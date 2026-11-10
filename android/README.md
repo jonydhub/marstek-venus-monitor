@@ -38,7 +38,7 @@ Per region the app tries sources in order and uses the first that has a publishe
 2. **ua-outages** — hukpo/ua-outages (MIT), a static aggregate of official operator data
    (`hukpo.github.io/ua-outages/data/now.json`). Distinguishes definite and «можливе» outages and
    emergency days.
-3. **svitlo.live** public proxies (selection/fallback logic from chaichuk/svitlo_live, MIT).
+3. A public community aggregator as a last-resort fallback (see NOTICE).
 
 DTEK regional websites are behind bot protection and are not scraped. Every source is fetched at most
 once per 10 minutes with ETag/If-Modified-Since and an identifying User-Agent. The UI shows the source

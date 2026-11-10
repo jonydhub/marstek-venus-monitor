@@ -53,7 +53,6 @@ Venus E ──UDP JSON-RPC (Open API, LAN)──▶ server/ (Python, ПК/RPi/NA
 
 1. **Офіційне API напряму**: Львівобленерго (Львівська обл.), YASNO (Київ, Дніпро — ДнЕМ і ЦЕК).
 2. **[hukpo/ua-outages](https://github.com/hukpo/ua-outages)** — статичний агрегат, що кожні ~15 хв читає сайти ~22 операторів.
-3. **[svitlo.live](https://svitlo.live)** — публічні проксі агрегатора (формат як у Home Assistant-інтеграції chaichuk/svitlo_live).
 
 Таблиця по областях — у [посібнику](docs/MANUAL.md#джерела-графіків-по-областях). Поле `power_outage.source` у `/api/status` показує, звідки взято графік саме зараз; дашборд пише це у верхній картці.
 
@@ -70,7 +69,7 @@ docker compose up -d
 
 ## Структура
 
-- `server/` — Python 3 (stdlib): опитування батареї, `/api/status`, `/api/regions`, `/health`, веб-дашборд, джерела відключень (`outage.py`, `yasno.py`, `uaoutages.py`, `svitlo.py`, `regions.py`), історія (`history.py`). Тести: `cd server && python3 -B -m unittest discover -s tests`.
+- `server/` — Python 3 (stdlib): опитування батареї, `/api/status`, `/api/regions`, `/health`, веб-дашборд, джерела відключень (`outage.py`, `yasno.py`, `uaoutages.py`, `regions.py`), історія (`history.py`). Тести: `cd server && python3 -B -m unittest discover -s tests`.
 - `android/` — Kotlin, minSdk 26, RemoteViews-віджети, WorkManager.
 - `docs/MANUAL.md` — покроковий посібник.
 
@@ -85,16 +84,16 @@ docker compose up -d
 
 - Тільки читання: жодних команд керування батареєю.
 - Дані батареї залишаються у вас: телефон ↔ батарея або телефон ↔ ваш сервер. Хмари проєкту немає, телеметрії немає.
-- В інтернет сервер звертається лише по графік відключень (публічні JSON операторів, ua-outages, svitlo.live) — без даних батареї.
+- В інтернет сервер звертається лише по графік відключень (публічні JSON операторів, ua-outages) — без даних батареї.
 
 ## Ліцензія та подяки
 
-MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліцензії — [NOTICE](NOTICE): [hukpo/ua-outages](https://github.com/hukpo/ua-outages) (MIT), [svitlo.live](https://svitlo.live) / [chaichuk/svitlo_live](https://github.com/chaichuk/svitlo_live) (MIT), відкриті дані Львівобленерго, публічне API YASNO.
+MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліцензії — [NOTICE](NOTICE): [hukpo/ua-outages](https://github.com/hukpo/ua-outages) (MIT), відкриті дані Львівобленерго, публічне API YASNO.
 
-**Проєкт не пов'язаний з Marstek, ДТЕК, YASNO, обленерго, ua-outages чи svitlo.live.** Назви й торгові марки належать їхнім власникам. Використовуйте на власний ризик.
+**Проєкт не пов'язаний з Marstek, ДТЕК, YASNO, обленерго чи ua-outages.** Назви й торгові марки належать їхнім власникам. Використовуйте на власний ризик.
 
 ---
 
 ## English
 
-**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator APIs first (Lvivoblenergo, YASNO), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate, then svitlo.live. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).
+**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator APIs first (Lvivoblenergo, YASNO), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate, then a community fallback. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).

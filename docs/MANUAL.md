@@ -139,7 +139,7 @@ loginctl enable-linger "$USER"
 | `MARSTEK_DASHBOARD_PORT` | `8767` | HTTP-порт |
 | `MARSTEK_API_TOKEN` | порожньо | якщо задано, `/api/*` вимагає `Authorization: Bearer <токен>` |
 | `MARSTEK_RATE_LIMIT_PER_MIN` | `120` | запитів до `/api/*` за хвилину з однієї IP |
-| `MARSTEK_OUTAGE_PROVIDER` | `auto`, якщо задано регіон, інакше `off` | `auto` · `ua-outages` · `svitlo` · `loe` · `yasno` · `off` |
+| `MARSTEK_OUTAGE_PROVIDER` | `auto`, якщо задано регіон, інакше `off` | `auto` · `ua-outages` · `loe` · `yasno` · `off` |
 | `MARSTEK_OUTAGE_REGION` | — | id регіону з таблиці нижче (або з `GET /api/regions`) |
 | `MARSTEK_OUTAGE_QUEUE` | — | черга, напр. `3.1` |
 | `MARSTEK_OUTAGE_OTG_ID`, `_CITY_ID`, `_STREET_ID`, `_BUILDING` | — | лише Львівобленерго: аварійні відключення за адресою (необов'язково) |
@@ -155,7 +155,7 @@ loginctl enable-linger "$USER"
 | `GET /api/status` | повний знімок: методи батареї, `battery_flow`, `insights`, `power_outage` |
 | `GET /api/regions` | `{"regions": [{"id", "name_ua", "operator", "queues", "sources"}]}` — для екранів налаштування |
 
-Ключові поля `power_outage`: `grid_state` (`on`/`off`/`unknown` — за резервним виходом), `current_outage`, `next_outage`, `maybe_outages` (можливі відключення, окремо від точних), `schedule_published`, `emergency` (діють аварійні — графік не застосовується), `provider` (налаштований режим), `source` (`loe`/`yasno`/`ua-outages`/`svitlo` — звідки взято зараз), `source_detail` (оператор), `source_errors`, `source_stale`, `autonomy`.
+Ключові поля `power_outage`: `grid_state` (`on`/`off`/`unknown` — за резервним виходом), `current_outage`, `next_outage`, `maybe_outages` (можливі відключення, окремо від точних), `schedule_published`, `emergency` (діють аварійні — графік не застосовується), `provider` (налаштований режим), `source` (`loe`/`yasno`/`ua-outages` — звідки взято зараз), `source_detail` (оператор), `source_errors`, `source_stale`, `autonomy`.
 
 ### Веб-дашборд і токен
 
@@ -177,36 +177,36 @@ loginctl enable-linger "$USER"
 
 | `MARSTEK_OUTAGE_REGION` | Область | Оператор | Ланцюг `auto` |
 |---|---|---|---|
-| `kyiv` | Київ | ДТЕК Київські електромережі (через YASNO) | YASNO (напряму) → ua-outages → svitlo.live |
-| `kyiv-region` | Київська область | ДТЕК Київські регіональні електромережі | ua-outages → svitlo.live |
-| `dnipro` | Дніпропетровська область (ДТЕК) | ДТЕК Дніпровські електромережі (через YASNO) | YASNO (напряму) → ua-outages → svitlo.live |
-| `dnipro-cek` | Дніпропетровська область (ЦЕК) | Центральна енергетична компанія (через YASNO) | YASNO (напряму) → ua-outages → svitlo.live |
-| `lviv` | Львівська область | Львівобленерго | Львівобленерго (напряму) → ua-outages → svitlo.live |
-| `odesa` | Одеська область | ДТЕК Одеські електромережі | ua-outages → svitlo.live |
-| `donetsk` | Донецька область | ДТЕК Донецькі електромережі | ua-outages → svitlo.live |
-| `kharkiv` | Харківська область | Харківобленерго | ua-outages → svitlo.live |
-| `poltava` | Полтавська область | Полтаваобленерго | ua-outages → svitlo.live |
-| `zaporizhzhia` | Запорізька область | Запоріжжяобленерго | ua-outages → svitlo.live |
-| `mykolaiv` | Миколаївська область | Миколаївобленерго | ua-outages → svitlo.live |
-| `kirovohrad` | Кіровоградська область | Кіровоградобленерго | ua-outages → svitlo.live |
-| `cherkasy` | Черкаська область | Черкасиобленерго | ua-outages → svitlo.live |
-| `sumy` | Сумська область | Сумиобленерго | ua-outages → svitlo.live |
-| `chernihiv` | Чернігівська область | Чернігівобленерго | ua-outages → svitlo.live |
-| `zhytomyr` | Житомирська область | Житомиробленерго | ua-outages → svitlo.live |
-| `khmelnytskyi` | Хмельницька область | Хмельницькобленерго | ua-outages → svitlo.live |
-| `rivne` | Рівненська область | Рівнеобленерго | ua-outages → svitlo.live |
-| `volyn` | Волинська область | Волиньобленерго | ua-outages → svitlo.live |
-| `ternopil` | Тернопільська область | Тернопільобленерго | ua-outages → svitlo.live |
-| `ivano-frankivsk` | Івано-Франківська область | Прикарпаттяобленерго | ua-outages → svitlo.live |
-| `zakarpattia` | Закарпатська область | Закарпаттяобленерго | ua-outages → svitlo.live |
-| `chernivtsi` | Чернівецька область | Чернівціобленерго | ua-outages → svitlo.live |
-| `vinnytsia` | Вінницька область | Вінницяобленерго | svitlo.live |
+| `kyiv` | Київ | ДТЕК Київські електромережі (через YASNO) | YASNO (напряму) → ua-outages → резервне джерело |
+| `kyiv-region` | Київська область | ДТЕК Київські регіональні електромережі | ua-outages → резервне джерело |
+| `dnipro` | Дніпропетровська область (ДТЕК) | ДТЕК Дніпровські електромережі (через YASNO) | YASNO (напряму) → ua-outages → резервне джерело |
+| `dnipro-cek` | Дніпропетровська область (ЦЕК) | Центральна енергетична компанія (через YASNO) | YASNO (напряму) → ua-outages → резервне джерело |
+| `lviv` | Львівська область | Львівобленерго | Львівобленерго (напряму) → ua-outages → резервне джерело |
+| `odesa` | Одеська область | ДТЕК Одеські електромережі | ua-outages → резервне джерело |
+| `donetsk` | Донецька область | ДТЕК Донецькі електромережі | ua-outages → резервне джерело |
+| `kharkiv` | Харківська область | Харківобленерго | ua-outages → резервне джерело |
+| `poltava` | Полтавська область | Полтаваобленерго | ua-outages → резервне джерело |
+| `zaporizhzhia` | Запорізька область | Запоріжжяобленерго | ua-outages → резервне джерело |
+| `mykolaiv` | Миколаївська область | Миколаївобленерго | ua-outages → резервне джерело |
+| `kirovohrad` | Кіровоградська область | Кіровоградобленерго | ua-outages → резервне джерело |
+| `cherkasy` | Черкаська область | Черкасиобленерго | ua-outages → резервне джерело |
+| `sumy` | Сумська область | Сумиобленерго | ua-outages → резервне джерело |
+| `chernihiv` | Чернігівська область | Чернігівобленерго | ua-outages → резервне джерело |
+| `zhytomyr` | Житомирська область | Житомиробленерго | ua-outages → резервне джерело |
+| `khmelnytskyi` | Хмельницька область | Хмельницькобленерго | ua-outages → резервне джерело |
+| `rivne` | Рівненська область | Рівнеобленерго | ua-outages → резервне джерело |
+| `volyn` | Волинська область | Волиньобленерго | ua-outages → резервне джерело |
+| `ternopil` | Тернопільська область | Тернопільобленерго | ua-outages → резервне джерело |
+| `ivano-frankivsk` | Івано-Франківська область | Прикарпаттяобленерго | ua-outages → резервне джерело |
+| `zakarpattia` | Закарпатська область | Закарпаттяобленерго | ua-outages → резервне джерело |
+| `chernivtsi` | Чернівецька область | Чернівціобленерго | ua-outages → резервне джерело |
+| `vinnytsia` | Вінницька область | Вінницяобленерго | резервне джерело |
 | `uz-…` | будинки на мережі Укрзалізниці (по областях) | Укрзалізниця | ua-outages |
 
-- Старі slug-и svitlo.live (`lvivska-oblast`, `kiivska-oblast`, `odeska-oblast`, …) теж приймаються.
+- Альтернативні slug-и (`lvivska-oblast`, `kiivska-oblast`, `odeska-oblast`, …) теж приймаються.
 - Сайти ДТЕК захищені від ботів, тому їх не парсимо: для областей ДТЕК графік беремо з YASNO або агрегаторів.
 - ua-outages: якщо оператор тимчасово недоступний, агрегат може віддавати останній опублікований графік — тоді `source_stale: true` і на дашборді «застаріле».
-- Примусово одне джерело: `MARSTEK_OUTAGE_PROVIDER=loe|yasno|ua-outages|svitlo`.
+- Примусово одне джерело: `MARSTEK_OUTAGE_PROVIDER=loe|yasno|ua-outages`.
 
 ## 10. Якщо щось не працює
 
