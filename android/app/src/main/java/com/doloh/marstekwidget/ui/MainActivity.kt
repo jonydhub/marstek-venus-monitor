@@ -84,10 +84,7 @@ class MainActivity : Activity() {
     private lateinit var historyCard: LinearLayout
     private lateinit var sparkline: SocSparklineView
     private lateinit var historyCaption: TextView
-    private lateinit var powerHeadline: TextView
     private lateinit var powerGroup: TextView
-    private lateinit var powerDetail: TextView
-    private lateinit var powerReserve: TextView
     private lateinit var powerNote: TextView
     private lateinit var modeMeta: TextView
     private lateinit var permissionHint: TextView
@@ -254,10 +251,17 @@ class MainActivity : Activity() {
         hero.addView(etaLine)
         outageLine = label("", 13f, TEXT, false).apply { setPadding(0, dp(4), 0, 0) }
         hero.addView(outageLine)
+        powerMaybe = label("", 12f, AMBER, false).apply { setPadding(0, dp(3), 0, 0); visibility = View.GONE }
+        hero.addView(powerMaybe)
         reserveLine = label("", 13f, TEXT, true).apply { setPadding(0, dp(3), 0, 0) }
         hero.addView(reserveLine)
         heroMeta = label("", 10f, MUTED, false).apply { setPadding(0, dp(8), 0, 0) }
         hero.addView(heroMeta)
+        // Light-schedule context (region · queue · source, forecast basis) lives in the hero as small print.
+        powerGroup = label("", 9f, MUTED, false).apply { setPadding(0, dp(6), 0, 0) }
+        hero.addView(powerGroup)
+        powerNote = label(getString(R.string.main_power_unavailable), 9f, DIM, false).apply { setPadding(0, dp(2), 0, 0) }
+        hero.addView(powerNote)
         page.addView(hero, sectionMargin())
 
         // 24 h SOC sparkline.
@@ -268,23 +272,6 @@ class MainActivity : Activity() {
         historyCaption = label("", 9f, DIM, false).apply { setPadding(0, dp(5), 0, 0) }
         historyCard.addView(historyCaption)
         page.addView(historyCard, sectionMargin())
-
-        // Light / outage card.
-        val powerCard = card()
-        powerCard.addView(sectionTitle(getString(R.string.main_power_title)))
-        powerHeadline = label(getString(R.string.widget_power_status_unknown), 18f, MUTED, true)
-        powerCard.addView(powerHeadline)
-        powerGroup = label("", 9f, MUTED, false).apply { setPadding(0, dp(2), 0, dp(6)) }
-        powerCard.addView(powerGroup)
-        powerDetail = label("—", 13f, TEXT, true)
-        powerCard.addView(powerDetail)
-        powerMaybe = label("", 12f, AMBER, false).apply { setPadding(0, dp(3), 0, 0); visibility = View.GONE }
-        powerCard.addView(powerMaybe)
-        powerReserve = label("", 13f, TEXT, true).apply { setPadding(0, dp(4), 0, 0) }
-        powerCard.addView(powerReserve)
-        powerNote = label(getString(R.string.main_power_unavailable), 9f, DIM, false).apply { setPadding(0, dp(7), 0, 0) }
-        powerCard.addView(powerNote)
-        page.addView(powerCard, sectionMargin())
 
         val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         refreshButton = actionButton(getString(R.string.main_refresh), filled = false) { refreshTelemetry() }
@@ -533,7 +520,7 @@ class MainActivity : Activity() {
         val outage = summary?.mode == SummaryMode.OUTAGE
         // During an outage the hero shows ONE runtime (autonomy, else ETA to 0%) with its verdict.
         val etaText = if (outage) reserve?.text else summary?.lines?.firstOrNull { it.kind == SummaryLineKind.ETA }?.text
-        etaLine.text = etaText ?: getString(R.string.main_eta_none)
+        etaLine.text = (if (outage) etaText else summary?.etaText) ?: getString(R.string.main_eta_none)
         etaLine.setTextColor(if (outage) toneColor(reserve?.tone) else TEXT)
         val outageText = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RETURN_TIME }?.text
             ?: info?.let { PowerOutageFormatter.detail(it) }
@@ -576,7 +563,7 @@ class MainActivity : Activity() {
             else -> getString(R.string.main_mode, mode)
         }
 
-        renderPower(snapshot, summary)
+        renderPower(snapshot)
         renderAlerts(AlertNotifier.activeAlerts(this))
         val lastFetchedAt = WidgetPreferences(this).lastFetchedAtMillis()
         val collected = snapshot?.collectedAt?.let(::formatCollectedAt)
@@ -595,39 +582,24 @@ class MainActivity : Activity() {
         else -> TEXT
     }
 
-    private fun renderPower(snapshot: BatterySnapshot?, summary: com.doloh.marstekwidget.domain.WidgetSummary?) {
+    private fun renderPower(snapshot: BatterySnapshot?) {
         val info = snapshot?.powerOutage
         if (info == null) {
-            powerHeadline.text = getString(R.string.widget_power_status_unknown)
-            powerHeadline.setTextColor(MUTED)
-            powerGroup.text = ""
-            powerDetail.text = "—"
+            powerGroup.visibility = View.GONE
             powerMaybe.visibility = View.GONE
-            powerReserve.visibility = View.GONE
             powerNote.text = getString(R.string.main_power_unavailable)
             return
         }
-        powerHeadline.text = PowerOutageFormatter.headline(info)
-        powerHeadline.setTextColor(when (info.gridState) {
-            GridState.ON -> POWER_ON
-            GridState.OFF -> AMBER
-            GridState.UNKNOWN -> MUTED
-        })
         val regionName = OutageRegions.byId(settings.outageRegionId)?.name
         powerGroup.text = if (!info.scheduleEnabled) getString(R.string.main_power_group_disabled)
         else listOfNotNull(
             if (regionName != null) getString(R.string.main_power_group, regionName, info.group ?: "—") else info.group?.let { "Черга $it" },
             PowerOutageFormatter.source(info),
         ).joinToString(" · ")
-        powerDetail.text = PowerOutageFormatter.detail(info)
+        powerGroup.visibility = if (powerGroup.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         val maybe = PowerOutageFormatter.maybe(info)
         powerMaybe.text = maybe.orEmpty()
-        powerMaybe.visibility = if (maybe == null || maybe == powerDetail.text) View.GONE else View.VISIBLE
-        val reserveSummary = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RESERVE }
-        val reserve = reserveSummary?.text ?: PowerOutageFormatter.reserve(info)
-        powerReserve.visibility = if (reserve == null) View.GONE else View.VISIBLE
-        powerReserve.text = reserve.orEmpty()
-        powerReserve.setTextColor(if (reserveSummary?.tone == SummaryTone.CRITICAL || info.coversOutage == false) CORAL else TEXT)
+        powerMaybe.visibility = if (maybe == null || maybe == outageLine.text.toString()) View.GONE else View.VISIBLE
         val watts = (info.loadWatts ?: 0.0).toInt()
         val basis = when (info.loadBasis) {
             "measured_discharge" -> getString(R.string.main_power_basis_measured, watts)
@@ -661,7 +633,7 @@ class MainActivity : Activity() {
                 when (result) {
                     is TelemetryFetchResult.Success -> render(result.snapshot, preferences.state())
                     TelemetryFetchResult.NeedsSignIn -> render(preferences.snapshot(), WidgetFetchState.NEEDS_SIGN_IN)
-                    is TelemetryFetchResult.Failure -> render(preferences.snapshot(), WidgetFetchState.ERROR)
+                    is TelemetryFetchResult.Failure -> render(preferences.snapshot(), preferences.state())
                 }
             } finally {
                 refreshing = false

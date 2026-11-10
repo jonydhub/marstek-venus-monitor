@@ -34,11 +34,19 @@ import java.time.format.DateTimeFormatter
  * adb shell am start -n com.doloh.marstekwidget/.debug.WidgetPreviewActivity --es state outage|charging|idle|soon [--es page 1|2] [--ez main true] [--ez notify true]
  * `notify`: saves the fixture and runs the real alert engine + notifier once (for outage it first seeds «grid was on»).
  * `--es showcase outage|charging [--ez main true]`: clean marketing render (no debug labels), fixed clock 18:30 Kyiv.
+ * `--es showcase live`: the same clean 4×1 / 2×2 / 4×2 stack fed by the last real stored snapshot.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("onboarding", false)) {
+            // README/manual screenshot of the first-run welcome screen without wiping the saved setup.
+            startActivity(Intent(this, com.doloh.marstekwidget.ui.SettingsActivity::class.java)
+                .putExtra(com.doloh.marstekwidget.ui.SettingsActivity.EXTRA_ONBOARDING, true))
+            finish()
+            return
+        }
         intent.getStringExtra("showcase")?.let { kind ->
             showcase(kind, intent.getBooleanExtra("main", false))
             return
@@ -163,8 +171,16 @@ class WidgetPreviewActivity : Activity() {
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Kyiv"))
         val kyiv = ZoneId.of("Europe/Kyiv")
         val realNow = ZonedDateTime.now(kyiv)
-        val now = if (main) realNow else realNow.withHour(18).withMinute(30).withSecond(0).withNano(0)
-        val snapshot = BatterySnapshotParser.parse(showcaseFixture(kind, now))
+        val live = kind == "live"
+        val now = if (main || live) realNow else realNow.withHour(18).withMinute(30).withSecond(0).withNano(0)
+        // `live`: clean render (no labels) of the last snapshot the app actually fetched — README screenshots.
+        val snapshot = if (live) WidgetPreferences(this).snapshot() ?: run { finish(); return }
+            else BatterySnapshotParser.parse(showcaseFixture(kind, now))
+        if (live && main) {
+            startActivity(Intent(this, MainActivity::class.java))
+            finish()
+            return
+        }
         if (main) {
             WidgetPreferences(this).saveSnapshot(snapshot)
             startActivity(Intent(this, MainActivity::class.java).putExtra("showcase", true))

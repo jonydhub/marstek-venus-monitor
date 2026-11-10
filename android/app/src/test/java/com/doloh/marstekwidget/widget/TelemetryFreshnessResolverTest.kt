@@ -36,6 +36,25 @@ class TelemetryFreshnessResolverTest {
     }
 
     @Test
+    fun transientErrorWithRecentSuccessfulPollStaysOnline() {
+        // Direct mode: one dropped UDP exchange must not flip a live screen to «ОФЛАЙН».
+        val collectedAt = Instant.ofEpochMilli(now - 6_000).toString()
+        assertEquals(
+            WidgetFetchState.OK,
+            TelemetryFreshnessResolver.resolve(WidgetFetchState.ERROR, collectedAt, now - 6_000, now),
+        )
+    }
+
+    @Test
+    fun errorAfterThresholdIsOffline() {
+        val collectedAt = Instant.ofEpochMilli(now - 100_001).toString()
+        assertEquals(
+            WidgetFetchState.ERROR,
+            TelemetryFreshnessResolver.resolve(WidgetFetchState.ERROR, collectedAt, now - 100_001, now),
+        )
+    }
+
+    @Test
     fun neverMasksAuthenticationOrNetworkErrorsAsStale() {
         assertEquals(
             WidgetFetchState.ERROR,

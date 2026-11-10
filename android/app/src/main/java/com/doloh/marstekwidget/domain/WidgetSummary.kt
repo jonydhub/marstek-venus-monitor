@@ -27,12 +27,15 @@ data class WidgetSummary(
     val lines: List<SummaryLine>,
     /** Battery-only state (no light info), for places that show the light state separately. */
     val batteryState: String,
+    /** Main-screen ETA line: time to 100%/0% while moving, «Заряджено» when idle at ≥99%, else null. */
+    val etaText: String? = null,
 )
 
 object WidgetSummaryResolver {
     private val kyiv: ZoneId = ZoneId.of("Europe/Kyiv")
     private val uk: Locale = Locale.forLanguageTag("uk-UA")
     private const val SEP = " · "
+    private const val FULL_SOC = 99
 
     fun resolve(snapshot: BatterySnapshot, now: ZonedDateTime = ZonedDateTime.now(kyiv)): WidgetSummary {
         val info = snapshot.powerOutage
@@ -118,12 +121,15 @@ object WidgetSummaryResolver {
                         temperatureLine,
                     ),
                     batteryState = listOfNotNull(if (charging) "Заряджається" else "Розряджається", power?.let { "≈ $it" }).joinToString(SEP),
+                    etaText = if (snapshot.etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —",
                 )
             }
             BatteryDirection.IDLE, BatteryDirection.UNKNOWN -> {
                 val idle = snapshot.direction == BatteryDirection.IDLE
                 val stateWord = if (idle) "очікування" else "стан невідомий"
                 val runtime = info?.runtimeSeconds?.let { "≈ ${EtaTextFormatter.formatSeconds(it)}" }
+                // The headline already names the light state, so the light detail line carries only the schedule.
+                val lightDetail = info?.let { SummaryLine(SummaryLineKind.LIGHT, PowerOutageFormatter.detail(it, now)) }
                 return WidgetSummary(
                     mode = if (idle) SummaryMode.IDLE else SummaryMode.UNKNOWN,
                     lightState = light,
@@ -132,8 +138,9 @@ object WidgetSummaryResolver {
                     secondary = info?.let { PowerOutageFormatter.detail(it, now) },
                     trailingPrimary = runtime ?: temperature ?: "—",
                     trailingSecondary = if (runtime != null) listOfNotNull("запас", temperature).joinToString(SEP) else null,
-                    lines = listOfNotNull(lightLine, reserveLine, temperatureLine),
+                    lines = listOfNotNull(lightDetail, reserveLine, temperatureLine),
                     batteryState = directionWord(snapshot.direction),
+                    etaText = if (idle && (snapshot.socPercent ?: 0) >= FULL_SOC) "Заряджено" else null,
                 )
             }
         }

@@ -156,6 +156,30 @@ class WidgetSummaryResolverTest {
     }
 
     @Test
+    fun idleDetailLinesNeverRepeatTheLightHeadline() {
+        val s = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE, power = 0.0, outage = outageOn), now)
+        // The headline already says «Світло є · очікування»; the first detail line carries only the schedule.
+        assertEquals("Відключення 20:00–22:00", s.lines.first { it.kind == SummaryLineKind.LIGHT }.text)
+        assertFalse(s.lines.any { it.text.contains("Світло є") })
+        val unpublished = """{"available":true,"group":"1.1","grid_state":"on","schedule_published":false,"autonomy":{}}"""
+        val u = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE, power = 0.0, outage = unpublished), now)
+        assertEquals("Світло є · очікування", u.primary)
+        assertEquals("Графік не опубліковано", u.lines.first { it.kind == SummaryLineKind.LIGHT }.text)
+        assertFalse(u.lines.any { it.text.contains("Світло є") })
+    }
+
+    @Test
+    fun etaTextSaysChargedWhenIdleAtFullAndNothingOtherwise() {
+        val full = snapshot(BatteryDirection.IDLE, outage = outageOn).copy(socPercent = 100)
+        assertEquals("Заряджено", WidgetSummaryResolver.resolve(full, now).etaText)
+        val almost = snapshot(BatteryDirection.IDLE, outage = outageOn).copy(socPercent = 99)
+        assertEquals("Заряджено", WidgetSummaryResolver.resolve(almost, now).etaText)
+        assertNull(WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE, outage = outageOn), now).etaText)
+        val charging = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.CHARGING, power = 800.0, eta = 80 * 60L), now)
+        assertEquals("До 100% ≈ 1 год 20 хв · оцінка", charging.etaText)
+    }
+
+    @Test
     fun idleWithoutOutageInfoStillUseful() {
         val s = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE), now)
         assertEquals("Очікування", s.primary)

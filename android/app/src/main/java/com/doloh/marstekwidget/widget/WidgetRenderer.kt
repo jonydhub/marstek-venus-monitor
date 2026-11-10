@@ -132,7 +132,9 @@ object WidgetRenderer {
         views.setContentDescription(R.id.widget_light_dot, lightDescription(context, snapshot))
 
         // Primary state line.
-        val primary = summary?.primary ?: noDataText(context, input.state)
+        // 4×4 has its own light block («Світло є · черга 1.1»), so its headline names only the battery state.
+        val primary = summary?.let { if (shape == WidgetShape.LARGE && snapshot?.powerOutage != null) it.batteryState else it.primary }
+            ?: noDataText(context, input.state)
         views.setTextViewText(R.id.widget_primary, primary)
         views.setTextColor(R.id.widget_primary, summary?.let { modeColor(it.mode) } ?: noDataColor(context, input.state))
 
@@ -150,7 +152,7 @@ object WidgetRenderer {
             WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> renderFlat(views, context, shape, summary, warning, input)
             WidgetShape.SMALL -> renderSmall(views, context, summary, warning, input)
             WidgetShape.WIDE, WidgetShape.TALL -> {
-                renderCapacity(views, context, snapshot, options, full = shape == WidgetShape.TALL)
+                renderCapacity(views, context, snapshot, options, full = true)
                 renderLines(views, context, shape, summary, warning, input)
             }
             WidgetShape.LARGE -> {
@@ -241,14 +243,23 @@ object WidgetRenderer {
     private fun renderLines(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput) {
         val options = input.options
         val excluded = if (shape == WidgetShape.LARGE) setOf(SummaryLineKind.LIGHT, SummaryLineKind.RESERVE, SummaryLineKind.RETURN_TIME) else emptySet()
-        val lines = buildList {
+        val lines = buildList<SummaryLine> {
             val alert = input.alert
             if (alert != null) {
                 add(SummaryLine(SummaryLineKind.TEMPERATURE, alert.title, if (alert.severity == AlertSeverity.CRITICAL) SummaryTone.CRITICAL else SummaryTone.WARNING))
             } else {
                 warning?.takeIf { it != BatteryWarning.HIGH_POWER }?.let { add(SummaryLine(SummaryLineKind.TEMPERATURE, warningText(context, it), SummaryTone.WARNING)) }
             }
-            summary?.lines?.filter { it.kind !in excluded && allowed(it.kind, options) }?.let(::addAll)
+            summary?.lines?.filter { it.kind !in excluded && allowed(it.kind, options) }?.forEach { line ->
+                add(if (line.kind == SummaryLineKind.TEMPERATURE) withBackup(line, summary, input) else line)
+                // Idle at full charge: say so instead of leaving the ETA slot empty.
+                if (line.kind == SummaryLineKind.LIGHT && summary.mode == SummaryMode.IDLE && options.showEta) {
+                    summary.etaText?.let { add(SummaryLine(SummaryLineKind.ETA, it, SummaryTone.GOOD)) }
+                }
+            }
+            if (summary != null && summary.mode == SummaryMode.IDLE && options.showEta && none { it.kind == SummaryLineKind.ETA }) {
+                summary.etaText?.let { add(0, SummaryLine(SummaryLineKind.ETA, it, SummaryTone.GOOD)) }
+            }
             if (summary == null) add(SummaryLine(SummaryLineKind.LIGHT, noDataHint(context, input.state).orEmpty()))
         }.filter { it.text.isNotBlank() }
         val count = lineCount(shape)
@@ -261,6 +272,13 @@ object WidgetRenderer {
                 views.setTextColor(id, toneColor(line.tone, Color.rgb(201, 213, 220)))
             }
         }
+    }
+
+    /** «Температура 27,0 °C · вихід 0 W» — the backup output joins the temperature row outside an outage. */
+    private fun withBackup(line: SummaryLine, summary: WidgetSummary, input: WidgetRenderInput): SummaryLine {
+        if (summary.mode == SummaryMode.OUTAGE || !input.options.showBackupPower) return line
+        val backup = input.snapshot?.insights?.backupOutputWatts ?: input.snapshot?.offgridPowerWatts ?: return line
+        return line.copy(text = line.text + SEP + "вихід " + WidgetSummaryResolver.formatWatts(backup))
     }
 
     private fun allowed(kind: SummaryLineKind, options: WidgetDisplayOptions): Boolean = when (kind) {

@@ -12,12 +12,16 @@ object TelemetryFreshnessResolver {
         nowMillis: Long,
         staleAfterMillis: Long = DEFAULT_STALE_AFTER_MILLIS,
     ): WidgetFetchState {
-        if (state != WidgetFetchState.OK) return state
+        if (state != WidgetFetchState.OK && state != WidgetFetchState.ERROR) return state
 
         val timestamp = collectedAt?.let(::parseTimestamp) ?: lastFetchedAtMillis
-        if (timestamp <= 0L) return WidgetFetchState.NEVER
+        if (timestamp <= 0L) return if (state == WidgetFetchState.ERROR) state else WidgetFetchState.NEVER
         val ageMillis = (nowMillis - timestamp).coerceAtLeast(0L)
-        return if (ageMillis > staleAfterMillis) WidgetFetchState.STALE else WidgetFetchState.OK
+        val fresh = ageMillis <= staleAfterMillis
+        // A single failed poll (the battery drops UDP requests under load) right after a successful one
+        // is not «offline»: the data on screen is still live. Only an error past the threshold is.
+        if (state == WidgetFetchState.ERROR) return if (fresh) WidgetFetchState.OK else WidgetFetchState.ERROR
+        return if (fresh) WidgetFetchState.OK else WidgetFetchState.STALE
     }
 
     private fun parseTimestamp(value: String): Long? =

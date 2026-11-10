@@ -8,7 +8,7 @@
 |---|---|---|
 | ![Головний екран](docs/img/app-main.png) | ![Віджети](docs/img/widgets.png) | ![Дашборд](docs/img/server-dashboard.png) |
 
-<sub>Скриншоти `docs/img/*.png` — заглушки, буде додано.</sub>
+<sub>Скриншоти з реальної Venus E 3.0 (режим «Напряму по Wi‑Fi», графік — Львівська область, черга 1.1). Більше — у [посібнику](docs/MANUAL.md).</sub>
 
 ## Два режими
 
