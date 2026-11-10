@@ -123,4 +123,4 @@ class LightOnlyFromBackupOutputWebTests(unittest.TestCase):
         self.assertIn("Немає зв’язку з батареєю", script)
         self.assertIn("за графіком зараз відключення", script)
         body = script[script.index("function lightView"):script.index("function renderToday")]
-        self.assertLess(body.index("noLink"), body.index("'Світла немає'"))  # no-link wins over a cached «off»
+        self.assertLess(body.index("noLink"), body.index("'Світла нема'"))  # no-link wins over a cached «off»

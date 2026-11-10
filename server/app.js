@@ -201,7 +201,7 @@ function lightView(data, fetchFailed) {
   const cur = outage.current_outage, now = Date.now();
   const scheduledNow = Boolean(cur && Date.parse(cur.start) <= now && Date.parse(cur.end) > now);
   if (noLink) return {state: 'nolink', title: 'Немає зв’язку з батареєю', hint: scheduledNow ? 'за графіком зараз відключення' : null};
-  if (outage.grid_state === 'off') return {state: 'off', title: 'Світла немає', hint: null};
+  if (outage.grid_state === 'off') return {state: 'off', title: 'Світла нема', hint: null};
   if (outage.grid_state === 'on') return {state: 'on', title: 'Світло є', hint: null};
   return {state: 'unknown', title: 'Світло: —', hint: null};
 }
