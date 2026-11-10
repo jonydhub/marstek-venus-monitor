@@ -32,6 +32,18 @@ Outage schedule data sources (read at runtime over public HTTP, not redistribute
    src/providers/posts.ts, src/providers/ua-text.ts, src/schedule.ts),
    Copyright (c) 2026 Pavlo Huk, MIT License — see the license text below.
 
+5. Windows app (windows/) bundles these third-party components in its PyInstaller build:
+   - pystray — LGPL-3.0-or-later (https://github.com/moses-palmer/pystray). It is shipped unmodified as
+     a separate Python package inside the bundle (_internal); you may replace it with your own build.
+   - Pillow — MIT-CMU (HPND) license (https://github.com/python-pillow/Pillow)
+   - pywebview — BSD-3-Clause (https://github.com/r0x0r/pywebview); pythonnet / clr_loader — MIT;
+     bottle, proxy_tools — MIT (pywebview dependencies); Microsoft Edge WebView2 runtime is used
+     from Windows, not redistributed
+   - qrcode — BSD-3-Clause (https://github.com/lincolnloop/python-qrcode)
+   - tzdata — Apache-2.0 (IANA time zone database is public domain)
+   - CPython runtime — PSF License; PyInstaller bootloader — GPL-2.0 with the bootloader exception
+   The installer is built with Inno Setup (https://jrsoftware.org/isinfo.php), which allows free use.
+
 Each data source remains the property of its publisher; check their terms before heavy use.
 The server polls every source at most once per 10 minutes with conditional requests
 (ETag / If-Modified-Since) and an identifying User-Agent.

@@ -1,0 +1,6 @@
+# Runtime dependencies of the Windows tray app (the embedded server itself is stdlib-only).
+pystray==0.19.5
+pillow>=11,<14
+qrcode==8.2
+pywebview==6.2.1
+tzdata>=2025.2
