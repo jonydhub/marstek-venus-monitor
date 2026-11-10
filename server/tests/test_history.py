@@ -65,8 +65,11 @@ class HistoryStoreTests(unittest.TestCase):
     def test_uses_wal_for_cheap_writes(self):
         store = HistoryStore(self.path)
         store.close()
-        with sqlite3.connect(self.path) as conn:
+        conn = sqlite3.connect(self.path)  # closed explicitly: Windows cannot delete an open database
+        try:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        finally:
+            conn.close()
 
 
 class InsightsTests(unittest.TestCase):

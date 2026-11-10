@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import os
+import re
 import socket
 import sys
 import threading
@@ -38,10 +39,18 @@ HTTP_HOST = SETTINGS.bind
 HTTP_PORT = SETTINGS.http_port
 API_TOKEN = SETTINGS.api_token
 POLL_SECONDS = 30
+MIN_POLL_SECONDS = 15  # VenusE drops requests <1 s apart; a poll is 6 paced requests
 BATTERY_RATE_WINDOW_SECONDS = 300
 BATTERY_RATE_MIN_SECONDS = 120
 BATTERY_RATE_DEADBAND_W = 10.0
 METHODS = ("Wifi.GetStatus", "BLE.GetStatus", "Bat.GetStatus", "ES.GetStatus", "ES.GetMode", "EM.GetStatus")
+# Read-only by construction: only `Component.GetSomething` queries may ever leave this process.
+_READ_ONLY_METHOD = re.compile(r"[A-Za-z]+\.Get[A-Za-z]+")
+MAX_REQUEST_ID = 65535  # the device echoes ids as uint16
+
+
+def is_read_only_method(method) -> bool:
+    return isinstance(method, str) and _READ_ONLY_METHOD.fullmatch(method) is not None
 HISTORY_DB = Path(SETTINGS.history_db)
 HISTORY_WINDOW_SECONDS = 24 * 3600
 EXPECTED_LOAD_W = SETTINGS.expected_load_w
@@ -158,10 +167,16 @@ class MarstekPoller:
         self.sock.bind(("0.0.0.0", 0))
         self.sock.settimeout(3.0)
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
+
+    def next_request_id(self) -> int:
+        self.seq = self.seq % MAX_REQUEST_ID + 1
+        return self.seq
 
     def query(self, method: str) -> dict:
-        self.seq = (self.seq + 1) % 2_000_000_000
-        request_id = self.seq
+        if not is_read_only_method(method):
+            raise ValueError(f"refusing non read-only method {method!r}")
+        request_id = self.next_request_id()
         payload = json.dumps({"id": request_id, "method": method, "params": {"id": 0}}, separators=(",", ":")).encode()
         for attempt in range(2):
             self.sock.settimeout(2.0)
@@ -275,10 +290,21 @@ class MarstekPoller:
                 "insights": insights,
             }
 
+    def wait(self, seconds) -> None:
+        """Sleep until the next poll; apply_settings()/stop() wake it early."""
+        self.wake_event.wait(seconds)
+        self.wake_event.clear()
+
     def run(self):
         while not self.stop_event.is_set():
-            self.poll_once()
-            self.stop_event.wait(POLL_SECONDS)
+            if HOST:  # nothing to poll until the battery address is configured
+                self.poll_once()
+            if not self.stop_event.is_set():
+                self.wait(POLL_SECONDS)
+
+    def stop(self):
+        self.stop_event.set()
+        self.wake_event.set()
 
     def run_outage_refresh(self):
         while not self.stop_event.is_set():
@@ -346,9 +372,34 @@ def token_ok(header_value, expected):
 poller = MarstekPoller()
 
 
+def apply_settings(settings, poll_seconds=None):
+    """Swap configuration at runtime (used by the embedded Windows app; the CLI server never calls it)."""
+    global SETTINGS, HOST, PORT, HTTP_HOST, HTTP_PORT, API_TOKEN, EXPECTED_LOAD_W, BACKUP_THRESHOLD_W, POLL_SECONDS
+    changed_device = (settings.host, settings.port) != (HOST, PORT)
+    SETTINGS = settings
+    HOST, PORT = settings.host, settings.port
+    HTTP_HOST, HTTP_PORT, API_TOKEN = settings.bind, settings.http_port, settings.api_token
+    EXPECTED_LOAD_W, BACKUP_THRESHOLD_W = settings.expected_load_w, settings.backup_threshold_w
+    if poll_seconds is not None:
+        POLL_SECONDS = max(MIN_POLL_SECONDS, int(poll_seconds))
+    poller.outage = build_outage_service(settings, ua_client=UA_OUTAGES_CLIENT)
+    with poller.lock:
+        if changed_device:
+            poller.battery_samples.clear()
+            poller.data = {**poller.data, "methods": {}, "collected_at": None,
+                           "battery_flow": calculate_battery_flow([], None, None)}
+        poller.data = {**poller.data, "device": {"model": "VenusE 3.0", "ip": HOST, "udp_port": PORT},
+                       "poll_interval_seconds": POLL_SECONDS}
+    poller.wake_event.set()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "MarstekVenusMonitor/1.0"
     sys_version = ""
+
+    def auth_exempt(self) -> bool:
+        """Hook for embedders (e.g. a loopback-only desktop window); the server itself never exempts."""
+        return False
 
     def log_message(self, fmt, *args):
         logging.info("http %s - %s", self.address_string(), fmt % args)
@@ -373,7 +424,7 @@ class Handler(BaseHTTPRequestHandler):
         allowed, retry_after = RATE_LIMITER.allow(self.client_address[0])
         if not allowed:
             return self.send_json(429, {"error": "rate_limited"}, {"Retry-After": str(retry_after)})
-        if not token_ok(self.headers.get("Authorization"), API_TOKEN):
+        if not self.auth_exempt() and not token_ok(self.headers.get("Authorization"), API_TOKEN):
             return self.send_json(401, {"error": "unauthorized"}, {"WWW-Authenticate": 'Bearer realm="marstek"'})
         if path == "/api/status":
             return self.send_json(200, poller.snapshot())

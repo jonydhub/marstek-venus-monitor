@@ -122,7 +122,7 @@ class ConfigWiringTests(unittest.TestCase):
     def test_no_personal_defaults_in_server_module(self):
         source = open(server.__file__, encoding="utf-8").read()
         # markers are assembled so this file itself stays free of the old personal values
-        for marker in ("TAILNET", "100." + "109.", "192.168.1." + "150", "127" + "83"):
+        for marker in ("TAILNET", "100." + "109.", "192.168." + "1." + "150", "127" + "83"):
             self.assertNotIn(marker, source)
 
 
