@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="mvm-nonce" content="{{NONCE}}">
+  <title>Налаштування · Marstek Venus Monitor</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/setup.css?v={{VERSION}}">
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div>
+      <p class="eyebrow">MARSTEK VENUS MONITOR · WINDOWS</p>
+      <h1 id="title">Налаштування</h1>
+      <p class="muted" id="subtitle">Програма лише читає дані батареї. Керування — в офіційному застосунку Marstek.</p>
+    </div>
+    <a class="button ghost" id="open-dashboard" href="/">Дашборд →</a>
+  </header>
+
+  <div class="banner" id="first-run" hidden>
+    Перший запуск: знайдіть батарею або введіть її IP-адресу, виберіть регіон і чергу — і натисніть «Зберегти».
+  </div>
+
+  <form id="form" novalidate>
+    <section class="card" id="battery">
+      <h2>1. Батарея</h2>
+      <p class="muted">Увімкніть <b>Open API</b> у застосунку Marstek (порт 30000) і закріпіть за батареєю IP у роутері.</p>
+      <div class="row">
+        <button type="button" class="button" id="discover">Знайти батарею</button>
+        <span class="status" id="discover-status"></span>
+      </div>
+      <ul class="devices" id="devices"></ul>
+      <div class="grid2">
+        <label>IP-адреса батареї<input id="host" name="host" inputmode="decimal" placeholder="192.168.0.50" autocomplete="off"></label>
+        <label>Порт<input id="port" name="port" inputmode="numeric" placeholder="30000"></label>
+      </div>
+      <div class="row">
+        <button type="button" class="button ghost" id="test">Перевірити з’єднання</button>
+        <span class="status" id="test-status"></span>
+      </div>
+    </section>
+
+    <section class="card" id="schedule">
+      <h2>2. Графік відключень</h2>
+      <div class="grid2">
+        <label>Регіон<select id="region" name="region"><option value="">— без графіка —</option></select></label>
+        <label>Черга<select id="queue" name="queue"><option value="">—</option></select></label>
+      </div>
+      <p class="muted small" id="region-note">Чергу можна дізнатися на сайті свого обленерго за адресою.</p>
+    </section>
+
+    <section class="card" id="power">
+      <h2>3. Резервний вихід і опитування</h2>
+      <div class="grid3">
+        <label>Поріг «світла немає», Вт<input id="backup_threshold_w" name="backup_threshold_w" inputmode="decimal" placeholder="5"></label>
+        <label>Середнє споживання, Вт<input id="expected_load_w" name="expected_load_w" inputmode="decimal" placeholder="напр. 150"></label>
+        <label>Опитування, с<input id="poll_seconds" name="poll_seconds" inputmode="numeric" placeholder="30"></label>
+      </div>
+      <p class="muted small">Світло вважається відсутнім, коли потужність резервного виходу перевищує поріг. Середнє споживання дає прогноз запасу одразу (інакше — після першого відключення). Батарея не любить частих запитів: не ставте опитування менше 30 с, якщо її вже опитує інший сервер.</p>
+    </section>
+
+    <section class="card" id="alerts-card">
+      <h2>4. Сповіщення Windows</h2>
+      <div class="checks" id="alerts"></div>
+    </section>
+
+    <div class="actions">
+      <button type="submit" class="button primary" id="save">Зберегти</button>
+      <span class="status" id="save-status" role="status"></span>
+    </div>
+  </form>
+
+  <section class="card" id="phone">
+    <h2>Доступ для телефона</h2>
+    <p class="muted">Дашборд стане доступним у домашній мережі за токеном (телефон, Android-застосунок у режимі «Сервер»). Windows може спитати дозвіл брандмауера — дозвольте лише для приватних мереж.</p>
+    <label class="switch"><input type="checkbox" id="phone-enabled"> Дозволити доступ з телефона</label>
+    <div id="phone-details" hidden>
+      <div class="phone-grid">
+        <div class="qr" id="qr"></div>
+        <dl>
+          <dt>Адреса</dt><dd id="phone-urls">—</dd>
+          <dt>Токен</dt><dd><code id="phone-token">—</code></dd>
+        </dl>
+      </div>
+      <p class="muted small">Відскануйте QR камерою телефона — токен збережеться у браузері автоматично.</p>
+      <button type="button" class="button ghost" id="phone-regenerate">Новий токен</button>
+    </div>
+  </section>
+
+  <section class="card" id="system">
+    <h2>Система</h2>
+    <label class="switch"><input type="checkbox" id="autostart"> Запускати з Windows</label>
+    <p class="muted small" id="autostart-note"></p>
+    <p class="muted small">Налаштування: <code>%APPDATA%\MarstekVenusMonitor\config.json</code> · історія та журнали: <code>%LOCALAPPDATA%\MarstekVenusMonitor</code></p>
+  </section>
+
+  <footer class="muted small" id="about">Marstek Venus Monitor {{VERSION}} · MIT · Не пов’язано з Marstek. Усі оцінки потужності й часу — приблизні.</footer>
+</main>
+<script src="/setup.js?v={{VERSION}}"></script>
+</body>
+</html>

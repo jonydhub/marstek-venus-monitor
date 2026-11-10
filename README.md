@@ -16,6 +16,25 @@
 
 Відкрийте посилання з телефона, встановіть файл (Android попросить дозвіл на встановлення з невідомих джерел) і пройдіть налаштування: [посібник](docs/MANUAL.md).
 
+**Windows 10/11**: `MarstekVenusMonitor-<версія>-setup.exe` (інсталятор без прав адміністратора) або `…-portable.zip` на сторінці [Releases](https://github.com/jonydhub/marstek-venus-monitor/releases) — див. [Windows-програма](#windows-програма).
+
+## Windows-програма
+
+Програма в треї з тим самим сервером усередині: не потрібні Docker, Python чи окремий ПК — достатньо комп'ютера з Windows у тій самій мережі, що й батарея.
+
+| Налаштування й пошук батареї | Дашборд у вікні програми | Значок у треї |
+|---|---|---|
+| ![Налаштування](docs/img/windows-setup.png) | ![Дашборд](docs/img/windows-dashboard.png) | ![Значки](docs/img/windows-tray-icons.png) |
+
+- **Значок у треї** показує заряд у %, колір — стан: зелений — заряджається, жовтий — розряджається, червоний — світла немає, синій — очікування, сірий — немає даних. Підказка: заряд, kWh, світло, час до 100% / 0%.
+- **Меню**: Відкрити дашборд · Налаштування · Запускати з Windows · Доступ для телефона (адреса, токен, QR) · Про програму · Вийти.
+- **Перший запуск**: «Знайти батарею» (широкомовний запит + обережне сканування вашої /24 мережі), або IP вручну, «Перевірити з'єднання», регіон і черга, поріг резервного виходу, середнє споживання. Зміни застосовуються без перезапуску.
+- **Сповіщення Windows**: світло зникло/повернулось, відключення через 60 і 15 хв, запасу не вистачить, заряд 20% / 10%, заряджання почалось / завершено, температура, немає зв'язку (лише після 3 невдалих опитувань поспіль). Кожне вмикається окремо.
+- Дашборд слухає лише `127.0.0.1`; «Доступ для телефона» відкриває його в домашній мережі **тільки з токеном**. Налаштування — `%APPDATA%\MarstekVenusMonitor`, історія й журнали — `%LOCALAPPDATA%\MarstekVenusMonitor`.
+- Опитування раз на 30 с (можна збільшити). Якщо батарею вже опитує ваш сервер, краще запускати щось одне з двох.
+
+Збірка з коду: `windows\build.ps1` (Python 3.12+, PyInstaller, Inno Setup 6) — див. [посібник](docs/MANUAL.md#11-windows-програма).
+
 ## Два режими
 
 | | **Напряму по Wi‑Fi** | **Сервер** |
@@ -73,6 +92,7 @@ docker compose up -d
 
 - `server/` — Python 3 (stdlib): опитування батареї, `/api/status`, `/api/regions`, `/health`, веб-дашборд, джерела відключень (`outage.py`, `yasno.py`, `oblenergo.py`, `uaoutages.py`, `regions.py`), історія (`history.py`). Тести: `cd server && python3 -B -m unittest discover -s tests`.
 - `android/` — Kotlin, minSdk 26, RemoteViews-віджети, WorkManager.
+- `windows/` — програма для Windows (pystray, pywebview, PyInstaller, Inno Setup), що вбудовує `server/` без змін. Тести: `cd windows && python -B -m unittest discover -s tests -t .`.
 - `docs/MANUAL.md` — покроковий посібник.
 
 ## Обмеження
@@ -98,4 +118,4 @@ MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліценз
 
 ## English
 
-**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator sources first (Lvivoblenergo and YASNO APIs; the Kharkiv, Poltava, Zaporizhzhia and Chernivtsi oblenergo sites, parsers ported from hukpo/ua-outages), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).
+**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator sources first (Lvivoblenergo and YASNO APIs; the Kharkiv, Poltava, Zaporizhzhia and Chernivtsi oblenergo sites, parsers ported from hukpo/ua-outages), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. A Windows 10/11 tray app (`windows/`) embeds the same server in-process: SOC on the tray icon, first-run battery discovery, native dashboard window, Windows notifications, optional token-protected LAN access for phones; per-user installer built with PyInstaller + Inno Setup. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).
