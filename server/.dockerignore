@@ -1,0 +1,7 @@
+data/
+tests/
+deploy/
+.env
+__pycache__/
+*.pyc
+docker-compose*.yml

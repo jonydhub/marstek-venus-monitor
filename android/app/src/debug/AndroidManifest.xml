@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug-only: renders every widget shape via the real renderer with fixture telemetry. -->
+        <activity
+            android:name=".debug.WidgetPreviewActivity"
+            android:exported="true"
+            android:label="Widget preview (debug)" />
+    </application>
+</manifest>

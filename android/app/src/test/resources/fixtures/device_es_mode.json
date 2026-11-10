@@ -1,0 +1,11 @@
+{
+	"id":	506,
+	"src":	"VenusE 3.0-aabbccddeeff",
+	"result":	{
+		"id":	0,
+		"mode":	"Manual",
+		"ongrid_power":	-1054,
+		"offgrid_power":	0,
+		"bat_soc":	99
+	}
+}

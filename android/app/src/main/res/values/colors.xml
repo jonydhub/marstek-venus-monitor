@@ -1,0 +1,16 @@
+<resources>
+    <color name="launcher_background">#071522</color>
+    <color name="widget_status_ok">#42C5A5</color>
+    <color name="widget_status_warning">#FFC46B</color>
+    <color name="widget_status_critical">#FF7777</color>
+    <color name="widget_ring_track">#324A59</color>
+    <color name="widget_ring_accent">#36C6D5</color>
+    <color name="widget_ring_warning">#F5B72E</color>
+    <color name="widget_ring_critical">#FF806F</color>
+    <color name="widget_state_charging">#FFD264</color>
+    <color name="widget_state_discharging">#8EE6EE</color>
+    <color name="widget_state_waiting">#D1DDE4</color>
+    <color name="widget_state_unknown">#A0AEB8</color>
+    <color name="widget_warning_text">#FFD264</color>
+    <color name="widget_critical_text">#FF8C80</color>
+</resources>

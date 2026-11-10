@@ -1,0 +1,36 @@
+# Copy to docker-compose.yml, fill in MARSTEK_HOST / token / region, then: docker compose up -d
+#
+# network_mode: host is the simplest choice: the server talks UDP to the battery on your LAN
+# (port 30000) and the battery answers to the sender's address; with host networking there is
+# no NAT in between. Docker Desktop (macOS/Windows) has no host networking — use the bridge
+# variant below and make sure the container can reach the battery's LAN IP.
+services:
+  marstek:
+    build: .
+    image: marstek-venus-monitor:latest
+    container_name: marstek-venus-monitor
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      MARSTEK_HOST: "192.168.0.50"          # battery LAN IP (DHCP reservation in the router)
+      MARSTEK_PORT: "30000"
+      MARSTEK_BIND: "0.0.0.0"               # 127.0.0.1 = only this machine
+      MARSTEK_DASHBOARD_PORT: "8767"
+      MARSTEK_API_TOKEN: "change-me-openssl-rand-hex-24"
+      MARSTEK_OUTAGE_REGION: "kyiv"         # GET /api/regions for the list
+      MARSTEK_OUTAGE_QUEUE: "1.1"
+      # MARSTEK_OUTAGE_PROVIDER: "auto"     # auto | ua-outages | svitlo | loe | yasno | off
+    volumes:
+      - marstek-data:/data
+      # - ./marstek.env:/config/.env:ro     # alternative to the environment: block
+
+  # Bridge-network variant (Docker Desktop):
+  # marstek:
+  #   build: .
+  #   restart: unless-stopped
+  #   ports: ["127.0.0.1:8767:8767"]
+  #   environment: { MARSTEK_HOST: "192.168.0.50", MARSTEK_API_TOKEN: "change-me" }
+  #   volumes: [marstek-data:/data]
+
+volumes:
+  marstek-data:

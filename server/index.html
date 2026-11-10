@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071522">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Marstek">
+  <title>Venus E 3.0 · Marstek</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/marstek-192.png">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css?v=8">
+</head>
+<body>
+  <form id="token-form" class="token-form" hidden>
+    <h2>Потрібен токен доступу</h2>
+    <label for="token-input">Сервер захищено токеном (MARSTEK_API_TOKEN). Він зберігається лише в цьому браузері.</label>
+    <input id="token-input" name="token" type="password" autocomplete="current-password" required>
+    <p id="token-error" class="token-error" hidden>Токен не підійшов.</p>
+    <button type="submit">Увійти</button>
+  </form>
+  <main class="official-shell">
+    <header class="topbar">
+      <div class="device-heading">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 48 48"><ellipse class="mark-orbit" cx="24" cy="25" rx="18" ry="14" transform="rotate(-18 24 25)"/><path class="mark-orbit-highlight" d="M8 20c3-9 12-14 21-13"/><path class="mark-v" d="M15 14l8 21h2l9-21"/><path class="mark-spark" d="M39 6l2 4 4 2-4 2-2 4-2-4-4-2 4-2z"/></svg>
+        </span>
+        <div class="device-title"><b id="device-model">Venus E 3.0</b><small><span class="status-led" id="conn-dot"></span><span id="conn-label">Підключення…</span><span class="separator">·</span><span id="last-updated">—</span></small></div>
+      </div>
+      <button id="install-app" class="install-button" type="button" hidden>Встановити</button>
+    </header>
+
+    <section class="hero" id="hero" data-state="unknown" aria-label="Світло, запас і заряд зараз" aria-live="polite">
+      <div class="flow-heading"><p class="eyebrow">СВІТЛО · ЧЕРГА <span id="outage-group">—</span></p><span class="tag" id="outage-source">—</span></div>
+      <h2 id="hero-title" class="hero-title">Перевіряю…</h2>
+      <p id="hero-sub" class="hero-sub">—</p>
+      <p id="hero-forecast" class="hero-forecast">—</p>
+      <div class="hero-stats">
+        <div><span>Заряд</span><b id="hero-soc">—</b></div>
+        <div><span>Температура</span><b id="hero-temp">—</b></div>
+        <div><span id="hero-extra-label">Запас</span><b id="hero-extra">—</b></div>
+      </div>
+      <div class="hero-spark">
+        <div class="spark-head"><span>Заряд за 24 год</span><span id="spark-range">—</span></div>
+        <svg id="soc-sparkline" class="sparkline" viewBox="0 0 300 64" preserveAspectRatio="none" role="img" aria-label="Графік заряду за 24 години"></svg>
+        <div class="spark-axis"><span>−24 год</span><span>−12 год</span><span>зараз</span></div>
+      </div>
+      <div class="hero-foot"><span>Резервний вихід сьогодні</span><b id="backup-today">—</b></div>
+      <p class="flow-footnote" id="hero-note">Стан мережі визначається за резервним виходом Venus (якщо до нього щось підключено).</p>
+    </section>
+
+    <section class="battery-summary" aria-label="Заряд і запас енергії батареї">
+      <div class="battery-headline">
+        <div class="battery-illustration" aria-hidden="true">
+          <svg viewBox="0 0 88 88"><rect x="18" y="17" width="48" height="58" rx="10"/><path d="M33 12h18v6H33zM39 29h10v11h11L39 62V49H28z"/><path d="M27 67h30"/></svg>
+        </div>
+        <div class="battery-main-value">
+          <p class="eyebrow">ЗАПАС ЕНЕРГІЇ</p>
+          <h1 id="capacity-kwh">— kWh</h1>
+          <span id="battery-state" class="battery-state">Очікую дані батареї</span>
+        </div>
+        <div class="soc-readout"><strong id="soc-value">—</strong><span>%</span><small>заряду</small></div>
+      </div>
+      <div id="soc-ring" class="soc-track" role="progressbar" aria-label="Рівень заряду батареї" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="soc-fill"></span></div>
+      <div class="battery-meta">
+        <div><span>Ємність</span><b id="capacity">—</b></div>
+        <div><span>Температура</span><b id="temperature">—</b></div>
+      </div>
+      <div class="permissions"><span id="charge-permission" class="permission">Заряджання: —</span><span id="discharge-permission" class="permission">Розряджання: —</span></div>
+    </section>
+
+    <section class="energy-flow-panel" aria-label="Звідки і куди йде енергія">
+      <div class="flow-heading"><div><p class="eyebrow">НАПРЯМОК ПОТОКІВ</p><h2>Енергосистема</h2></div><span class="tag" id="battery-flow-window">Збираю виміри</span></div>
+      <div class="flow-grid">
+        <article class="flow-entry grid" data-flow="grid-signed">
+          <div class="flow-copy"><span class="flow-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h16M9 7l-5 5 5 5m6-10 5 5-5 5"/></svg></span><div class="flow-copy-text"><div><b>Мережа ↔ Venus E</b></div><div><small id="grid-sign-note">Знак пристрою: + / −</small></div></div></div>
+          <strong id="grid-power">—</strong>
+        </article>
+        <article class="flow-entry battery" data-flow="battery-estimate">
+          <div class="flow-copy"><span class="flow-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="3"/><path d="M9 2h6v2m-2 5-3 4h3l-1 4 4-6h-3l1-2"/></svg></span><div class="flow-copy-text"><div><b id="battery-flow-state">Батарея ↔ Venus E</b></div><div><small>Середня потужність за трендом ємності</small></div></div></div>
+          <div class="battery-flow-value"><span id="battery-flow-arrow" class="flow-arrow" aria-hidden="true">↔</span><strong id="battery-flow-power">—</strong></div>
+        </article>
+        <article class="flow-entry backup" data-flow="venus-to-backup">
+          <div class="flow-copy"><span class="flow-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12h14m-5-5 5 5-5 5"/><path d="M4 5v14"/></svg></span><div class="flow-copy-text"><div><b>Venus E → резерв</b></div><div><small>Резервний вихід</small></div></div></div>
+          <strong id="offgrid-power">—</strong>
+        </article>
+      </div>
+      <p class="flow-footnote">Потужність батареї — усереднена оцінка зі зміни ємності, не миттєвий вимір. Для мережі збережено знак, який передає пристрій.</p>
+    </section>
+
+    <section class="eta-grid" aria-label="Оцінка часу заряджання та розряджання">
+      <article class="eta-card eta-charge-card"><span class="eta-label">До повного заряду</span><strong id="charge-eta">—</strong><small id="charge-eta-note">Очікую стабільний потік</small></article>
+      <article class="eta-card eta-discharge-card"><span class="eta-label">До 0%*</span><strong id="discharge-eta">—</strong><small id="discharge-eta-note">Очікую стабільний потік</small></article>
+    </section>
+    <p class="notice eta-note">ETA усереднюється за вимірами до 5 хв. Час до 0% теоретичний і не враховує резерв/DOD.</p>
+
+    <section class="energy-cards" aria-label="Накопичена енергія">
+      <article class="energy-total"><div><span class="eyebrow">НАКОПИЧЕНА ЕНЕРГІЯ</span><h2>Лічильники пристрою</h2></div></article>
+      <article class="energy-card"><span>З мережі</span><b id="total-grid-in">—</b><i class="energy-marker grid-dot"></i></article>
+      <article class="energy-card"><span>У мережу</span><b id="total-grid-out">—</b><i class="energy-marker export-dot"></i></article>
+      <article class="energy-card"><span>Споживання</span><b id="total-load">—</b><i class="energy-marker load-dot"></i></article>
+    </section>
+
+    <section class="status-strip" aria-label="Додатковий стан">
+      <div><span>CT лічильник</span><b id="ct-state">—</b></div>
+      <div><span>Режим роботи</span><b id="mode">—</b></div>
+    </section>
+
+    <details class="diagnostics">
+      <summary>Графік та діагностика</summary>
+      <div class="diagnostics-body">
+        <article class="panel chart-panel">
+          <div class="panel-head"><div><p class="eyebrow">ОСТАННІ ВИМІРИ</p><h2>Потужність і заряд</h2></div><span class="chart-period">за час відкриття сторінки</span></div>
+          <div class="chart-wrap"><canvas id="history-chart" aria-label="Графік потужності та заряду"></canvas><div id="chart-empty" class="chart-empty">Збираю перші виміри…</div></div>
+          <div class="legend"><span><i class="lg-solar"></i>Резерв · W</span><span><i class="lg-grid"></i>Мережа · W</span><span><i class="lg-soc"></i>Заряд · %</span></div>
+        </article>
+        <article class="panel diagnostic-grid">
+          <div class="diagnostic-card"><h2>Фази CT</h2><div class="energy-list"><div><span>Фаза A</span><b id="em-a">—</b></div><div><span>Фаза B</span><b id="em-b">—</b></div><div><span>Фаза C</span><b id="em-c">—</b></div><div><span>Сумарно</span><b id="em-total">—</b></div><div><span>Енергія EM · вхід / вихід</span><b id="em-energy">—</b></div></div></div>
+          <div class="diagnostic-card"><h2>Мережа й API <span class="tag" id="api-summary">—</span></h2><div class="network-list"><div><span>IP пристрою · UDP</span><b><span id="device-ip">—</span>:<span id="device-port">—</span></b></div><div><span>Wi‑Fi сигнал</span><b id="wifi-rssi">—</b></div><div><span>Шлюз</span><b id="wifi-gateway">—</b></div><div><span>Маска</span><b id="wifi-mask">—</b></div><div><span>DNS</span><b id="wifi-dns">—</b></div><div><span>Bluetooth</span><b id="ble-state">—</b></div><div><span>SSID</span><b id="wifi-ssid">—</b></div><div><span>Wi‑Fi MAC</span><b id="wifi-mac">—</b></div><div><span>BLE MAC</span><b id="ble-mac">—</b></div></div><div class="method-list" id="method-list"></div><details class="raw-details"><summary>Сирі показники</summary><pre id="raw-data">Очікую на дані…</pre></details></div>
+        </article>
+      </div>
+    </details>
+
+    <footer><span>Лише читання · без команд керування</span><span>Оновлення кожні 30 секунд</span></footer>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>

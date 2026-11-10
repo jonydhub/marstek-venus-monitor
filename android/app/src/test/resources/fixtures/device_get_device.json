@@ -1,0 +1,12 @@
+{
+	"id":	501,
+	"src":	"VenusE 3.0-aabbccddeeff",
+	"result":	{
+		"device":	"VenusE 3.0",
+		"ver":	148,
+		"ble_mac":	"aabbccddeeff",
+		"wifi_mac":	"112233445566",
+		"wifi_name":	"HomeWiFi",
+		"ip":	"192.0.2.150"
+	}
+}

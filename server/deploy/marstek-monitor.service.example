@@ -1,0 +1,31 @@
+[Unit]
+Description=Marstek Venus monitor (read-only, LAN telemetry + dashboard)
+After=network-online.target
+Wants=network-online.target
+
+# Install as a user service (repo cloned to ~/marstek-venus-monitor):
+#   cd ~/marstek-venus-monitor/server && cp config.example.env .env && $EDITOR .env && mkdir -p data
+#   mkdir -p ~/.config/systemd/user && cp deploy/marstek-monitor.service.example ~/.config/systemd/user/marstek-monitor.service
+#   systemctl --user daemon-reload && systemctl --user enable --now marstek-monitor
+#   loginctl enable-linger "$USER"   # keep running after logout
+
+[Service]
+Type=simple
+WorkingDirectory=%h/marstek-venus-monitor/server
+# All settings live in server/.env (see config.example.env); Environment= lines here override it.
+Environment=MARSTEK_CONFIG=%h/marstek-venus-monitor/server/.env
+ExecStart=/usr/bin/python3 -B %h/marstek-venus-monitor/server/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/marstek-venus-monitor/server/data
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=128M
+CPUQuota=25%
+UMask=0077
+
+[Install]
+WantedBy=default.target

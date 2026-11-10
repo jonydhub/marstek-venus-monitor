@@ -1,0 +1,9 @@
+{
+	"id":	503,
+	"src":	"VenusE 3.0-aabbccddeeff",
+	"result":	{
+		"id":	0,
+		"state":	"disconnect",
+		"ble_mac":	"aabbccddeeff"
+	}
+}

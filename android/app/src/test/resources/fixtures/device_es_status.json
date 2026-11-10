@@ -1,0 +1,16 @@
+{
+	"id":	505,
+	"src":	"VenusE 3.0-aabbccddeeff",
+	"result":	{
+		"id":	0,
+		"bat_soc":	99,
+		"bat_cap":	5120,
+		"pv_power":	0,
+		"ongrid_power":	-333,
+		"offgrid_power":	0,
+		"total_pv_energy":	0,
+		"total_grid_output_energy":	0,
+		"total_grid_input_energy":	4253,
+		"total_load_energy":	0
+	}
+}

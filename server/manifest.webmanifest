@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "Marstek VenusE 3.0",
+  "short_name": "VenusE",
+  "description": "Моніторинг батареї Marstek VenusE 3.0",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#071522",
+  "theme_color": "#071522",
+  "prefer_related_applications": false,
+  "icons": [
+    {"src": "/icons/marstek-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/marstek-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/icons/marstek-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

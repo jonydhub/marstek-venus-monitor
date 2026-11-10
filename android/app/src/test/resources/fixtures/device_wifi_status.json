@@ -1,0 +1,14 @@
+{
+	"id":	502,
+	"src":	"VenusE 3.0-aabbccddeeff",
+	"result":	{
+		"id":	0,
+		"wifi_mac":	"112233445566",
+		"ssid":	"HomeWiFi",
+		"rssi":	-38,
+		"sta_ip":	"192.0.2.150",
+		"sta_gate":	"192.0.2.1",
+		"sta_mask":	"255.255.255.0",
+		"sta_dns":	"1.1.1.1"
+	}
+}

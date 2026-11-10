@@ -1,0 +1,33 @@
+Marstek Venus Monitor
+Copyright (c) 2026 Ivan Doloh — MIT License (see LICENSE)
+
+This project is not affiliated with, endorsed by or supported by Marstek, DTEK, YASNO,
+any regional grid operator (oblenergo), hukpo/ua-outages or svitlo.live. All product
+names and trademarks belong to their owners.
+
+Outage schedule data sources (read at runtime over public HTTP, not redistributed):
+
+1. Lvivoblenergo (PrAT "Lvivoblenergo") open data
+   - GPV schedule: https://api.loe.lviv.ua/api/menus?type=photo-grafic
+   - Accidents by address: https://power-api.loe.lviv.ua/api/pw_accidents
+   Data belongs to Lvivoblenergo.
+
+2. YASNO public blackout-service API (Kyiv city, Dnipro DnEM / CEK)
+   https://app.yasno.ua/api/blackout-service/public/shutdowns/...
+   Data belongs to YASNO / DTEK Kyiv Electric Networks / DTEK Dnipro Electric Networks / CEK.
+
+3. hukpo/ua-outages — https://github.com/hukpo/ua-outages
+   Static aggregate https://hukpo.github.io/ua-outages/data/now.json of official operator
+   schedules. Copyright (c) 2026 Pavlo Huk, MIT License. The compact data format
+   (s: s/n/e/u, intervals [startMin, endMin, kind]) and region ids follow that project.
+   Operator names in docs/MANUAL.md are taken from its now.json.
+
+4. svitlo.live public proxies
+   https://dtek-api.svitlo-proxy.workers.dev/ and https://svitlo-proxy.svitlo-proxy.workers.dev
+   The schedule format, region slug mapping and primary/fallback selection rule are adapted
+   from the Home Assistant integration chaichuk/svitlo_live
+   (https://github.com/chaichuk/svitlo_live), MIT License.
+
+Each data source remains the property of its publisher; check their terms before heavy use.
+The server polls every source at most once per 10 minutes with conditional requests
+(ETag / If-Modified-Since) and an identifying User-Agent.
