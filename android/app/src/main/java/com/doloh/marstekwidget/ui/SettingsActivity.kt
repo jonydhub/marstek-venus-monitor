@@ -27,7 +27,6 @@ import com.doloh.marstekwidget.direct.MarstekRpc
 import com.doloh.marstekwidget.direct.RpcResult
 import com.doloh.marstekwidget.direct.SubnetScanPlanner
 import com.doloh.marstekwidget.domain.BatteryDisplayFormatter
-import com.doloh.marstekwidget.outage.OfficialSource
 import com.doloh.marstekwidget.outage.OfficialSources
 import com.doloh.marstekwidget.outage.OutageRegions
 import com.doloh.marstekwidget.settings.AppSettings
@@ -263,15 +262,11 @@ class SettingsActivity : Activity() {
             "Графік вимкнено: застосунок покаже лише, чи є світло (за резервним виходом)."
         } else {
             val chain = buildList {
-                when (OfficialSources.forRegion(region.id)) {
-                    OfficialSource.Loe -> add("Львівобленерго")
-                    is OfficialSource.Yasno -> add("YASNO")
-                    null -> Unit
-                }
+                OfficialSources.forRegion(region.id)?.let { add("${it.kind.displayName} (напряму)") }
                 if (region.inUaOutages) add("ua-outages (офіційні дані обленерго)")
-                add("svitlo.live")
             }
-            "Джерела по черзі: ${chain.joinToString(" → ")}. Оновлення не частіше ніж раз на 10 хв."
+            if (chain.isEmpty()) "Графік недоступний — світло визначається за резервним виходом."
+            else "Джерела по черзі: ${chain.joinToString(" → ")}. Оновлення не частіше ніж раз на 10 хв."
         }
     }
 

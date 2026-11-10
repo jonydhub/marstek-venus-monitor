@@ -4,15 +4,22 @@ import org.json.JSONObject
 import java.time.OffsetDateTime
 
 sealed interface OfficialSource {
-    data object Loe : OfficialSource
+    val kind: OutageSourceKind
+
+    data object Loe : OfficialSource {
+        override val kind get() = OutageSourceKind.LOE
+    }
     data class Yasno(val regionId: Int, val dsoId: Int) : OfficialSource {
+        override val kind get() = OutageSourceKind.YASNO
         val url: String get() = "https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/$regionId/dsos/$dsoId/planned-outages"
     }
+    /** Oblenergo website read directly (see [OblenergoParsers]). */
+    data class Oblenergo(override val kind: OutageSourceKind) : OfficialSource
 }
 
 /**
- * Direct official sources with a stable open API. DTEK regional sites are behind bot protection and are
- * deliberately not scraped; those regions use the aggregators.
+ * Direct official sources. DTEK regional sites are behind bot protection and are deliberately not scraped;
+ * those regions use the ua-outages aggregate. Vinnytsiaoblenergo publishes only images and a captcha lookup.
  */
 object OfficialSources {
     fun forRegion(regionId: String): OfficialSource? = when (regionId) {
@@ -20,6 +27,10 @@ object OfficialSources {
         "kyiv" -> OfficialSource.Yasno(25, 902)
         "dnipro" -> OfficialSource.Yasno(3, 301)
         "dnipro-cek" -> OfficialSource.Yasno(3, 303)
+        "kharkiv" -> OfficialSource.Oblenergo(OutageSourceKind.KHARKIV)
+        "poltava" -> OfficialSource.Oblenergo(OutageSourceKind.POLTAVA)
+        "zaporizhzhia" -> OfficialSource.Oblenergo(OutageSourceKind.ZAPORIZHZHIA)
+        "chernivtsi" -> OfficialSource.Oblenergo(OutageSourceKind.CHERNIVTSI)
         else -> null
     }
 }

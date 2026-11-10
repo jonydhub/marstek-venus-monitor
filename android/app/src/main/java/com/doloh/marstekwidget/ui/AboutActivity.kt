@@ -62,8 +62,8 @@ class AboutActivity : Activity() {
             Triple("Marstek Open API", "Локальний UDP JSON-RPC інтерфейс батареї (лише методи Get). Marstek — торгова марка її власника.", null),
             Triple("Львівобленерго", "Відкритий API графіків погодинних відключень (api.loe.lviv.ua).", "https://poweron.loe.lviv.ua/"),
             Triple("YASNO", "Публічний API планових відключень для Києва та Дніпра.", "https://yasno.ua/"),
-            Triple("ua-outages — Pavlo Huk (MIT)", "Агрегат офіційних даних обленерго (hukpo/ua-outages), оновлюється кожні ~15 хв.", "https://github.com/hukpo/ua-outages"),
-            Triple("svitlo.live та chaichuk/svitlo_live (MIT)", "Резервне джерело графіків для всіх областей; логіка вибору джерела портована з інтеграції для Home Assistant.", "https://github.com/chaichuk/svitlo_live"),
+            Triple("Харківобленерго, Полтаваобленерго, Запоріжжяобленерго, Чернівціобленерго", "Графіки читаються напряму з офіційних сайтів обленерго (не частіше ніж раз на 10 хв).", null),
+            Triple("ua-outages — Pavlo Huk (MIT)", "Агрегат офіційних даних обленерго (hukpo/ua-outages), оновлюється кожні ~15 хв; з нього ж портовано розбір сайтів Харків-, Полтава-, Запоріжжя- та Чернівціобленерго.", "https://github.com/hukpo/ua-outages"),
             Triple("AndroidX WorkManager (Apache-2.0)", "Фонові оновлення віджетів.", null),
         )
     }

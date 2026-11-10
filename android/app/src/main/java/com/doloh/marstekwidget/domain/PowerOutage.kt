@@ -29,11 +29,15 @@ data class PowerOutageInfo(
     val scheduleEnabled: Boolean = true,
     val maybeStart: String? = null,
     val maybeEnd: String? = null,
+    /** A region is set but no source publishes its schedule (grid state still comes from the backup output). */
+    val scheduleUnavailable: Boolean = false,
 )
 
 object PowerOutageParser {
     fun parse(block: JSONObject?): PowerOutageInfo? {
-        if (block == null || !block.optBoolean("available", false)) return null
+        if (block == null) return null
+        val unavailable = block.optBoolean("schedule_unavailable", false)
+        if (!block.optBoolean("available", false) && !unavailable) return null
         val current = block.optJSONObject("current_outage")
         val next = block.optJSONObject("next_outage")
         val autonomy = block.optJSONObject("autonomy") ?: JSONObject()
@@ -65,6 +69,7 @@ object PowerOutageParser {
             scheduleEnabled = block.optBoolean("schedule_enabled", true),
             maybeStart = maybe?.optStringOrNull("start"),
             maybeEnd = maybe?.optStringOrNull("end"),
+            scheduleUnavailable = unavailable,
         )
     }
 
@@ -90,6 +95,7 @@ object PowerOutageFormatter {
 
     fun detail(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv)): String {
         if (!info.scheduleEnabled) return "Графік відключень не налаштовано"
+        if (info.scheduleUnavailable) return SCHEDULE_UNAVAILABLE
         if (info.emergency) return "Аварійні відключення, графік не діє"
         info.currentEnd?.let(::toKyiv)?.let { end ->
             return "Повернення о ${stamp(end, now)}"
@@ -113,6 +119,17 @@ object PowerOutageFormatter {
     }
 
     fun source(info: PowerOutageInfo): String? = info.source?.let { "Джерело: $it" }
+
+    /** «Область · черга · джерело» under the headline; none when no schedule is configured (the detail line says so). */
+    fun groupLine(info: PowerOutageInfo, regionName: String?): String? {
+        if (!info.scheduleEnabled) return null
+        return listOfNotNull(
+            if (regionName != null) "$regionName · черга ${info.group ?: "—"}" else info.group?.let { "Черга $it" },
+            source(info),
+        ).joinToString(" · ").ifEmpty { null }
+    }
+
+    const val SCHEDULE_UNAVAILABLE = "Графік недоступний — світло визначається за резервним виходом"
 
     fun shortDetail(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv)): String? {
         info.currentEnd?.let(::toKyiv)?.let { end -> return "до ${stamp(end, now)}" }

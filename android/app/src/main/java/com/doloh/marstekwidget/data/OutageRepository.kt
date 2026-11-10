@@ -3,14 +3,12 @@ package com.doloh.marstekwidget.data
 import android.content.Context
 import com.doloh.marstekwidget.outage.CachingHttpFetcher
 import com.doloh.marstekwidget.outage.KYIV
+import com.doloh.marstekwidget.outage.OfficialOutageProvider
 import com.doloh.marstekwidget.outage.OutageConfig
 import com.doloh.marstekwidget.outage.OutageProviderChain
 import com.doloh.marstekwidget.outage.OutageRegions
 import com.doloh.marstekwidget.outage.OutageSchedule
 import com.doloh.marstekwidget.outage.OutageScheduleCodec
-import com.doloh.marstekwidget.outage.SvitloCatalog
-import com.doloh.marstekwidget.outage.SvitloParser
-import com.doloh.marstekwidget.outage.SvitloSelector
 import com.doloh.marstekwidget.outage.UaOutagesParser
 import com.doloh.marstekwidget.outage.fetchTextPublic
 import java.io.File
@@ -66,18 +64,17 @@ class OutageRepository(context: Context) {
         return cached(config)
     }
 
-    /** Queue list for the picker: ua-outages groups, else svitlo.live catalog, else the common 1.1–6.2 set. */
+    /** Queue list for the picker: the oblenergo site's groups, else ua-outages groups, else the region's usual set. */
     fun queuesFor(regionId: String): List<String> {
         val region = OutageRegions.byId(regionId) ?: return DEFAULT_QUEUES
+        val today = LocalDate.now(KYIV)
+        runCatching { OfficialOutageProvider(fetcher).groups(region, today) }
+            .getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
         if (region.inUaOutages) {
             runCatching { UaOutagesParser.groups(fetcher.fetchTextPublic(UaOutagesParser.URL), region.id) }
                 .getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
         }
-        val primary = runCatching { SvitloParser.parseRoot(fetcher.fetchTextPublic(SvitloSelector.PRIMARY_URL)) }.getOrNull()
-        val fallback = runCatching { SvitloParser.parseRoot(fetcher.fetchTextPublic(SvitloSelector.FALLBACK_URL)) }.getOrNull()
-        SvitloCatalog.merge(primary, fallback).firstOrNull { it.id == region.svitloSlug }?.queues
-            ?.takeIf { it.isNotEmpty() }?.let { return it }
-        return DEFAULT_QUEUES
+        return region.defaultQueues.ifEmpty { DEFAULT_QUEUES }
     }
 
     private fun key(config: OutageConfig) = "${config.regionId}|${config.queue}"
@@ -85,7 +82,7 @@ class OutageRepository(context: Context) {
     companion object {
         private val inFlight = java.util.concurrent.atomic.AtomicBoolean(false)
         const val MIN_INTERVAL_MS = 10 * 60_000L
-        val DEFAULT_QUEUES = (1..6).flatMap { listOf("$it.1", "$it.2") }
+        val DEFAULT_QUEUES = OutageRegions.STANDARD_QUEUES
         private const val KEY_ID = "id"
         private const val KEY_SCHEDULE = "schedule"
         private const val KEY_FETCHED_AT = "fetched_at"

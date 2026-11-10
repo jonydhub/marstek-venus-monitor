@@ -107,32 +107,41 @@ class RegionTableTests(unittest.TestCase):
         self.assertIsNone(REGIONS["odesa"]["official"])
         self.assertEqual(REGIONS["lviv"]["operator"], "Львівобленерго")
 
-    def test_svitlo_slugs_are_accepted_as_aliases(self):
+    def test_legacy_slugs_are_accepted_as_aliases(self):
         self.assertEqual(resolve_region("lvivska-oblast"), "lviv")
         self.assertEqual(resolve_region("harkivska-oblast"), "kharkiv")
         self.assertEqual(resolve_region("kharkivska-oblast"), "kharkiv")
         self.assertEqual(resolve_region("kiivska-oblast"), "kyiv-region")
         self.assertEqual(resolve_region("dnipro-dnem"), "dnipro")
+        self.assertEqual(resolve_region("hmelnitska-oblast"), "khmelnytskyi")
+        self.assertEqual(resolve_region("vinnitska-oblast"), "vinnytsia")
         self.assertEqual(resolve_region("odesa"), "odesa")
         self.assertEqual(resolve_region("uz-lviv"), "uz-lviv")
         self.assertIsNone(resolve_region("atlantis"))
 
     def test_catalog_lists_sources_per_region(self):
-        catalog = build_region_catalog(NOW, svitlo_catalog=[
-            {"id": "lvivska-oblast", "name_ua": "Львівська область", "queues": ["1.1", "1.2"]},
-            {"id": "vinnitska-oblast", "name_ua": "Вінницька область", "queues": ["1.1"]},
-        ])
+        catalog = build_region_catalog(NOW)
         by_id = {r["id"]: r for r in catalog}
-        self.assertEqual(by_id["lviv"]["sources"], ["loe", "ua-outages", "svitlo"])
-        self.assertEqual(by_id["lviv"]["queues"], ["1.1", "1.2"])
-        self.assertEqual(by_id["kyiv"]["sources"], ["yasno", "ua-outages", "svitlo"])
-        self.assertEqual(by_id["odesa"]["sources"], ["ua-outages", "svitlo"])
-        self.assertEqual(by_id["vinnytsia"]["sources"], ["svitlo"])
+        self.assertEqual(by_id["lviv"]["sources"], ["loe", "ua-outages"])
+        self.assertEqual(by_id["kyiv"]["sources"], ["yasno", "ua-outages"])
+        self.assertEqual(by_id["odesa"]["sources"], ["ua-outages"])
+        self.assertEqual(by_id["kharkiv"]["sources"], ["kharkiv", "ua-outages"])
+        self.assertEqual(by_id["poltava"]["sources"], ["poltava", "ua-outages"])
+        self.assertEqual(by_id["zaporizhzhia"]["sources"], ["zaporizhzhia", "ua-outages"])
+        self.assertEqual(by_id["chernivtsi"]["sources"], ["chernivtsi", "ua-outages"])
+        self.assertEqual(by_id["vinnytsia"]["sources"], [])
+        self.assertEqual(by_id["vinnytsia"]["queues"], [])
         self.assertEqual(by_id["uz-lviv"]["sources"], ["ua-outages"])
         self.assertEqual(by_id["odesa"]["operator"], "ДТЕК Одеські електромережі")
         for entry in catalog:
             self.assertEqual(set(entry), {"id", "name_ua", "operator", "queues", "sources"})
 
+    def test_catalog_queues_fall_back_to_the_static_table(self):
+        # ua-outages reports kharkiv / chernivtsi as failed (no groups) from abroad
+        by_id = {r["id"]: r for r in build_region_catalog(NOW)}
+        self.assertEqual(by_id["kharkiv"]["queues"][:3], ["1.1", "1.2", "2.1"])
+        self.assertEqual(by_id["chernivtsi"]["queues"], [str(n) for n in range(1, 13)])
+        self.assertEqual({r["id"]: r for r in build_region_catalog(None)}["lviv"]["queues"][-1], "6.2")
 
 if __name__ == "__main__":
     unittest.main()

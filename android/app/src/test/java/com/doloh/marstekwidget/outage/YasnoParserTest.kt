@@ -49,6 +49,9 @@ class YasnoParserTest {
         assertEquals(OfficialSource.Yasno(3, 303), OfficialSources.forRegion("dnipro-cek"))
         assertEquals(null, OfficialSources.forRegion("kyiv-region")) // DTEK site behind bot protection: aggregators only
         assertEquals(null, OfficialSources.forRegion("odesa"))
+        assertEquals(OutageSourceKind.KHARKIV, OfficialSources.forRegion("kharkiv")!!.kind)
+        assertEquals(OutageSourceKind.CHERNIVTSI, OfficialSources.forRegion("chernivtsi")!!.kind)
+        assertEquals(null, OfficialSources.forRegion("vinnytsia")) // images + captcha only
         assertEquals(
             "https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages",
             OfficialSource.Yasno(25, 902).url,

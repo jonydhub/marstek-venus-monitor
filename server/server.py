@@ -22,7 +22,6 @@ from history import HistoryStore, compute_insights, measured_backup_load
 from outage import build_outage_service, detect_grid_state
 from netcache import CachedJsonClient
 from regions import build_region_catalog
-from svitlo import SvitloClient
 from uaoutages import NOW_URL
 
 ROOT = Path(__file__).resolve().parent
@@ -47,7 +46,6 @@ HISTORY_DB = Path(SETTINGS.history_db)
 HISTORY_WINDOW_SECONDS = 24 * 3600
 EXPECTED_LOAD_W = SETTINGS.expected_load_w
 BACKUP_THRESHOLD_W = SETTINGS.backup_threshold_w
-SVITLO_CLIENT = SvitloClient()
 UA_OUTAGES_CLIENT = CachedJsonClient(ttl=600)
 
 
@@ -153,7 +151,7 @@ class MarstekPoller:
         }
         self.seq = 100
         self.battery_samples = deque(maxlen=32)
-        self.outage = build_outage_service(SETTINGS, svitlo_client=SVITLO_CLIENT, ua_client=UA_OUTAGES_CLIENT)
+        self.outage = build_outage_service(SETTINGS, ua_client=UA_OUTAGES_CLIENT)
         self.history = None  # HistoryStore, attached by __main__ so imports/tests never touch the real DB
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -302,20 +300,13 @@ class MarstekPoller:
             return json.loads(json.dumps(self.data))
 
 def regions_catalog():
-    """Canonical regions with queues from ua-outages + svitlo.live; one upstream may be down."""
-    ua_now = svitlo_catalog = None
-    errors = []
+    """Canonical regions; live queue lists from ua-outages when reachable, else the static table."""
     try:
         ua_now = UA_OUTAGES_CLIENT.get(NOW_URL)
     except Exception as exc:
-        errors.append(exc)
-    try:
-        svitlo_catalog = SVITLO_CLIENT.catalog()
-    except Exception as exc:
-        errors.append(exc)
-    if len(errors) == 2:
-        raise errors[0]
-    return build_region_catalog(ua_now, svitlo_catalog)
+        logging.warning("ua-outages catalog unavailable: %s", exc)
+        ua_now = None
+    return build_region_catalog(ua_now)
 
 
 class RateLimiter:
@@ -392,7 +383,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logging.warning("regions catalog failed: %s", exc)
                 return self.send_json(502, {"error": "upstream_unavailable"})
-            return self.send_json(200, {"source": "ua-outages + svitlo.live", "regions": regions})
+            return self.send_json(200, {"source": "official oblenergo sources + ua-outages", "regions": regions})
         return self.send_json(404, {"error": "not_found"})
 
     def do_GET(self):

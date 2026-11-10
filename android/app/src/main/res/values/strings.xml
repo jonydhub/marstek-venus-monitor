@@ -38,8 +38,6 @@
     <string name="widget_power_status_group">%1$s · черга %2$s · %3$s</string>
     <string name="widget_power_status_short">%1$s · %2$s</string>
     <string name="widget_power_reserve_measuring">Запас: оцінюю розряд…</string>
-    <string name="main_power_group">%1$s · черга %2$s</string>
-    <string name="main_power_group_disabled">Графік не налаштовано · світло визначається за резервним виходом</string>
     <string name="main_power_basis_measured">За фактичним розрядом ≈ %1$d W.</string>
     <string name="main_power_basis_configured">За середнім споживанням %1$d W.</string>
     <string name="main_power_basis_missing">Середнє споживання не задано — прогноз з’явиться під час відключення за фактичним розрядом.</string>

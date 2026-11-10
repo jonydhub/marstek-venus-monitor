@@ -17,12 +17,14 @@ class OutageRegionsTest {
     }
 
     @Test
-    fun mapsToSvitloSlugs() {
-        assertEquals("lvivska-oblast", OutageRegions.byId("lviv")!!.svitloSlug)
-        assertEquals("kharkivska-oblast", OutageRegions.byId("kharkiv")!!.svitloSlug)
-        assertEquals("dnipro-dnem", OutageRegions.byId("dnipro")!!.svitloSlug)
-        assertEquals("vinnitska-oblast", OutageRegions.byId("vinnytsia")!!.svitloSlug)
+    fun sourcesPerRegion() {
         assertEquals(false, OutageRegions.byId("vinnytsia")!!.inUaOutages)
+        assertEquals(false, OutageRegions.byId("vinnytsia")!!.hasScheduleSource)
+        for (id in listOf("kharkiv", "poltava", "zaporizhzhia", "chernivtsi", "lviv", "kyiv", "odesa")) {
+            assertTrue(id, OutageRegions.byId(id)!!.hasScheduleSource)
+        }
+        assertEquals((1..12).map(Int::toString), OutageRegions.byId("chernivtsi")!!.defaultQueues)
+        assertEquals("6.2", OutageRegions.byId("kharkiv")!!.defaultQueues.last())
         assertNull(OutageRegions.byId("atlantis"))
     }
 
@@ -34,9 +36,19 @@ class OutageRegionsTest {
     }
 
     @Test
-    fun everySvitloCatalogEntryWeCareAboutMapsBack() {
-        assertEquals("kharkiv", OutageRegions.fromSvitloSlug("harkivska-oblast")!!.id)
-        assertEquals("khmelnytskyi", OutageRegions.fromSvitloSlug("hmelnitska-oblast")!!.id)
-        assertEquals("lviv", OutageRegions.fromSvitloSlug("lvivska-oblast")!!.id)
+    fun legacySlugsResolveToCanonicalIds() {
+        assertEquals("kharkiv", OutageRegions.resolve("harkivska-oblast")!!.id)
+        assertEquals("kharkiv", OutageRegions.resolve("kharkivska-oblast")!!.id)
+        assertEquals("khmelnytskyi", OutageRegions.resolve("hmelnitska-oblast")!!.id)
+        assertEquals("lviv", OutageRegions.resolve("lvivska-oblast")!!.id)
+        assertEquals("dnipro", OutageRegions.resolve("dnipro-dnem")!!.id)
+        assertEquals("vinnytsia", OutageRegions.resolve("vinnitska-oblast")!!.id)
+        assertEquals("odesa", OutageRegions.resolve("odesa")!!.id)
+        assertNull(OutageRegions.resolve("atlantis"))
+    }
+
+    @Test
+    fun queueOrderIsNatural() {
+        assertEquals(listOf("1.1", "1.2", "2.1", "10.1"), listOf("10.1", "2.1", "1.2", "1.1").sortedWith(OutageRegions.queueOrder))
     }
 }

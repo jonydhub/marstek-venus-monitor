@@ -49,10 +49,12 @@ Venus E ──UDP JSON-RPC (Open API, LAN)──▶ server/ (Python, ПК/RPi/NA
 
 ## Джерела графіків відключень
 
-Сервер спершу бере дані **напряму в оператора**, а агрегатори — як запасний варіант (`MARSTEK_OUTAGE_PROVIDER=auto`):
+Сервер і застосунок спершу беруть дані **напряму в оператора**, а агрегат — як запасний варіант (`MARSTEK_OUTAGE_PROVIDER=auto`):
 
-1. **Офіційне API напряму**: Львівобленерго (Львівська обл.), YASNO (Київ, Дніпро — ДнЕМ і ЦЕК).
+1. **Офіційне джерело напряму**: Львівобленерго (Львівська обл.), YASNO (Київ, Дніпро — ДнЕМ і ЦЕК), сайти Харків-, Полтава-, Запоріжжя- та Чернівціобленерго (розбір портовано з hukpo/ua-outages, MIT; ці сайти відповідають з українських IP).
 2. **[hukpo/ua-outages](https://github.com/hukpo/ua-outages)** — статичний агрегат, що кожні ~15 хв читає сайти ~22 операторів.
+
+Для Вінницької області машинного джерела немає (лише картинки й пошук з капчею) — там графік недоступний, а світло визначається за резервним виходом.
 
 Таблиця по областях — у [посібнику](docs/MANUAL.md#джерела-графіків-по-областях). Поле `power_outage.source` у `/api/status` показує, звідки взято графік саме зараз; дашборд пише це у верхній картці.
 
@@ -69,7 +71,7 @@ docker compose up -d
 
 ## Структура
 
-- `server/` — Python 3 (stdlib): опитування батареї, `/api/status`, `/api/regions`, `/health`, веб-дашборд, джерела відключень (`outage.py`, `yasno.py`, `uaoutages.py`, `regions.py`), історія (`history.py`). Тести: `cd server && python3 -B -m unittest discover -s tests`.
+- `server/` — Python 3 (stdlib): опитування батареї, `/api/status`, `/api/regions`, `/health`, веб-дашборд, джерела відключень (`outage.py`, `yasno.py`, `oblenergo.py`, `uaoutages.py`, `regions.py`), історія (`history.py`). Тести: `cd server && python3 -B -m unittest discover -s tests`.
 - `android/` — Kotlin, minSdk 26, RemoteViews-віджети, WorkManager.
 - `docs/MANUAL.md` — покроковий посібник.
 
@@ -84,11 +86,11 @@ docker compose up -d
 
 - Тільки читання: жодних команд керування батареєю.
 - Дані батареї залишаються у вас: телефон ↔ батарея або телефон ↔ ваш сервер. Хмари проєкту немає, телеметрії немає.
-- В інтернет сервер звертається лише по графік відключень (публічні JSON операторів, ua-outages) — без даних батареї.
+- В інтернет сервер звертається лише по графік відключень (публічні JSON/сторінки операторів, ua-outages) — без даних батареї.
 
 ## Ліцензія та подяки
 
-MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліцензії — [NOTICE](NOTICE): [hukpo/ua-outages](https://github.com/hukpo/ua-outages) (MIT), відкриті дані Львівобленерго, публічне API YASNO.
+MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліцензії — [NOTICE](NOTICE): [hukpo/ua-outages](https://github.com/hukpo/ua-outages) (MIT, з нього портовано розбір сайтів чотирьох обленерго), відкриті дані Львівобленерго, публічне API YASNO, сайти Харків-, Полтава-, Запоріжжя- та Чернівціобленерго.
 
 **Проєкт не пов'язаний з Marstek, ДТЕК, YASNO, обленерго чи ua-outages.** Назви й торгові марки належать їхнім власникам. Використовуйте на власний ризик.
 
@@ -96,4 +98,4 @@ MIT, див. [LICENSE](LICENSE). Сторонні джерела й ліценз
 
 ## English
 
-**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator APIs first (Lvivoblenergo, YASNO), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate, then a community fallback. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).
+**Marstek Venus Monitor** is an unofficial, read-only monitor for the Marstek Venus E home battery: an Android app with widgets and notifications, plus an optional stdlib-only Python server (Docker image included) that polls the battery's local Open API (UDP JSON-RPC, port 30000), keeps 48 h of history, serves a PWA dashboard and `/api/status`, and merges Ukrainian power-outage schedules — official operator sources first (Lvivoblenergo and YASNO APIs; the Kharkiv, Poltava, Zaporizhzhia and Chernivtsi oblenergo sites, parsers ported from hukpo/ua-outages), then the [hukpo/ua-outages](https://github.com/hukpo/ua-outages) aggregate. It never sends control commands. The battery only answers on the LAN, so remote access needs the home server plus a VPN or tunnel; set `MARSTEK_API_TOKEN` before exposing it anywhere. MIT licensed; not affiliated with Marstek or any grid operator. Full manual (Ukrainian): [docs/MANUAL.md](docs/MANUAL.md).

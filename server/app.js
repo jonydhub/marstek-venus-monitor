@@ -153,6 +153,7 @@ function formatClock(iso) {
 const finiteOrNull = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
 const watts = value => { const n = finiteOrNull(value); return n === null ? '—' : `${Math.round(Math.abs(n))} W`; };
 function outageSourceText(outage) {
+  if (outage?.schedule_unavailable) return 'Графік недоступний — світло визначається за резервним виходом';
   if (!outage || outage.provider === 'off' || !outage.available) return 'Графік вимкнено';
   if (!outage.source_name) return 'Джерело недоступне';
   const fallback = outage.provider === 'auto' && Object.keys(outage.source_errors || {}).length;

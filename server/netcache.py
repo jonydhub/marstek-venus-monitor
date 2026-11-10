@@ -1,4 +1,4 @@
-"""Small polite JSON-over-HTTP client: TTL cache, ETag / If-Modified-Since, explicit User-Agent."""
+"""Small polite HTTP client (JSON or text): TTL cache, ETag / If-Modified-Since, explicit User-Agent."""
 from __future__ import annotations
 
 import json
@@ -24,8 +24,9 @@ def urllib_opener(url, headers, timeout):
 
 class CachedJsonClient:
     def __init__(self, opener=urllib_opener, ttl=600, clock=time.monotonic, timeout=20,
-                 accept="application/json"):
+                 accept="application/json", as_text=False):
         self.opener, self.ttl, self.clock, self.timeout, self.accept = opener, ttl, clock, timeout, accept
+        self.as_text = as_text  # return the decoded body instead of parsed JSON (HTML pages)
         self.lock = threading.Lock()
         self._cache = {}  # url -> {"data", "at", "etag", "last_modified"}
 
@@ -53,7 +54,8 @@ class CachedJsonClient:
                 return entry["data"]
             if status != 200:
                 raise OSError(f"HTTP {status} from {url}")
-            data = json.loads(body.decode("utf-8"))
+            text = body.decode("utf-8", errors="replace")
+            data = text if self.as_text else json.loads(text)
             self._cache[url] = {"data": data, "at": now, "etag": lower.get("etag"),
                                 "last_modified": lower.get("last-modified")}
             return data

@@ -12,8 +12,11 @@ val KYIV: ZoneId = ZoneId.of("Europe/Kyiv")
 enum class OutageSourceKind(val displayName: String, val tag: String) {
     LOE("Львівобленерго", "LOE"),
     YASNO("YASNO", "YASNO"),
+    KHARKIV("Харківобленерго", "Kharkiv"),
+    POLTAVA("Полтаваобленерго", "Poltava"),
+    ZAPORIZHZHIA("Запоріжжяобленерго", "Zaporizhzhia"),
+    CHERNIVTSI("Чернівціобленерго", "Chernivtsi"),
     UA_OUTAGES("ua-outages (офіційні дані обленерго)", "ua-outages"),
-    SVITLO("svitlo.live (агрегатор)", "svitlo.live"),
 }
 
 /** [maybe] = «можливе відключення» (depends on the grid situation), otherwise a definite outage. */
@@ -57,24 +60,6 @@ object OutageWindowMerger {
 /** Wall-clock minutes from local midnight → zoned time (DST-safe: local time first, then zone). */
 internal fun kyivAt(date: LocalDate, minutes: Int): ZonedDateTime =
     date.atStartOfDay().plusMinutes(minutes.toLong()).atZone(KYIV)
-
-/** svitlo.live half-hour codes: 1 = power on, 2 = off, 0 = unknown. */
-object HalfHourSlots {
-    fun toWindows(date: LocalDate, slots: Map<String, Int>): List<OutageWindow> {
-        val windows = (0 until 48).mapNotNull { i ->
-            val label = "%02d:%02d".format(i / 2, (i % 2) * 30)
-            if (slots[label] == 2) OutageWindow(kyivAt(date, i * 30), kyivAt(date, i * 30 + 30)) else null
-        }
-        return OutageWindowMerger.merge(windows)
-    }
-
-    /** 2 = has on/off slots, 1 = date present but only zeros, 0 = missing. */
-    fun score(slots: Map<String, Int>?): Int = when {
-        slots == null -> 0
-        slots.values.any { it == 1 || it == 2 } -> 2
-        else -> 1
-    }
-}
 
 object OutageScheduleCodec {
     fun encode(s: OutageSchedule): String = JSONObject()

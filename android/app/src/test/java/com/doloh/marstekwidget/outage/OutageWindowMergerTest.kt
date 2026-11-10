@@ -19,20 +19,17 @@ class OutageWindowMergerTest {
     }
 
     @Test
-    fun halfHourSlotsBecomeMergedWindows() {
-        val slots = (0 until 48).associate { i ->
-            val label = "%02d:%02d".format(i / 2, (i % 2) * 30)
-            label to when (i) { in 4..17 -> 2; 47 -> 2; else -> 1 }
-        }
-        val windows = HalfHourSlots.toWindows(LocalDate.of(2026, 11, 10), slots)
-        assertEquals(listOf(OutageWindow(at(2), at(9)), OutageWindow(at(23, 30), at(0, 0, day = 11))), windows)
+    fun halfHourCellsBecomeMergedSlots() {
+        val cells = (0 until 48).map { i -> when (i) { in 4..17 -> false; 18 -> true; 47 -> false; else -> null } }
+        assertEquals(listOf(DaySlot(120, 540), DaySlot(540, 570, maybe = true), DaySlot(1410, 1440)), UaScheduleText.cells(cells))
     }
 
     @Test
     fun windowsAcrossMidnightMergeWhenBothDaysAreGiven() {
-        val today = HalfHourSlots.toWindows(LocalDate.of(2026, 11, 10), mapOf("23:30" to 2))
-        val tomorrow = HalfHourSlots.toWindows(LocalDate.of(2026, 11, 11), mapOf("00:00" to 2, "00:30" to 2))
-        assertEquals(listOf(OutageWindow(at(23, 30), at(1, 0, day = 11))), OutageWindowMerger.merge(today + tomorrow))
+        val d10 = LocalDate.of(2026, 11, 10)
+        val d11 = LocalDate.of(2026, 11, 11)
+        val windows = listOf(OutageWindow(kyivAt(d10, 1410), kyivAt(d10, 1440)), OutageWindow(kyivAt(d11, 0), kyivAt(d11, 60)))
+        assertEquals(listOf(OutageWindow(at(23, 30), at(1, 0, day = 11))), OutageWindowMerger.merge(windows))
     }
 
     @Test
@@ -42,12 +39,5 @@ class OutageWindowMergerTest {
         ))
         assertEquals(3, merged.size)
         assertEquals(listOf(true, false, true), merged.map { it.maybe })
-    }
-
-    @Test
-    fun slotScoring() {
-        assertEquals(0, HalfHourSlots.score(null))
-        assertEquals(1, HalfHourSlots.score(mapOf("00:00" to 0)))
-        assertEquals(2, HalfHourSlots.score(mapOf("00:00" to 0, "00:30" to 1)))
     }
 }

@@ -19,7 +19,7 @@ services:
       MARSTEK_API_TOKEN: "change-me-openssl-rand-hex-24"
       MARSTEK_OUTAGE_REGION: "kyiv"         # GET /api/regions for the list
       MARSTEK_OUTAGE_QUEUE: "1.1"
-      # MARSTEK_OUTAGE_PROVIDER: "auto"     # auto | ua-outages | svitlo | loe | yasno | off
+      # MARSTEK_OUTAGE_PROVIDER: "auto"     # auto | ua-outages | loe | yasno | kharkiv | poltava | zaporizhzhia | chernivtsi | off
     volumes:
       - marstek-data:/data
       # - ./marstek.env:/config/.env:ro     # alternative to the environment: block

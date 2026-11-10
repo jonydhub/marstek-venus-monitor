@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.doloh.marstekwidget.direct.MarstekRpc
 import com.doloh.marstekwidget.outage.OutageConfig
+import com.doloh.marstekwidget.outage.OutageRegions
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -52,7 +53,8 @@ class SettingsStore(context: Context) {
         deviceModel = prefs.getString("device.model", null),
         serverUrl = prefs.getString("server.url", null),
         serverAuth = runCatching { ServerAuth.valueOf(prefs.getString("server.auth", null)!!) }.getOrDefault(ServerAuth.NONE),
-        outageRegionId = prefs.getString("outage.region", null),
+        // legacy slugs (e.g. lvivska-oblast) map to the canonical id; unknown values are kept as-is
+        outageRegionId = prefs.getString("outage.region", null)?.let { OutageRegions.resolve(it)?.id ?: it },
         outageQueue = prefs.getString("outage.queue", null),
         backupThresholdW = prefs.getFloat("backup.threshold_w", AppSettings.DEFAULT_BACKUP_THRESHOLD_W.toFloat()).toDouble(),
         averageLoadW = prefs.getFloat("load.average_w", -1f).toDouble().takeIf { it > 0 },

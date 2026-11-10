@@ -79,6 +79,33 @@ class OutageStatusBuilderTest {
     }
 
     @Test
+    fun regionWithoutSourceSaysScheduleUnavailable() {
+        val block = OutageStatusBuilder.build(OutageConfig("vinnytsia", "1.1"), null, "no schedule source for region", at(10), "on", 2000.0, null, null, null, null)
+        val info = PowerOutageParser.parse(block)!!
+        assertTrue(info.scheduleUnavailable)
+        assertEquals("Графік недоступний — світло визначається за резервним виходом", PowerOutageFormatter.detail(info, at(10)))
+        assertEquals("Вінницька область · черга 1.1", PowerOutageFormatter.groupLine(info, "Вінницька область"))
+    }
+
+    @Test
+    fun disabledScheduleShowsOneLineOnly() {
+        val info = PowerOutageParser.parse(OutageStatusBuilder.build(null, null, null, at(10), "on", 2000.0, null, null, null, null))!!
+        assertEquals("Графік відключень не налаштовано", PowerOutageFormatter.detail(info, at(10)))
+        assertNull(PowerOutageFormatter.groupLine(info, null))
+        val withSource = PowerOutageParser.parse(build(at(10)))!!
+        assertEquals("Харківська область · черга 1.1 · Джерело: YASNO", PowerOutageFormatter.groupLine(withSource, "Харківська область"))
+    }
+
+    @Test
+    fun serverBlockWithoutSourceIsParsed() {
+        val block = org.json.JSONObject().put("available", false).put("schedule_unavailable", true).put("grid_state", "off")
+        val info = PowerOutageParser.parse(block)!!
+        assertEquals(GridState.OFF, info.gridState)
+        assertEquals(PowerOutageFormatter.SCHEDULE_UNAVAILABLE, PowerOutageFormatter.detail(info, at(10)))
+        assertNull(PowerOutageParser.parse(org.json.JSONObject().put("available", false)))
+    }
+
+    @Test
     fun measuredDischargeUsedDuringOutage() {
         val flow = BatteryFlow(true, -500.0, "discharging", 300, 10, null, null, 18000.0)
         val block = OutageStatusBuilder.build(OutageConfig("x", "1.1"), schedule, null, at(16), "off", 2500.0, flow, null, null, null)

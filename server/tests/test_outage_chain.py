@@ -41,7 +41,7 @@ def status(service, **kw):
 
 class ChainTests(unittest.TestCase):
     def test_official_source_wins_when_it_has_a_schedule(self):
-        official, fallback = Fake("yasno", "YASNO", data(WINDOW)), Fake("svitlo", "svitlo.live", data())
+        official, fallback = Fake("yasno", "YASNO", data(WINDOW)), Fake("ua-outages", "ua-outages", data())
         result = status(OutageService("auto", [official, fallback], queue="1.1", region="kyiv"))
         self.assertEqual(result["provider"], "auto")
         self.assertEqual(result["source"], "yasno")
@@ -51,11 +51,11 @@ class ChainTests(unittest.TestCase):
         self.assertFalse(result["emergency"])
         self.assertEqual(fallback.calls, 0)
 
-    def test_official_failure_falls_back_to_svitlo(self):
+    def test_official_failure_falls_back_to_ua_outages(self):
         official = Fake("loe", "Львівобленерго", error=OSError("timeout"))
-        fallback = Fake("svitlo", "svitlo.live", data(WINDOW))
+        fallback = Fake("ua-outages", "ua-outages", data(WINDOW))
         result = status(OutageService("auto", [official, fallback], queue="1.1"))
-        self.assertEqual(result["source"], "svitlo")
+        self.assertEqual(result["source"], "ua-outages")
         self.assertIsNone(result["error"])
         self.assertEqual(result["source_errors"], {"loe": "OSError"})
         self.assertTrue(result["schedule_published"])
@@ -64,14 +64,14 @@ class ChainTests(unittest.TestCase):
         accident = {"dateEvent": "2026-11-10T18:30:00+02:00", "datePlanIn": "2026-11-10T21:00:00+02:00",
                     "koment": "ремонт", "buildingNames": "5, 7"}
         official = Fake("loe", "Львівобленерго", data(accidents=[accident]))
-        fallback = Fake("svitlo", "svitlo.live", data(WINDOW))
+        fallback = Fake("ua-outages", "ua-outages", data(WINDOW))
         result = status(OutageService("auto", [official, fallback], queue="1.1", building="7"))
-        self.assertEqual(result["source"], "svitlo")
+        self.assertEqual(result["source"], "ua-outages")
         self.assertEqual(result["current_outage"]["kind"], "loe_outage")
 
     def test_official_emergency_is_authoritative(self):
         official = Fake("yasno", "YASNO", data(emergency=True))
-        fallback = Fake("svitlo", "svitlo.live", data(WINDOW))
+        fallback = Fake("ua-outages", "ua-outages", data(WINDOW))
         result = status(OutageService("auto", [official, fallback], queue="1.1"))
         self.assertEqual(result["source"], "yasno")
         self.assertTrue(result["emergency"])
@@ -123,35 +123,50 @@ class BuildServiceTests(unittest.TestCase):
         service = build_outage_service(settings)
         return [f.name for f in getattr(service, "fetchers", [])], service
 
-    def test_auto_lviv_uses_loe_then_svitlo(self):
+    def test_auto_lviv_uses_loe_then_ua_outages(self):
         names, service = self.names(MARSTEK_OUTAGE_REGION="lvivska-oblast", MARSTEK_OUTAGE_QUEUE="1.1")
-        self.assertEqual(names, ["loe", "ua-outages", "svitlo"])
-        self.assertEqual(service.region, "lviv")  # svitlo slug resolved to canonical id
+        self.assertEqual(names, ["loe", "ua-outages"])
+        self.assertEqual(service.region, "lviv")  # legacy slug resolved to canonical id
         self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="lviv", MARSTEK_OUTAGE_QUEUE="1.1")[0],
-                         ["loe", "ua-outages", "svitlo"])
+                         ["loe", "ua-outages"])
 
-    def test_auto_kyiv_and_dnipro_use_yasno_then_svitlo(self):
-        self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="kyiv", MARSTEK_OUTAGE_QUEUE="3.1")[0],
-                         ["yasno", "ua-outages", "svitlo"])
-        self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="dnipro-cek", MARSTEK_OUTAGE_QUEUE="1.1")[0],
-                         ["yasno", "ua-outages", "svitlo"])
-        self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="dnipro", MARSTEK_OUTAGE_QUEUE="1.1")[0],
-                         ["yasno", "ua-outages", "svitlo"])
+    def test_auto_kyiv_and_dnipro_use_yasno_then_ua_outages(self):
+        for region in ("kyiv", "dnipro-cek", "dnipro"):
+            self.assertEqual(self.names(MARSTEK_OUTAGE_REGION=region, MARSTEK_OUTAGE_QUEUE="1.1")[0],
+                             ["yasno", "ua-outages"])
 
-    def test_auto_other_region_uses_svitlo_only(self):
+    def test_auto_direct_oblenergo_regions(self):
+        for region, legacy in (("kharkiv", "harkivska-oblast"), ("poltava", "poltavska-oblast"),
+                               ("zaporizhzhia", "zaporizka-oblast"), ("chernivtsi", "chernivetska-oblast")):
+            names, service = self.names(MARSTEK_OUTAGE_REGION=legacy, MARSTEK_OUTAGE_QUEUE="1")
+            self.assertEqual(names, [region, "ua-outages"])
+            self.assertEqual(service.region, region)
+        labels = [f.label for f in self.names(MARSTEK_OUTAGE_REGION="kharkiv", MARSTEK_OUTAGE_QUEUE="1.1")[1].fetchers]
+        self.assertEqual(labels, ["Харківобленерго", "ua-outages"])
+
+    def test_auto_other_region_uses_ua_outages_only(self):
         self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="odeska-oblast", MARSTEK_OUTAGE_QUEUE="1.1")[0],
-                         ["ua-outages", "svitlo"])
-        self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="vinnytsia", MARSTEK_OUTAGE_QUEUE="1.1")[0], ["svitlo"])
+                         ["ua-outages"])
         self.assertEqual(self.names(MARSTEK_OUTAGE_REGION="uz-lviv", MARSTEK_OUTAGE_QUEUE="1.1")[0], ["ua-outages"])
 
+    def test_region_without_any_source_reports_schedule_unavailable(self):
+        names, service = self.names(MARSTEK_OUTAGE_REGION="vinnitska-oblast", MARSTEK_OUTAGE_QUEUE="1.1")
+        self.assertEqual(names, [])
+        self.assertIsInstance(service, OffService)
+        result = service.status(grid_state="on", stored_wh=1000.0, battery_flow={}, expected_load_w=None, now=NOW)
+        self.assertTrue(result["schedule_unavailable"])
+        self.assertEqual(result["provider"], "unavailable")
+        self.assertEqual(result["region"], "vinnytsia")
+        self.assertEqual(result["grid_state"], "on")
+
     def test_explicit_providers(self):
-        self.assertEqual(self.names(MARSTEK_OUTAGE_PROVIDER="svitlo", MARSTEK_OUTAGE_REGION="lvivska-oblast",
-                                    MARSTEK_OUTAGE_QUEUE="1.1")[0], ["svitlo"])
         self.assertEqual(self.names(MARSTEK_OUTAGE_PROVIDER="loe", MARSTEK_OUTAGE_QUEUE="1.1")[0], ["loe"])
         self.assertEqual(self.names(MARSTEK_OUTAGE_PROVIDER="ua-outages", MARSTEK_OUTAGE_REGION="odesa",
                                     MARSTEK_OUTAGE_QUEUE="1.1")[0], ["ua-outages"])
         self.assertEqual(self.names(MARSTEK_OUTAGE_PROVIDER="yasno", MARSTEK_OUTAGE_REGION="kyiv",
                                     MARSTEK_OUTAGE_QUEUE="1.1")[0], ["yasno"])
+        self.assertEqual(self.names(MARSTEK_OUTAGE_PROVIDER="poltava", MARSTEK_OUTAGE_REGION="poltava",
+                                    MARSTEK_OUTAGE_QUEUE="1.1")[0], ["poltava"])
 
     def test_off_and_unconfigured(self):
         self.assertIsInstance(self.names()[1], OffService)

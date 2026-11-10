@@ -2,7 +2,7 @@ Marstek Venus Monitor
 Copyright (c) 2026 Ivan Doloh — MIT License (see LICENSE)
 
 This project is not affiliated with, endorsed by or supported by Marstek, DTEK, YASNO,
-any regional grid operator (oblenergo), hukpo/ua-outages or svitlo.live. All product
+any regional grid operator (oblenergo) or hukpo/ua-outages. All product
 names and trademarks belong to their owners.
 
 Outage schedule data sources (read at runtime over public HTTP, not redistributed):
@@ -22,12 +22,33 @@ Outage schedule data sources (read at runtime over public HTTP, not redistribute
    (s: s/n/e/u, intervals [startMin, endMin, kind]) and region ids follow that project.
    Operator names in docs/MANUAL.md are taken from its now.json.
 
-4. svitlo.live public proxies
-   https://dtek-api.svitlo-proxy.workers.dev/ and https://svitlo-proxy.svitlo-proxy.workers.dev
-   The schedule format, region slug mapping and primary/fallback selection rule are adapted
-   from the Home Assistant integration chaichuk/svitlo_live
-   (https://github.com/chaichuk/svitlo_live), MIT License.
+4. Oblenergo websites, read directly (server/oblenergo.py, android .../outage/OblenergoParsers.kt)
+   - Kharkivoblenergo: https://oblenergo.kharkiv.ua/uk/jsonapi/node/newsforlenta (Drupal JSON:API)
+   - Poltavaoblenergo: https://www.poe.pl.ua/customs/dynamicgpv-info.php
+   - Zaporizhzhiaoblenergo: https://www.zoe.com.ua/outage/
+   - Chernivtsioblenergo: https://oblenergo.cv.ua/shutdowns/
+   Data belongs to each operator. The parsers are ported from hukpo/ua-outages
+   (src/providers/{kharkiv,poltava,zaporizhzhia,chernivtsi}.ts and the shared helpers
+   src/providers/posts.ts, src/providers/ua-text.ts, src/schedule.ts),
+   Copyright (c) 2026 Pavlo Huk, MIT License — see the license text below.
 
 Each data source remains the property of its publisher; check their terms before heavy use.
 The server polls every source at most once per 10 minutes with conditional requests
 (ETag / If-Modified-Since) and an identifying User-Agent.
+
+MIT License (hukpo/ua-outages, Copyright (c) 2026 Pavlo Huk)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the
+following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial
+portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
+LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO
+EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -1,10 +1,11 @@
-"""Power-outage status: official schedule source first, svitlo.live aggregator as fallback.
+"""Power-outage status: direct official schedule source first, ua-outages aggregate as fallback.
 
 Sources (all read-only, public):
 - Lvivoblenergo (LOE) GPV schedule: https://api.loe.lviv.ua/api/menus?type=photo-grafic (Today/Tomorrow rawHtml)
 - LOE emergency / planned outages by street (optional, address-level): https://power-api.loe.lviv.ua/api/pw_accidents
 - YASNO (Kyiv city, Dnipro): see yasno.py
-- svitlo.live proxies (all Ukraine): see svitlo.py
+- Kharkiv / Poltava / Zaporizhzhia / Chernivtsi oblenergos: see oblenergo.py
+- hukpo/ua-outages aggregate (most oblasts): see uaoutages.py
 Grid presence is detected locally: if something is powered from the Venus backup output and it
 draws power, the house is running from the battery (grid is absent).
 """
@@ -132,7 +133,7 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
                         battery_flow, expected_load_w, fetched_at, error, measured_load_w=None,
                         provider="loe", source="loe", source_name="Львівобленерго", emergency=False,
                         region=None, source_errors=None, available=True, maybe=None, source_stale=False,
-                        source_detail=None):
+                        source_detail=None, schedule_unavailable=False):
     now = now if now.tzinfo else now.replace(tzinfo=KYIV)
     current = current_end = None
     upcoming = upcoming_start = None
@@ -189,6 +190,7 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
         "error": error,
         "source_errors": source_errors or {},
         "source_stale": bool(source_stale),
+        "schedule_unavailable": bool(schedule_unavailable),
     }
 
 
@@ -346,8 +348,12 @@ class OutageService:
 
 
 class OffService:
-    """No schedule source configured: still report local grid state and battery autonomy."""
+    """No schedule source configured (or none exists for the region): still report local grid state
+    and battery autonomy. `unavailable` = a region is set but no source covers it."""
     fetchers = ()
+
+    def __init__(self, region=None, unavailable=False):
+        self.region, self.unavailable = region, unavailable
 
     def refresh_if_due(self, now=None):
         return
@@ -357,33 +363,36 @@ class OffService:
             now=(now or datetime.now(KYIV)), group=None, building=None, schedules=[], accidents=[],
             grid_state=grid_state, stored_wh=stored_wh, battery_flow=battery_flow,
             expected_load_w=expected_load_w, fetched_at=None, error=None, measured_load_w=measured_load_w,
-            provider="off", source=None, source_name=None, available=False,
+            provider="unavailable" if self.unavailable else "off", source=None, source_name=None, available=False,
+            region=self.region, schedule_unavailable=self.unavailable,
         )
 
 
-def build_outage_service(settings, svitlo_client=None, ua_client=None):
-    """auto: direct official source (LOE / YASNO) -> ua-outages aggregate -> svitlo.live."""
-    from regions import REGIONS, resolve_region, sources_for
-    from svitlo import SvitloFetcher
+def build_outage_service(settings, ua_client=None, direct_clients=None):
+    """auto: direct official source (LOE / YASNO / oblenergo site) -> ua-outages aggregate.
+
+    `direct_clients`: optional {fetcher name: shared HTTP client} for the oblenergo fetchers."""
+    from oblenergo import DIRECT_FETCHERS
+    from regions import resolve_region, sources_for
     from uaoutages import UaOutagesFetcher
     from yasno import YasnoFetcher
     provider, queue = settings.outage_provider, settings.outage_queue
     region = resolve_region(settings.outage_region) if settings.outage_region else None
     if provider == "off" or not queue:
         return OffService()
-    svitlo_slug = (REGIONS.get(region) or {}).get("svitlo") or settings.outage_region
     loe = lambda: LoeFetcher(settings.loe_otg_id, settings.loe_city_id, settings.loe_street_id)  # noqa: E731
     make = {
         "loe": loe,
         "yasno": lambda: YasnoFetcher(region, queue),
         "ua-outages": lambda: UaOutagesFetcher(region, queue, client=ua_client),
-        "svitlo": lambda: SvitloFetcher(svitlo_slug, queue, client=svitlo_client),
     }
+    for name, cls in DIRECT_FETCHERS.items():
+        make[name] = lambda cls=cls, name=name: cls(queue, client=(direct_clients or {}).get(name))
     if provider == "auto":
         names = sources_for(region)
     else:
         names = [provider]
     fetchers = [make[name]() for name in names if name in make]
     if not fetchers:
-        return OffService()
+        return OffService(region=region, unavailable=provider == "auto" and region is not None)
     return OutageService(provider, fetchers, queue=queue, building=settings.loe_building or None, region=region)

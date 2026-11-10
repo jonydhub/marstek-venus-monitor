@@ -55,6 +55,6 @@ object UaOutagesParser {
 
     fun groups(text: String, regionId: String): List<String> = runCatching {
         val arr = region(text, regionId).optJSONArray("groups") ?: return emptyList()
-        (0 until arr.length()).map { arr.getString(it) }.sortedWith(SvitloCatalog.queueComparator)
+        (0 until arr.length()).map { arr.getString(it) }.sortedWith(OutageRegions.queueOrder)
     }.getOrDefault(emptyList())
 }

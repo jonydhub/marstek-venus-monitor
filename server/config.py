@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-PROVIDERS = ("auto", "off", "ua-outages", "svitlo", "loe", "yasno")
+PROVIDERS = ("auto", "off", "ua-outages", "loe", "yasno", "kharkiv", "poltava", "zaporizhzhia", "chernivtsi")
 _LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 
 
@@ -129,7 +129,7 @@ def validate(settings: Settings) -> list[str]:
         errors.append("MARSTEK_RATE_LIMIT_PER_MIN must be >= 1")
     if settings.outage_provider not in PROVIDERS:
         errors.append(f"MARSTEK_OUTAGE_PROVIDER must be one of {', '.join(PROVIDERS)}")
-    if settings.outage_provider in ("auto", "ua-outages", "svitlo", "yasno"):
+    if settings.outage_provider not in ("off", "loe"):
         name = settings.outage_provider
         if not settings.outage_region:
             errors.append(f"MARSTEK_OUTAGE_REGION is required for provider {name} (see GET /api/regions)")
@@ -146,7 +146,7 @@ def validate(settings: Settings) -> list[str]:
         from yasno import YASNO_REGIONS
         if region_id not in YASNO_REGIONS:
             errors.append(f"provider yasno supports only regions {', '.join(sorted(YASNO_REGIONS))}; "
-                          "use MARSTEK_OUTAGE_PROVIDER=auto or svitlo")
+                          "use MARSTEK_OUTAGE_PROVIDER=auto")
     if settings.outage_provider == "loe" and not settings.outage_queue:
         errors.append("MARSTEK_OUTAGE_QUEUE is required for provider loe, e.g. 1.1")
     return errors

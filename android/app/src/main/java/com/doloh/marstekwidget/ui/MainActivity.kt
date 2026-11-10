@@ -591,11 +591,7 @@ class MainActivity : Activity() {
             return
         }
         val regionName = OutageRegions.byId(settings.outageRegionId)?.name
-        powerGroup.text = if (!info.scheduleEnabled) getString(R.string.main_power_group_disabled)
-        else listOfNotNull(
-            if (regionName != null) getString(R.string.main_power_group, regionName, info.group ?: "—") else info.group?.let { "Черга $it" },
-            PowerOutageFormatter.source(info),
-        ).joinToString(" · ")
+        powerGroup.text = PowerOutageFormatter.groupLine(info, regionName).orEmpty()
         powerGroup.visibility = if (powerGroup.text.isNullOrEmpty()) View.GONE else View.VISIBLE
         val maybe = PowerOutageFormatter.maybe(info)
         powerMaybe.text = maybe.orEmpty()

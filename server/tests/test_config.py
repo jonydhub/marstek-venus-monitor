@@ -60,9 +60,9 @@ class SettingsTests(unittest.TestCase):
         errors = validate(load_settings({}))
         self.assertTrue(any("MARSTEK_HOST" in e for e in errors))
 
-    def test_valid_svitlo_config(self):
+    def test_valid_ua_outages_config(self):
         settings = load_settings({
-            "MARSTEK_HOST": "10.0.0.5", "MARSTEK_OUTAGE_PROVIDER": "svitlo",
+            "MARSTEK_HOST": "10.0.0.5", "MARSTEK_OUTAGE_PROVIDER": "ua-outages",
             "MARSTEK_OUTAGE_REGION": "kyiv", "MARSTEK_OUTAGE_QUEUE": "3.1",
             "MARSTEK_BIND": "0.0.0.0", "MARSTEK_DASHBOARD_PORT": "18790",
             "MARSTEK_BACKUP_THRESHOLD_W": "12.5", "MARSTEK_API_TOKEN": "abc",
@@ -73,8 +73,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.backup_threshold_w, 12.5)
         self.assertEqual(settings.api_token, "abc")
 
-    def test_svitlo_requires_region_and_queue(self):
-        errors = validate(load_settings({"MARSTEK_HOST": "h", "MARSTEK_OUTAGE_PROVIDER": "svitlo"}))
+    def test_ua_outages_requires_region_and_queue(self):
+        errors = validate(load_settings({"MARSTEK_HOST": "h", "MARSTEK_OUTAGE_PROVIDER": "ua-outages"}))
         self.assertTrue(any("MARSTEK_OUTAGE_REGION" in e for e in errors))
         self.assertTrue(any("MARSTEK_OUTAGE_QUEUE" in e for e in errors))
 

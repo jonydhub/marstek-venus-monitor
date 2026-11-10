@@ -10,15 +10,16 @@ Data sources
 - YASNO — public planned-outages API, https://app.yasno.ua
 - ua-outages by Pavlo Huk — https://github.com/hukpo/ua-outages — MIT License.
   The app reads the published aggregate https://hukpo.github.io/ua-outages/data/now.json.
-- svitlo.live public proxies, and the selection/fallback logic (region slug mapping, schedule scoring)
-  ported from chaichuk/svitlo_live (Home Assistant integration) — https://github.com/chaichuk/svitlo_live —
-  MIT License.
+- Харківобленерго, Полтаваобленерго, Запоріжжяобленерго, Чернівціобленерго — official websites read
+  directly (oblenergo.kharkiv.ua, poe.pl.ua, zoe.com.ua, oblenergo.cv.ua). The page/JSON parsers are
+  ported from hukpo/ua-outages (src/providers/{kharkiv,poltava,zaporizhzhia,chernivtsi}.ts, posts.ts,
+  ua-text.ts, schedule.ts) — Copyright (c) 2026 Pavlo Huk — MIT License.
 
 Libraries
 ---------
 - AndroidX WorkManager, Kotlin coroutines — Apache License 2.0.
 
-MIT License (applies to the ua-outages and svitlo_live portions referenced above)
+MIT License (applies to the ua-outages portions referenced above)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
 associated documentation files (the "Software"), to deal in the Software without restriction, including

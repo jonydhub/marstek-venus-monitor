@@ -33,14 +33,18 @@ measured backup-output average (≥30 min of draw).
 
 Per region the app tries sources in order and uses the first that has a published schedule:
 
-1. Direct official API where a stable open one exists: **Львівобленерго** (`api.loe.lviv.ua`) for Lviv
-   oblast, **YASNO** public API for Kyiv and Dnipro (ДТЕК/ЦЕК).
+1. Direct official source: **Львівобленерго** (`api.loe.lviv.ua`) for Lviv oblast, **YASNO** public API
+   for Kyiv and Dnipro (ДТЕК/ЦЕК), and the **Харківобленерго / Полтаваобленерго / Запоріжжяобленерго /
+   Чернівціобленерго** websites (`outage/OblenergoParsers.kt`, parsers ported from hukpo/ua-outages, MIT).
+   These sites answer only from Ukrainian IPs, which the phone normally has.
 2. **ua-outages** — hukpo/ua-outages (MIT), a static aggregate of official operator data
    (`hukpo.github.io/ua-outages/data/now.json`). Distinguishes definite and «можливе» outages and
    emergency days.
-3. A public community aggregator as a last-resort fallback (see NOTICE).
 
-DTEK regional websites are behind bot protection and are not scraped. Every source is fetched at most
+Vinnytsia oblast has no machine-readable source (images and a captcha-protected lookup only): the app
+shows «Графік недоступний — світло визначається за резервним виходом». Chernivtsi numbers its groups 1–12.
+
+DTEK regional websites (incl. Donetsk) are behind bot protection and are not scraped. Every source is fetched at most
 once per 10 minutes with ETag/If-Modified-Since and an identifying User-Agent. The UI shows the source
 used («Джерело: …»). The schedule only informs forecasts; whether there is power right now always comes
 from the battery's backup output.

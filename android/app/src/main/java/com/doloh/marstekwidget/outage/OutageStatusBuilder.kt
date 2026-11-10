@@ -49,6 +49,7 @@ object OutageStatusBuilder {
             .put("region", config?.regionId ?: JSONObject.NULL)
             .put("group", config?.queue ?: JSONObject.NULL)
             .put("schedule_enabled", config != null)
+            .put("schedule_unavailable", config != null && OutageRegions.byId(config.regionId)?.hasScheduleSource == false)
             .put("grid_state", gridState)
             .put("grid_state_basis", "backup_output_power")
             .put("current_outage", current?.let { window(it, now) } ?: JSONObject.NULL)
