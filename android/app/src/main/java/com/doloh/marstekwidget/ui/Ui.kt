@@ -5,19 +5,34 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.content.Context
 import android.text.InputType
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.ScrollView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.TextView
 
+/** LinearLayout that never measures wider than [maxWidthPx] (0 = unbounded); centre it with a parent gravity. */
+class MaxWidthLinearLayout(context: Context, var maxWidthPx: Int) : LinearLayout(context) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val size = MeasureSpec.getSize(widthMeasureSpec)
+        val clamped = if (maxWidthPx in 1 until size) MeasureSpec.makeMeasureSpec(maxWidthPx, MeasureSpec.EXACTLY) else widthMeasureSpec
+        super.onMeasure(clamped, heightMeasureSpec)
+    }
+}
+
 /** Small programmatic UI kit shared by settings/about screens (same palette as the dashboard). */
 class Ui(private val activity: Activity) {
     fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 
-    fun page() = LinearLayout(activity).apply {
+    /** Form page: a single column clamped to [ScreenLayoutSelector.FORM_MAX_WIDTH_DP] so lines stay readable on tablets. */
+    fun page() = MaxWidthLinearLayout(activity, dp(ScreenLayoutSelector.FORM_MAX_WIDTH_DP)).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(14), dp(8), dp(14), dp(18))
         setBackgroundColor(BG)
@@ -80,6 +95,18 @@ class Ui(private val activity: Activity) {
         setColor(fill)
         cornerRadius = radius.toFloat()
         setStroke(dp(1), stroke)
+    }
+
+    /** Scrollable screen with [page] horizontally centered (fills the width on phones, a centered column on tablets). */
+    fun scrollCentered(page: View, fillViewport: Boolean = false) = ScrollView(activity).apply {
+        isFillViewport = fillViewport
+        setBackgroundColor(BG)
+        addView(centered(page), ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+    }
+
+    fun centered(page: View) = FrameLayout(activity).apply {
+        setBackgroundColor(BG)
+        addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL))
     }
 
     fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }

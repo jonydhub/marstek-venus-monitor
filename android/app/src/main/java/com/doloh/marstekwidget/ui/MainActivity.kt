@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -21,6 +22,7 @@ import android.text.InputType
 import android.text.TextWatcher
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -95,6 +97,7 @@ class MainActivity : Activity() {
     private lateinit var powerMaybe: TextView
     private lateinit var webButton: Button
     private var refreshing = false
+    private var spec = ScreenLayoutSelector.specFor(0)
     private val settings: AppSettings get() = SettingsStore(this).load()
     private val refreshIntervalMs: Long get() = if (settings.mode == ConnectionMode.DIRECT) DIRECT_INTERVAL_MS else SERVER_INTERVAL_MS
 
@@ -121,6 +124,23 @@ class MainActivity : Activity() {
         }
         WidgetRefreshScheduler.ensurePeriodic(this)
         AlertNotifier.ensureChannels(this)
+        showDashboard()
+    }
+
+    /**
+     * Rotation, split-screen and window resizes are handled in place (see manifest configChanges): rebuild the
+     * width-dependent arrangement from the cached snapshot without restarting the activity or re-polling.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!::statusText.isInitialized) return
+        val newSpec = ScreenLayoutSelector.specFor(newConfig.screenWidthDp)
+        if (newSpec == spec) return
+        showDashboard()
+        updatePermissionHint()
+    }
+
+    private fun showDashboard() {
         val content = buildDashboard()
         SystemBarsInsetHelper.apply(content, 14, 10, 14, 18)
         setContentView(content)
@@ -152,7 +172,10 @@ class MainActivity : Activity() {
     }
 
     private fun buildDashboard(): ScrollView {
-        val page = LinearLayout(this).apply {
+        spec = ScreenLayoutSelector.specFor(resources.configuration.screenWidthDp)
+        metricValues.clear()
+        val wide = spec.mode != ScreenLayoutMode.SINGLE
+        val page = MaxWidthLinearLayout(this, dp(spec.maxContentWidthDp)).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), dp(8), dp(14), dp(18))
             setBackgroundColor(BG)
@@ -161,7 +184,10 @@ class MainActivity : Activity() {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
             setBackgroundColor(BG)
-            addView(page, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            addView(FrameLayout(this@MainActivity).apply {
+                setBackgroundColor(BG)
+                addView(page, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL))
+            }, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
 
         // One-row header: icon · brand · status.
@@ -181,7 +207,7 @@ class MainActivity : Activity() {
             background = rounded(SURFACE_RAISED, dp(20), STROKE)
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            maxWidth = dp(150)
+            maxWidth = dp(if (wide) 320 else 150)
         }
         header.addView(statusText)
         header.addView(label("⚙", 20f, MUTED, false).apply {
@@ -209,7 +235,6 @@ class MainActivity : Activity() {
         alertsCard.addView(sectionTitle(getString(R.string.main_alerts_title)).apply { setTextColor(AMBER) })
         alertsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         alertsCard.addView(alertsList)
-        page.addView(alertsCard, sectionMargin())
 
         // Hero: SOC + light state + ETA + outage.
         val hero = card()
@@ -250,28 +275,30 @@ class MainActivity : Activity() {
         etaLine = label(getString(R.string.main_eta_none), 15f, TEXT, true).apply { setPadding(0, dp(10), 0, 0) }
         hero.addView(etaLine)
         outageLine = label("", 13f, TEXT, false).apply { setPadding(0, dp(4), 0, 0) }
-        hero.addView(outageLine)
         powerMaybe = label("", 12f, AMBER, false).apply { setPadding(0, dp(3), 0, 0); visibility = View.GONE }
-        hero.addView(powerMaybe)
         reserveLine = label("", 13f, TEXT, true).apply { setPadding(0, dp(3), 0, 0) }
-        hero.addView(reserveLine)
         heroMeta = label("", 10f, MUTED, false).apply { setPadding(0, dp(8), 0, 0) }
-        hero.addView(heroMeta)
-        // Light-schedule context (region · queue · source, forecast basis) lives in the hero as small print.
+        // Light-schedule context (region · queue · source, forecast basis): small print under the outage lines.
         powerGroup = label("", 9f, MUTED, false).apply { setPadding(0, dp(6), 0, 0) }
-        hero.addView(powerGroup)
         powerNote = label(getString(R.string.main_power_unavailable), 9f, DIM, false).apply { setPadding(0, dp(2), 0, 0) }
-        hero.addView(powerNote)
-        page.addView(hero, sectionMargin())
+        // Phones keep the outage/schedule block inside the hero; wider windows give it its own card.
+        val scheduleCard = if (wide) card().apply { addView(sectionTitle(getString(R.string.main_schedule_title))) } else null
+        val scheduleHost = scheduleCard ?: hero
+        scheduleHost.addView(outageLine)
+        scheduleHost.addView(powerMaybe)
+        scheduleHost.addView(reserveLine)
+        if (wide) hero.addView(heroMeta)
+        else scheduleHost.addView(heroMeta)
+        scheduleHost.addView(powerGroup)
+        scheduleHost.addView(powerNote)
 
         // 24 h SOC sparkline.
         historyCard = card()
         historyCard.addView(sectionTitle(getString(R.string.main_history_title)))
         sparkline = SocSparklineView(this)
-        historyCard.addView(sparkline, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)))
+        historyCard.addView(sparkline, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(spec.sparklineHeightDp)))
         historyCaption = label("", 9f, DIM, false).apply { setPadding(0, dp(5), 0, 0) }
         historyCard.addView(historyCaption)
-        page.addView(historyCard, sectionMargin())
 
         val buttonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         refreshButton = actionButton(getString(R.string.main_refresh), filled = false) { refreshTelemetry() }
@@ -281,7 +308,6 @@ class MainActivity : Activity() {
         }
         buttonRow.addView(webButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply { marginStart = dp(6) })
         if (settings.mode != ConnectionMode.SERVER) webButton.visibility = View.GONE
-        page.addView(buttonRow, sectionMargin())
 
         // Battery & flows.
         val flowCard = card()
@@ -292,7 +318,6 @@ class MainActivity : Activity() {
         modeMeta = label(getString(R.string.main_mode, "—"), 9f, MUTED, false).apply { setPadding(0, dp(8), 0, 0) }
         flowCard.addView(modeMeta)
         flowCard.addView(label(getString(R.string.main_grid_sign_note), 9f, DIM, false).apply { setPadding(0, dp(4), 0, 0) })
-        page.addView(flowCard, sectionMargin())
 
         // Notifications.
         val notifyCard = card()
@@ -309,7 +334,7 @@ class MainActivity : Activity() {
             val switch = Switch(this).apply {
                 text = getString(labels.first)
                 isChecked = group in settings.enabledGroups
-                textSize = 13f
+                textSize = 13f * spec.textScale
                 setTextColor(TEXT)
                 thumbTintList = ColorStateList.valueOf(MINT)
                 setPadding(0, dp(4), 0, 0)
@@ -322,7 +347,7 @@ class MainActivity : Activity() {
         notifyCard.addView(EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText(settings.highLoadThresholdWatts.toString())
-            textSize = 14f
+            textSize = 14f * spec.textScale
             setTextColor(TEXT)
             setHintTextColor(DIM)
             hint = "200"
@@ -343,7 +368,6 @@ class MainActivity : Activity() {
         }
         notifyCard.addView(permissionHint)
         notifyCard.addView(label(getString(R.string.main_notify_note), 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
-        page.addView(notifyCard, sectionMargin())
 
         // Accumulated counters (moved off the large widget).
         val energyCard = card()
@@ -351,7 +375,21 @@ class MainActivity : Activity() {
         energyCard.addView(metricRow("energyGridIn", R.string.main_energy_grid_in, "energyGridOut", R.string.main_energy_grid_out))
         energyCard.addView(metricColumn(getString(R.string.main_energy_load), "energyLoad"), rowMargin())
         energyCard.addView(label(getString(R.string.main_energy_moved_note), 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
-        page.addView(energyCard, sectionMargin())
+
+        when (spec.mode) {
+            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, buttonRow, flowCard, notifyCard, energyCard)
+                .forEach { page.addView(it, sectionMargin()) }
+            // Left: battery (hero, flows, counters). Right: light schedule, alerts, 24 h chart, notifications.
+            ScreenLayoutMode.TWO_COLUMN -> page.addView(columns(
+                listOf(hero, buttonRow, flowCard, energyCard),
+                listOf(scheduleCard!!, alertsCard, historyCard, notifyCard),
+            ))
+            ScreenLayoutMode.THREE_COLUMN -> page.addView(columns(
+                listOf(hero, buttonRow, flowCard),
+                listOf(scheduleCard!!, alertsCard, historyCard),
+                listOf(notifyCard, energyCard),
+            ))
+        }
 
         updatedText = label(getString(R.string.widget_not_updated), 9f, DIM, false).apply {
             gravity = Gravity.CENTER
@@ -436,6 +474,20 @@ class MainActivity : Activity() {
         return box
     }
 
+    /** Equal-width, top-aligned columns; each card keeps its own height. */
+    private fun columns(vararg groups: List<View>): LinearLayout {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; isBaselineAligned = false }
+        groups.forEachIndexed { index, views ->
+            val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            views.forEach { column.addView(it, sectionMargin()) }
+            row.addView(column, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                if (index > 0) marginStart = dp(6)
+                if (index < groups.size - 1) marginEnd = dp(6)
+            })
+        }
+        return row
+    }
+
     private fun card() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(15), dp(13), dp(15), dp(13))
@@ -446,7 +498,7 @@ class MainActivity : Activity() {
 
     private fun label(value: String, sizeSp: Float, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
-        textSize = sizeSp
+        textSize = sizeSp * spec.textScale
         setTextColor(color)
         if (bold) setTypeface(typeface, Typeface.BOLD)
         setLineSpacing(dp(2).toFloat(), 1f)
@@ -454,7 +506,7 @@ class MainActivity : Activity() {
 
     private fun actionButton(value: String, filled: Boolean, action: () -> Unit) = Button(this).apply {
         text = value
-        textSize = 11f
+        textSize = 11f * spec.textScale
         isAllCaps = false
         setTextColor(if (filled) BG else TEXT)
         background = rounded(if (filled) AMBER else SURFACE_RAISED, dp(13), if (filled) AMBER else STROKE)

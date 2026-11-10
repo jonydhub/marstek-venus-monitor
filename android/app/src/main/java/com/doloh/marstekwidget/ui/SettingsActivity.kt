@@ -80,11 +80,7 @@ class SettingsActivity : Activity() {
         draft = store.load()
         onboarding = intent.getBooleanExtra(EXTRA_ONBOARDING, false) || !draft.configured
         val page = ui.page()
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            setBackgroundColor(Ui.BG)
-            addView(page, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        val scroll = ui.scrollCentered(page, fillViewport = true)
         build(page)
         SystemBarsInsetHelper.apply(scroll, 0, 0, 0, 0)
         setContentView(scroll)

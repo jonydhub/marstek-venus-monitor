@@ -108,10 +108,12 @@ object WidgetRenderer {
         WidgetShape.WIDE -> R.layout.widget_shape_wide
         WidgetShape.TALL -> R.layout.widget_shape_tall
         WidgetShape.LARGE -> R.layout.widget_shape_large
+        WidgetShape.XLARGE -> R.layout.widget_shape_xlarge
     }
 
     private fun lineCount(shape: WidgetShape): Int = when (shape) {
         WidgetShape.WIDE, WidgetShape.LARGE -> 4
+        WidgetShape.XLARGE -> 5
         WidgetShape.TALL -> 5
         else -> 0
     }
@@ -133,7 +135,7 @@ object WidgetRenderer {
 
         // Primary state line.
         // 4×4 has its own light block («Світло є · черга 1.1»), so its headline names only the battery state.
-        val primary = summary?.let { if (shape == WidgetShape.LARGE && snapshot?.powerOutage != null) it.batteryState else it.primary }
+        val primary = summary?.let { if (shape.isBlock && snapshot?.powerOutage != null) it.batteryState else it.primary }
             ?: noDataText(context, input.state)
         views.setTextViewText(R.id.widget_primary, primary)
         views.setTextColor(R.id.widget_primary, summary?.let { modeColor(it.mode) } ?: noDataColor(context, input.state))
@@ -155,7 +157,7 @@ object WidgetRenderer {
                 renderCapacity(views, context, snapshot, options, full = true)
                 renderLines(views, context, shape, summary, warning, input)
             }
-            WidgetShape.LARGE -> {
+            WidgetShape.LARGE, WidgetShape.XLARGE -> {
                 renderCapacity(views, context, snapshot, options, full = true)
                 renderLines(views, context, shape, summary, warning, input)
                 renderPowerBlock(views, context, snapshot, summary, input)
@@ -242,7 +244,7 @@ object WidgetRenderer {
 
     private fun renderLines(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput) {
         val options = input.options
-        val excluded = if (shape == WidgetShape.LARGE) setOf(SummaryLineKind.LIGHT, SummaryLineKind.RESERVE, SummaryLineKind.RETURN_TIME) else emptySet()
+        val excluded = if (shape.isBlock) setOf(SummaryLineKind.LIGHT, SummaryLineKind.RESERVE, SummaryLineKind.RETURN_TIME) else emptySet()
         val lines = buildList<SummaryLine> {
             val alert = input.alert
             if (alert != null) {
@@ -351,7 +353,7 @@ object WidgetRenderer {
             R.id.widget_root,
             PendingIntent.getActivity(context, widgetId * 10 + 2, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
         )
-        if (shape == WidgetShape.WIDE || shape == WidgetShape.TALL || shape == WidgetShape.LARGE) {
+        if (shape == WidgetShape.WIDE || shape == WidgetShape.TALL || shape.isBlock) {
             val configIntent = Intent(context, WidgetConfigActivity::class.java).apply { putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId) }
             views.setOnClickPendingIntent(
                 R.id.widget_settings,

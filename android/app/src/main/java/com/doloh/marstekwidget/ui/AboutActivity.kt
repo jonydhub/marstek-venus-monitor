@@ -44,10 +44,7 @@ class AboutActivity : Activity() {
         }
         page.addView(credits, ui.matchWrap(10))
 
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(Ui.BG)
-            addView(page, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        }
+        val scroll = ui.scrollCentered(page)
         SystemBarsInsetHelper.apply(scroll, 0, 0, 0, 0)
         setContentView(scroll)
     }

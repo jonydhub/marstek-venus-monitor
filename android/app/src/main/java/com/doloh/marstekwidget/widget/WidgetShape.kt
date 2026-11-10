@@ -11,9 +11,15 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
     SMALL(100f, 110f),
     WIDE(250f, 100f),
     TALL(180f, 190f),
-    LARGE(250f, 280f);
+    LARGE(250f, 280f),
+
+    /** Tablet-sized cells (≈ 6×4 and up): the LARGE block with bigger type. */
+    XLARGE(400f, 400f);
 
     val area: Float get() = minWidthDp * minHeightDp
+
+    /** The 4×4-style block (light chip + flows), at phone or tablet scale. */
+    val isBlock: Boolean get() = this == LARGE || this == XLARGE
 }
 
 object WidgetShapeSelector {

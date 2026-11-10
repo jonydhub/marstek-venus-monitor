@@ -31,7 +31,7 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 
 /**
- * adb shell am start -n com.doloh.marstekwidget/.debug.WidgetPreviewActivity --es state outage|charging|idle|soon [--es page 1|2] [--ez main true] [--ez notify true]
+ * adb shell am start -n com.doloh.marstekwidget/.debug.WidgetPreviewActivity --es state outage|charging|idle|soon [--es page 1|2|tablet] [--ez main true] [--ez notify true]
  * `notify`: saves the fixture and runs the real alert engine + notifier once (for outage it first seeds «grid was on»).
  * `--es showcase outage|charging [--ez main true]`: clean marketing render (no debug labels), fixed clock 18:30 Kyiv.
  * `--es showcase live`: the same clean 4×1 / 2×2 / 4×2 stack fed by the last real stored snapshot.
@@ -80,6 +80,9 @@ class WidgetPreviewActivity : Activity() {
         val page = intent.getStringExtra("page") ?: "1"
         val sizes = if (page == "1") {
             listOf("4x1 min" to (340 to 44), "4x1" to (340 to 72), "2x1" to (160 to 72), "2x2" to (160 to 160), "4x2" to (340 to 160))
+        } else if (page == "tablet") {
+            // Tablet launcher cells (Pixel Tablet-like): 6×1, 5×2, 3×3, 6×3 and 6×4.
+            listOf("6x1" to (640 to 90), "5x2" to (560 to 210), "3x3" to (330 to 330), "6x3" to (680 to 330), "6x4" to (700 to 470))
         } else {
             listOf("4x3" to (340 to 250), "4x4" to (340 to 340))
         }

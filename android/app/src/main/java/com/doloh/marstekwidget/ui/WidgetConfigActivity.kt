@@ -34,7 +34,7 @@ class WidgetConfigActivity : Activity() {
         }
 
         val previous = WidgetPreferences(this).options(widgetId)
-        val root = LinearLayout(this).apply {
+        val root = MaxWidthLinearLayout(this, dp(ScreenLayoutSelector.FORM_MAX_WIDTH_DP)).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(18))
             setBackgroundColor(Color.rgb(7, 21, 34))
@@ -122,8 +122,10 @@ class WidgetConfigActivity : Activity() {
             }
         }
         root.addView(save, spaced())
-        SystemBarsInsetHelper.apply(root, 20, 18, 20, 18)
-        setContentView(root)
+        // Scrollable + centered: the option list must not clip in phone landscape and stays a column on tablets.
+        val screen = Ui(this).scrollCentered(root)
+        SystemBarsInsetHelper.apply(screen, 0, 0, 0, 0)
+        setContentView(screen)
     }
 
     private fun checkbox(label: Int, checked: Boolean) = CheckBox(this).apply {

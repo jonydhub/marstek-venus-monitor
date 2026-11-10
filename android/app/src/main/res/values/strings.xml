@@ -195,5 +195,6 @@
     <string name="main_backup_today">Резерв · сьогодні</string>
     <string name="main_power_basis_measured_24h">За середнім споживанням резервного виходу за 24 год ≈ %1$d W.</string>
     <string name="main_details_title">Батарея і потоки</string>
+    <string name="main_schedule_title">Світло і графік</string>
     <string name="main_energy_moved_note">Накопичені загальні лічильники пристрою, не за день.</string>
 </resources>
