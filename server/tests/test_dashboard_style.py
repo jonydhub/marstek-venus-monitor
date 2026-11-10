@@ -56,16 +56,25 @@ class OfficialStyleDashboardTests(unittest.TestCase):
     def test_context_hero_sits_above_battery_summary(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         for marker in ('id="hero"', 'id="hero-title"', 'id="hero-sub"', 'id="hero-forecast"',
-                       'id="hero-soc"', 'id="hero-temp"', 'id="soc-sparkline"', 'id="backup-today"'):
+                       'id="today-charge"', 'id="today-discharge"', 'id="today-outage"', 'id="schedule-bar"',
+                       'id="soc-chart"', 'id="backup-today"', 'id="journal"', 'id="journal-csv"'):
             with self.subTest(marker=marker):
                 self.assertIn(marker, html)
         self.assertLess(html.index('id="hero"'), html.index('class="battery-summary"'))
         self.assertNotIn('id="power-panel"', html)  # old light card merged into hero
+        # SOC % and kWh live only in the battery card (no duplicate tiles in the hero)
+        self.assertNotIn('id="hero-soc"', html)
+        self.assertNotIn('id="hero-extra"', html)
+        self.assertEqual(html.count('ЗАПАС ЕНЕРГІЇ'), 1)
 
     def test_script_renders_hero_from_insights_without_external_libs(self):
         script = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("function renderHero", script)
-        self.assertIn("function renderSparkline", script)
+        self.assertIn("function renderSocChart", script)
+        self.assertIn("function renderScheduleBar", script)
+        self.assertIn("outage_periods", script)
+        self.assertIn("chart_events", script)
+        self.assertIn("/api/events", script)
         self.assertIn("data.insights", script)
         self.assertIn("measured_average_24h", script)
         self.assertNotIn("<script src=\"http", (ROOT / "index.html").read_text(encoding="utf-8"))
@@ -105,3 +114,13 @@ class TokenAndSourceUiTests(unittest.TestCase):
         self.assertIn('id="token-form"', html)
         self.assertNotIn("NUC", html)
         self.assertNotIn(">Львівобленерго<", html)
+
+
+class LightOnlyFromBackupOutputWebTests(unittest.TestCase):
+    def test_lost_connection_is_shown_as_no_link_not_no_light(self):
+        script = (ROOT / "app.js").read_text(encoding="utf-8")
+        self.assertIn("function lightView", script)
+        self.assertIn("Немає зв’язку з батареєю", script)
+        self.assertIn("за графіком зараз відключення", script)
+        body = script[script.index("function lightView"):script.index("function renderToday")]
+        self.assertLess(body.index("noLink"), body.index("'Світла немає'"))  # no-link wins over a cached «off»

@@ -133,7 +133,8 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
                         battery_flow, expected_load_w, fetched_at, error, measured_load_w=None,
                         provider="loe", source="loe", source_name="Львівобленерго", emergency=False,
                         region=None, source_errors=None, available=True, maybe=None, source_stale=False,
-                        source_detail=None, schedule_unavailable=False):
+                        source_detail=None, schedule_unavailable=False, backup_output_w=None, rated_wh=None,
+                        soc=None, floor_pct=None, backup_threshold_w=BACKUP_DRAW_THRESHOLD_W):
     now = now if now.tzinfo else now.replace(tzinfo=KYIV)
     current = current_end = None
     upcoming = upcoming_start = None
@@ -167,7 +168,18 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
             maybe_windows.append(_window("maybe", start, end, now))
     maybe_windows.sort(key=lambda w: w["start"])
     published = [schedule for schedule in schedules or [] if schedule]
-    autonomy = _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, current or upcoming, measured_load_w)
+    autonomy = _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, current or upcoming, measured_load_w,
+                         backup_output_w=backup_output_w, rated_wh=rated_wh, soc=soc, floor_pct=floor_pct,
+                         backup_threshold_w=backup_threshold_w)
+    midnight = datetime(now.astimezone(KYIV).year, now.astimezone(KYIV).month, now.astimezone(KYIV).day, tzinfo=KYIV)
+    bar_end = midnight + timedelta(days=2)
+    bar = [{"start": _iso(s), "end": _iso(e), "kind": "off"} for s, e in _scheduled_windows(schedules, group)
+           if e > midnight and s < bar_end]
+    for start_iso, end_iso in maybe or []:
+        start, end = _parse_dt(start_iso), _parse_dt(end_iso)
+        if start and end and end > midnight and start < bar_end:
+            bar.append({"start": _iso(start), "end": _iso(end), "kind": "maybe"})
+    bar.sort(key=lambda w: w["start"])
     return {
         "available": available,
         "provider": provider,
@@ -186,6 +198,7 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
         "schedule_dates": [schedule["date"] for schedule in published],
         "schedule_updated_at": max((s["updated_at"] for s in published if s.get("updated_at")), default=None),
         "autonomy": autonomy,
+        "windows": bar,
         "fetched_at": fetched_at,
         "error": error,
         "source_errors": source_errors or {},
@@ -194,21 +207,48 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
     }
 
 
-def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, measured_load_w=None):
-    result: dict = {"load_w": None, "load_basis": None, "stored_wh": None, "runtime_seconds": None,
-                    "outage_seconds": None, "covers_next_outage": None}
+def _finite_or_none(value):
     try:
-        stored = float(stored_wh)
+        number = float(value)
     except (TypeError, ValueError):
-        return result
-    if not math.isfinite(stored) or stored < 0:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, measured_load_w=None, *,
+              backup_output_w=None, rated_wh=None, soc=None, floor_pct=None,
+              backup_threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """Runtime on the battery = usable energy above the discharge floor / load.
+
+    usable = stored − rated × floor% (the BMS stops discharging at the floor, ~11–12 % on a Venus E).
+    Load precedence: (1) during an outage the measured backup output (ES offgrid_power, a direct reading);
+    (2) the capacity-trend discharge estimate; (3) a configured average; (4) the 24 h measured average.
+    """
+    result: dict = {"load_w": None, "load_basis": None, "stored_wh": None, "usable_wh": None, "floor_pct": None,
+                    "floor_wh": None, "runtime_seconds": None, "outage_seconds": None, "covers_next_outage": None}
+    stored = _finite_or_none(stored_wh)
+    if stored is None or stored < 0:
         return result
     result["stored_wh"] = round(stored)
+    rated = _finite_or_none(rated_wh)
+    soc_value = _finite_or_none(soc)
+    if (rated is None or rated <= 0) and soc_value and soc_value > 0:
+        rated = stored / soc_value * 100.0
+    floor = _finite_or_none(floor_pct)
+    floor_wh = None
+    if floor is not None and floor > 0 and rated and rated > 0:
+        floor_wh = rated * floor / 100.0
+        result.update({"floor_pct": round(floor, 1) if floor % 1 else int(floor), "floor_wh": round(floor_wh)})
+    usable = max(0.0, stored - (floor_wh or 0.0))
+    result["usable_wh"] = round(usable)
     flow = battery_flow or {}
     load, basis = None, None
-    measured = flow.get("power_w")
-    if grid_state == "off" and flow.get("direction") == "discharging" and measured is not None:
-        load, basis = abs(float(measured)), "measured_discharge"
+    measured = _finite_or_none(flow.get("power_w"))
+    backup = _finite_or_none(backup_output_w)
+    if grid_state == "off" and backup is not None and abs(backup) >= float(backup_threshold_w):
+        load, basis = abs(backup), "measured_backup_output"
+    elif grid_state == "off" and flow.get("direction") == "discharging" and measured is not None:
+        load, basis = abs(measured), "measured_discharge"
     elif expected_load_w is not None and float(expected_load_w) > 0:
         load, basis = float(expected_load_w), "configured_average"
     elif measured_load_w is not None and float(measured_load_w) > 0:
@@ -218,7 +258,7 @@ def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, meas
         if outage:
             result["outage_seconds"] = outage["remaining_seconds"]
         return result
-    runtime = round(stored / load * 3600)
+    runtime = round(usable / load * 3600)
     result.update({"load_w": round(load, 1), "load_basis": basis, "runtime_seconds": runtime})
     if outage:
         result["outage_seconds"] = outage["remaining_seconds"]
@@ -330,7 +370,8 @@ class OutageService:
             self.fetched_at = _iso(now.astimezone(KYIV))
             self.error = None
 
-    def status(self, *, grid_state, stored_wh, battery_flow, expected_load_w, measured_load_w=None, now=None):
+    def status(self, *, grid_state, stored_wh, battery_flow, expected_load_w, measured_load_w=None, now=None,
+               **reserve):
         with self.lock:
             data, used = self.data or {}, self.used
             fetched_at, error, source_errors = self.fetched_at, self.error, dict(self.source_errors)
@@ -343,7 +384,7 @@ class OutageService:
             source=used.name if used else None, source_name=used.label if used else None,
             emergency=bool(data.get("emergency")), region=self.region, source_errors=source_errors,
             maybe=list(data.get("maybe") or []), source_stale=bool(data.get("stale")),
-            source_detail=data.get("detail"),
+            source_detail=data.get("detail"), **reserve,
         )
 
 
@@ -358,13 +399,14 @@ class OffService:
     def refresh_if_due(self, now=None):
         return
 
-    def status(self, *, grid_state, stored_wh, battery_flow, expected_load_w, measured_load_w=None, now=None):
+    def status(self, *, grid_state, stored_wh, battery_flow, expected_load_w, measured_load_w=None, now=None,
+               **reserve):
         return build_outage_status(
             now=(now or datetime.now(KYIV)), group=None, building=None, schedules=[], accidents=[],
             grid_state=grid_state, stored_wh=stored_wh, battery_flow=battery_flow,
             expected_load_w=expected_load_w, fetched_at=None, error=None, measured_load_w=measured_load_w,
             provider="unavailable" if self.unavailable else "off", source=None, source_name=None, available=False,
-            region=self.region, schedule_unavailable=self.unavailable,
+            region=self.region, schedule_unavailable=self.unavailable, **reserve,
         )
 
 

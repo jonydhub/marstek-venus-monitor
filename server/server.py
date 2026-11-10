@@ -16,9 +16,11 @@ from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from config import ConfigError, load_env_file, load_settings, validate
+import events as journal
 from history import HistoryStore, compute_insights, measured_backup_load
 from outage import build_outage_service, detect_grid_state
 from netcache import CachedJsonClient
@@ -26,6 +28,7 @@ from regions import build_region_catalog
 from uaoutages import NOW_URL
 
 ROOT = Path(__file__).resolve().parent
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 # Optional .env-style file; real environment variables always win.
 load_env_file(os.environ.get("MARSTEK_CONFIG") or (ROOT / ".env"), os.environ)
 try:
@@ -162,6 +165,7 @@ class MarstekPoller:
         self.battery_samples = deque(maxlen=32)
         self.outage = build_outage_service(SETTINGS, ua_client=UA_OUTAGES_CLIENT)
         self.history = None  # HistoryStore, attached by __main__ so imports/tests never touch the real DB
+        self.detector = None  # events.DetectorState (journal); in memory, rebuilt after a restart
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", 0))
@@ -253,14 +257,51 @@ class MarstekPoller:
     def power_outage(self, results: dict, battery_flow: dict, measured_load_w=None) -> dict:
         energy = results.get("ES.GetStatus", {})
         battery = results.get("Bat.GetStatus", {})
-        energy_data = energy.get("data") or {}
+        energy_data = (energy.get("data") or {}) if energy.get("ok") else {}
+        bat = (battery.get("data") or {}) if battery.get("ok") else {}
+        # Light state comes ONLY from the backup-output power; no answer from the battery = unknown.
         grid_state = detect_grid_state(
             energy_data.get("offgrid_power"), energy_data.get("ongrid_power"), bool(energy.get("ok")),
             threshold_w=BACKUP_THRESHOLD_W,
         )
-        stored = (battery.get("data") or {}).get("bat_capacity") if battery.get("ok") else None
-        return self.outage.status(grid_state=grid_state, stored_wh=stored, battery_flow=battery_flow,
-                                  expected_load_w=EXPECTED_LOAD_W, measured_load_w=measured_load_w)
+        return self.outage.status(grid_state=grid_state, stored_wh=bat.get("bat_capacity"), battery_flow=battery_flow,
+                                  expected_load_w=EXPECTED_LOAD_W, measured_load_w=measured_load_w,
+                                  backup_output_w=energy_data.get("offgrid_power"),
+                                  rated_wh=bat.get("rated_capacity") or energy_data.get("bat_cap"),
+                                  soc=bat.get("soc", energy_data.get("bat_soc")),
+                                  floor_pct=SETTINGS.discharge_floor_pct, backup_threshold_w=BACKUP_THRESHOLD_W)
+
+    def journal(self, results: dict, battery_flow: dict, grid_state: str, now: float) -> list:
+        """Feed this poll into the event detector and persist new events (never breaks telemetry)."""
+        bat_r, es_r = results.get("Bat.GetStatus", {}), results.get("ES.GetStatus", {})
+        bat = (bat_r.get("data") or {}) if bat_r.get("ok") else {}
+        es = (es_r.get("data") or {}) if es_r.get("ok") else {}
+        soc = _optional_float(bat.get("soc", es.get("bat_soc")))
+        obs = journal.Observation(
+            ok=bool(bat_r.get("ok") or es_r.get("ok")), grid_state=grid_state,
+            direction=battery_flow.get("direction") or "unknown",
+            battery_w=_optional_float(battery_flow.get("power_w")) if battery_flow.get("available") else None,
+            backup_w=_optional_float(es.get("offgrid_power")), soc=None if soc is None else int(round(soc)),
+            temp_c=_optional_float(bat.get("bat_temp")))
+        new_events, self.detector = journal.step(self.detector, obs, now, SETTINGS.anomaly_discharge_w)
+        if self.history is not None:
+            for event in new_events:
+                try:
+                    self.history.record_event(event)
+                except Exception as exc:
+                    logging.warning("event write failed: %s", exc)
+        return new_events
+
+    def chart_events(self, now: float) -> list:
+        if self.history is None:
+            return []
+        try:
+            rows = self.history.events(limit=200, since=now - HISTORY_WINDOW_SECONDS)
+        except Exception as exc:
+            logging.warning("event read failed: %s", exc)
+            return []
+        wanted = ("light_lost", "light_returned", "charging_started", "charged_full")
+        return [{"t": event_time(e["ts"]), "kind": e["kind"]} for e in reversed(rows) if e["kind"] in wanted]
 
     def poll_once(self):
         results = {}
@@ -277,8 +318,13 @@ class MarstekPoller:
         power_outage = self.power_outage(results, battery_flow, measured_backup_load(rows, now=now))
         es = (results.get("ES.GetStatus", {}).get("data") or {}) if results.get("ES.GetStatus", {}).get("ok") else {}
         bat = (results.get("Bat.GetStatus", {}).get("data") or {}) if results.get("Bat.GetStatus", {}).get("ok") else {}
+        self.journal(results, battery_flow, power_outage.get("grid_state", "unknown"), now)
         insights = compute_insights(rows, now=now, current_offgrid_w=es.get("offgrid_power"),
-                                    temperature_c=bat.get("bat_temp"))
+                                    temperature_c=bat.get("bat_temp"), threshold_w=BACKUP_THRESHOLD_W,
+                                    chart_events=self.chart_events(now))
+        detector = self.detector
+        connection = {"ok": bool(bat or es), "consecutive_failures": detector.failures if detector else 0,
+                      "lost": bool(detector and detector.connection_lost)}
         with self.lock:
             self.data = {
                 "device": {"model": "VenusE 3.0", "ip": HOST, "udp_port": PORT},
@@ -288,6 +334,7 @@ class MarstekPoller:
                 "battery_flow": battery_flow,
                 "power_outage": power_outage,
                 "insights": insights,
+                "connection": connection,
             }
 
     def wait(self, seconds) -> None:
@@ -324,6 +371,23 @@ class MarstekPoller:
     def snapshot(self):
         with self.lock:
             return json.loads(json.dumps(self.data))
+
+def event_time(ts) -> str:
+    return datetime.fromtimestamp(round(float(ts)), timezone.utc).astimezone(KYIV_TZ).isoformat(timespec="seconds")
+
+
+def events_payload(query: str) -> dict:
+    params = parse_qs(query or "")
+    try:
+        limit = int((params.get("limit") or ["200"])[0])
+    except ValueError:
+        limit = 200
+    category = (params.get("category") or [None])[0]
+    if category not in (None, "light", "battery", "connection", "anomaly"):
+        category = None
+    rows = poller.history.events(limit=limit, category=category) if poller.history is not None else []
+    return {"events": [{**row, "ts": event_time(row["ts"])} for row in rows]}
+
 
 def regions_catalog():
     """Canonical regions; live queue lists from ua-outages when reachable, else the static table."""
@@ -420,7 +484,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode()
         return self.send_bytes(status, body, "application/json; charset=utf-8", headers)
 
-    def handle_api(self, path):
+    def handle_api(self, path, query=""):
         allowed, retry_after = RATE_LIMITER.allow(self.client_address[0])
         if not allowed:
             return self.send_json(429, {"error": "rate_limited"}, {"Retry-After": str(retry_after)})
@@ -428,6 +492,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(401, {"error": "unauthorized"}, {"WWW-Authenticate": 'Bearer realm="marstek"'})
         if path == "/api/status":
             return self.send_json(200, poller.snapshot())
+        if path == "/api/events":
+            try:
+                return self.send_json(200, events_payload(query))
+            except Exception as exc:
+                logging.warning("events read failed: %s", exc)
+                return self.send_json(500, {"error": "events_unavailable"})
         if path == "/api/regions":
             try:
                 regions = regions_catalog()
@@ -438,9 +508,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(404, {"error": "not_found"})
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path.startswith("/api/"):
-            return self.handle_api(path)
+            return self.handle_api(path, parsed.query)
         if path == "/health":
             return self.send_json(200, poller.health())
         files = {

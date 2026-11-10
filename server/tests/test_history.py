@@ -84,6 +84,9 @@ class InsightsTests(unittest.TestCase):
             "backup_energy_today_wh": None,
             "temperature_c": 26.0,
             "soc_history": [],
+            "today": {"charge_seconds": 0, "discharge_seconds": 0, "outage_seconds": 0},
+            "outage_periods": [],
+            "chart_events": [],
         })
 
     def test_time_weighted_average_needs_one_hour_coverage(self):
@@ -185,7 +188,8 @@ class PollerInsightsTests(unittest.TestCase):
             store.close()
         insights = poller.snapshot()["insights"]
         self.assertEqual(set(insights), {"backup_output_w", "backup_avg_w_24h", "backup_avg_coverage_hours",
-                                         "backup_energy_today_wh", "temperature_c", "soc_history"})
+                                         "backup_energy_today_wh", "temperature_c", "soc_history",
+                                         "today", "outage_periods", "chart_events"})
         self.assertEqual(insights["backup_output_w"], 0.0)
         self.assertEqual(insights["temperature_c"], 24.0)
         self.assertEqual(len(rows), 1)

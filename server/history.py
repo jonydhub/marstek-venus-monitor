@@ -22,6 +22,8 @@ BACKUP_DRAW_THRESHOLD_W = 5.0
 SOC_BUCKET_SECONDS = 1800
 SOC_MAX_POINTS = 48
 COLUMNS = ("ts", "soc", "bat_wh", "flow_w", "flow_dir", "offgrid_w", "ongrid_w", "temp_c")
+EVENT_RETENTION_SECONDS = 30 * 86400
+EVENT_COLUMNS = ("ts", "kind", "category", "text", "value")
 
 
 class HistoryStore:
@@ -38,6 +40,11 @@ class HistoryStore:
             "CREATE TABLE IF NOT EXISTS samples (ts REAL PRIMARY KEY, soc INTEGER, bat_wh REAL, flow_w REAL,"
             " flow_dir TEXT, offgrid_w REAL, ongrid_w REAL, temp_c REAL) WITHOUT ROWID"
         )
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL,"
+            " kind TEXT NOT NULL, category TEXT NOT NULL, text TEXT NOT NULL, value REAL)"
+        )
+        self.conn.execute("CREATE INDEX IF NOT EXISTS events_ts ON events (ts)")
 
     def record(self, sample: dict):
         values = tuple(sample.get(name) for name in COLUMNS)
@@ -51,6 +58,29 @@ class HistoryStore:
     def prune(self, now):
         with self.lock:
             self.conn.execute("DELETE FROM samples WHERE ts < ?", (now - self.retention_seconds,))
+            self.conn.execute("DELETE FROM events WHERE ts < ?", (now - EVENT_RETENTION_SECONDS,))
+
+    def record_event(self, event: dict):
+        values = tuple(event.get(name) for name in EVENT_COLUMNS)
+        with self.lock:
+            self.conn.execute(f"INSERT INTO events ({','.join(EVENT_COLUMNS)}) VALUES (?,?,?,?,?)", values)
+
+    def events(self, limit=200, category=None, since=None):
+        """Newest first. `category`: light / battery / connection / anomaly."""
+        query = f"SELECT {','.join(EVENT_COLUMNS)} FROM events"
+        where, args = [], []
+        if category:
+            where.append("category = ?")
+            args.append(category)
+        if since is not None:
+            where.append("ts >= ?")
+            args.append(float(since))
+        if where:
+            query += " WHERE " + " AND ".join(where)
+        query += " ORDER BY ts DESC, id DESC LIMIT ?"
+        args.append(max(1, min(1000, int(limit))))
+        with self.lock:
+            return [dict(zip(EVENT_COLUMNS, values)) for values in self.conn.execute(query, args).fetchall()]
 
     def since(self, start_ts):
         with self.lock:
@@ -122,7 +152,55 @@ def _soc_history(rows, now):
             for t, soc in points]
 
 
-def compute_insights(rows, *, now, current_offgrid_w, temperature_c):
+def _state_intervals(rows, start_ts, now):
+    """(t0, t1, row0) for consecutive samples ≤ MAX_GAP apart, clipped to [start_ts, now]. State = earlier sample."""
+    points = sorted((r for r in rows if r.get("ts") is not None), key=lambda r: r["ts"])
+    for a, b in zip(points, points[1:]):
+        t0, t1 = a["ts"], b["ts"]
+        if not 0 < t1 - t0 <= MAX_GAP_SECONDS:
+            continue
+        t0, t1 = max(t0, start_ts), min(t1, now)
+        if t1 > t0:
+            yield t0, t1, a
+
+
+def _is_outage(row, threshold_w):
+    value = _finite(row.get("offgrid_w"))
+    return value is not None and abs(value) >= threshold_w
+
+
+def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """Seconds since local midnight spent charging / discharging / without grid (backup output drawing).
+
+    Gaps longer than MAX_GAP_SECONDS (no samples) count as no state at all."""
+    charge = discharge = outage = 0.0
+    for t0, t1, sample in _state_intervals(rows, _local_midnight(now), now):
+        span = t1 - t0
+        if sample.get("flow_dir") == "charging":
+            charge += span
+        elif sample.get("flow_dir") == "discharging":
+            discharge += span
+        if _is_outage(sample, threshold_w):
+            outage += span
+    return {"charge_seconds": round(charge), "discharge_seconds": round(discharge), "outage_seconds": round(outage)}
+
+
+def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """Backup-output draw periods over the last 24 h as [{start, end}] (ISO, Kyiv); gaps split periods."""
+    periods = []
+    for t0, t1, sample in _state_intervals(rows, now - WINDOW_SECONDS, now):
+        if not _is_outage(sample, threshold_w):
+            continue
+        if periods and abs(periods[-1][1] - t0) < 1e-6:
+            periods[-1][1] = t1
+        else:
+            periods.append([t0, t1])
+    iso = lambda t: datetime.fromtimestamp(round(t), KYIV).isoformat(timespec="seconds")  # noqa: E731
+    return [{"start": iso(a), "end": iso(b)} for a, b in periods if b - a >= 60]
+
+
+def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+                     chart_events=None):
     energy_ws, covered = _integral(_intervals(rows, now - WINDOW_SECONDS))
     average = round(energy_ws / covered, 1) if covered >= MIN_AVG_COVERAGE_SECONDS else None
     today = list(_intervals(rows, _local_midnight(now)))
@@ -136,4 +214,7 @@ def compute_insights(rows, *, now, current_offgrid_w, temperature_c):
         "backup_energy_today_wh": round(today_ws / 3600.0, 1) if today else None,
         "temperature_c": None if temp is None else float(temp),
         "soc_history": _soc_history(rows, now),
+        "today": today_durations(rows, now=now, threshold_w=threshold_w),
+        "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w),
+        "chart_events": list(chart_events or []),
     }

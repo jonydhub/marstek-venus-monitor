@@ -63,6 +63,8 @@ class Settings:
     backup_threshold_w: float
     expected_load_w: float | None
     history_db: str
+    discharge_floor_pct: float = 11.0
+    anomaly_discharge_w: float = 2000.0
 
 
 def _text(env, key, default=""):
@@ -112,6 +114,8 @@ def load_settings(env, default_history_db="data/history.db") -> Settings:
         backup_threshold_w=_float(env, "MARSTEK_BACKUP_THRESHOLD_W", 5.0),
         expected_load_w=expected if expected and expected > 0 else None,
         history_db=_text(env, "MARSTEK_HISTORY_DB") or default_history_db,
+        discharge_floor_pct=_float(env, "MARSTEK_DISCHARGE_FLOOR_PCT", 11.0),
+        anomaly_discharge_w=_float(env, "MARSTEK_ANOMALY_DISCHARGE_W", 2000.0),
     )
 
 
@@ -125,6 +129,10 @@ def validate(settings: Settings) -> list[str]:
         errors.append("MARSTEK_PORT must be 1..65535")
     if not 0 < settings.http_port < 65536:
         errors.append("MARSTEK_DASHBOARD_PORT must be 1..65535")
+    if not 0 <= settings.discharge_floor_pct <= 50:
+        errors.append("MARSTEK_DISCHARGE_FLOOR_PCT must be 0..50 (Venus E stops discharging at ~11-12 %)")
+    if not 200 <= settings.anomaly_discharge_w <= 10000:
+        errors.append("MARSTEK_ANOMALY_DISCHARGE_W must be 200..10000")
     if settings.rate_limit_per_minute < 1:
         errors.append("MARSTEK_RATE_LIMIT_PER_MIN must be >= 1")
     if settings.outage_provider not in PROVIDERS:

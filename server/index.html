@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=8">
+  <link rel="stylesheet" href="/style.css?v=9">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -36,20 +36,25 @@
     <section class="hero" id="hero" data-state="unknown" aria-label="Світло, запас і заряд зараз" aria-live="polite">
       <div class="flow-heading"><p class="eyebrow">СВІТЛО · ЧЕРГА <span id="outage-group">—</span></p><span class="tag" id="outage-source">—</span></div>
       <h2 id="hero-title" class="hero-title">Перевіряю…</h2>
-      <p id="hero-sub" class="hero-sub">—</p>
       <p id="hero-forecast" class="hero-forecast">—</p>
-      <div class="hero-stats">
-        <div><span>Заряд</span><b id="hero-soc">—</b></div>
-        <div><span>Температура</span><b id="hero-temp">—</b></div>
-        <div><span id="hero-extra-label">Запас</span><b id="hero-extra">—</b></div>
+      <p id="hero-sub" class="hero-sub">—</p>
+      <div class="today-tiles" aria-label="Сьогодні з 00:00">
+        <div><b id="today-charge">—</b><span>Заряд</span></div>
+        <div><b id="today-discharge">—</b><span>Розряд</span></div>
+        <div class="outage"><b id="today-outage">—</b><span>Без світла</span></div>
+      </div>
+      <div class="schedule-block">
+        <div class="spark-head"><span id="schedule-caption">Сьогодні і завтра</span><span id="schedule-legend"><i class="lg-off"></i>відключення <i class="lg-maybe"></i>можливе</span></div>
+        <div id="schedule-bar" class="schedule-bar" role="img" aria-label="Графік відключень на сьогодні і завтра"></div>
+        <div class="schedule-axis"><span>0</span><span>12</span><span>0</span><span>12</span><span>24</span></div>
       </div>
       <div class="hero-spark">
         <div class="spark-head"><span>Заряд за 24 год</span><span id="spark-range">—</span></div>
-        <svg id="soc-sparkline" class="sparkline" viewBox="0 0 300 64" preserveAspectRatio="none" role="img" aria-label="Графік заряду за 24 години"></svg>
-        <div class="spark-axis"><span>−24 год</span><span>−12 год</span><span>зараз</span></div>
+        <svg id="soc-chart" class="soc-chart" viewBox="0 0 320 150" role="img" aria-label="Графік заряду за 24 години з періодами без світла"></svg>
+        <div class="chart-legend"><span><i class="lg-outage"></i>без світла</span><span><i class="lg-floor"></i>резерв розряду</span><span class="mk">● світло зникло · ○ повернулось · ⚡ заряд</span></div>
       </div>
       <div class="hero-foot"><span>Резервний вихід сьогодні</span><b id="backup-today">—</b></div>
-      <p class="flow-footnote" id="hero-note">Стан мережі визначається за резервним виходом Venus (якщо до нього щось підключено).</p>
+      <p class="flow-footnote" id="hero-note">Світло є / нема визначається лише за потужністю на резервному виході Venus.</p>
     </section>
 
     <section class="battery-summary" aria-label="Заряд і запас енергії батареї">
@@ -93,9 +98,9 @@
 
     <section class="eta-grid" aria-label="Оцінка часу заряджання та розряджання">
       <article class="eta-card eta-charge-card"><span class="eta-label">До повного заряду</span><strong id="charge-eta">—</strong><small id="charge-eta-note">Очікую стабільний потік</small></article>
-      <article class="eta-card eta-discharge-card"><span class="eta-label">До 0%*</span><strong id="discharge-eta">—</strong><small id="discharge-eta-note">Очікую стабільний потік</small></article>
+      <article class="eta-card eta-discharge-card"><span class="eta-label" id="discharge-eta-label">До резерву*</span><strong id="discharge-eta">—</strong><small id="discharge-eta-note">Очікую стабільний потік</small></article>
     </section>
-    <p class="notice eta-note">ETA усереднюється за вимірами до 5 хв. Час до 0% теоретичний і не враховує резерв/DOD.</p>
+    <p class="notice eta-note">ETA усереднюється за вимірами до 5 хв. *Розряд рахується до резерву (поріг розряду BMS, MARSTEK_DISCHARGE_FLOOR_PCT), не до 0%.</p>
 
     <section class="energy-cards" aria-label="Накопичена енергія">
       <article class="energy-total"><div><span class="eyebrow">НАКОПИЧЕНА ЕНЕРГІЯ</span><h2>Лічильники пристрою</h2></div></article>
@@ -107,6 +112,15 @@
     <section class="status-strip" aria-label="Додатковий стан">
       <div><span>CT лічильник</span><b id="ct-state">—</b></div>
       <div><span>Режим роботи</span><b id="mode">—</b></div>
+    </section>
+
+    <section class="journal" id="journal" aria-label="Журнал подій">
+      <div class="flow-heading"><div><p class="eyebrow">ЖУРНАЛ ПОДІЙ · 30 ДНІВ</p><h2>Світло, зв'язок, аномалії</h2></div><button id="journal-csv" class="install-button" type="button">CSV</button></div>
+      <div class="journal-filter" role="group" aria-label="Фільтр журналу">
+        <button type="button" data-filter="" class="active">Все</button><button type="button" data-filter="anomaly">Аномалії</button><button type="button" data-filter="connection">Зв'язок</button><button type="button" data-filter="light">Світло</button>
+      </div>
+      <ol id="journal-list" class="journal-list"><li class="journal-empty">Подій ще немає</li></ol>
+      <p class="flow-footnote">Аномалії: розрядка вище порогу (MARSTEK_ANOMALY_DISCHARGE_W), розряд при наявності мережі, висока температура. Зв'язок втрачено = 3 опитування поспіль без відповіді; це не «світла нема».</p>
     </section>
 
     <details class="diagnostics">

@@ -98,6 +98,16 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.loe_city_id, 5)
         self.assertEqual(validate(settings), [])
 
+    def test_reserve_floor_and_anomaly_threshold_defaults_and_bounds(self):
+        settings = load_settings({"MARSTEK_HOST": "h"})
+        self.assertEqual(settings.discharge_floor_pct, 11.0)
+        self.assertEqual(settings.anomaly_discharge_w, 2000.0)
+        self.assertEqual(validate(settings), [])
+        bad = load_settings({"MARSTEK_HOST": "h", "MARSTEK_DISCHARGE_FLOOR_PCT": "70", "MARSTEK_ANOMALY_DISCHARGE_W": "50"})
+        errors = " ".join(validate(bad))
+        self.assertIn("MARSTEK_DISCHARGE_FLOOR_PCT", errors)
+        self.assertIn("MARSTEK_ANOMALY_DISCHARGE_W", errors)
+
     def test_bad_numbers_raise_config_error(self):
         with self.assertRaises(ConfigError):
             load_settings({"MARSTEK_DASHBOARD_PORT": "abc"})

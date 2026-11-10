@@ -131,7 +131,7 @@ function renderBatteryFlow(flow = {}) {
     set('charge-eta', 'Не заряджається');
     set('charge-eta-note', 'Зараз є розрядний потік');
     set('discharge-eta', formatDuration(flow.discharge_eta_seconds));
-    set('discharge-eta-note', 'Теоретично до 0%, без резерву');
+    set('discharge-eta-note', 'До резерву розряду (оцінка)');
   } else {
     set('battery-flow-power', '≈ 0,00 кВт');
     set('battery-flow-state', 'Батарея ↔ Venus E · очікування');
@@ -171,92 +171,162 @@ function outageWindowText(outage) {
   return outage.schedule_published ? 'Відключень для черги не заплановано' : 'Графік не опубліковано';
 }
 function autonomyBasisText(a) {
-  if (a.load_basis === 'measured_average_24h') return `при середньому споживанні ${Math.round(a.load_w)} W (за 24 год)`;
-  if (a.load_basis === 'configured_average') return `при заданому споживанні ${Math.round(a.load_w)} W`;
-  if (a.load_basis === 'measured_discharge') return `при поточному розряді ≈ ${Math.round(a.load_w)} W`;
+  if (a.load_basis === 'measured_backup_output') return `при поточному навантаженні ${Math.round(a.load_w)} Вт (вимір резервного виходу)`;
+  if (a.load_basis === 'measured_average_24h') return `при середньому споживанні ${Math.round(a.load_w)} Вт (за 24 год)`;
+  if (a.load_basis === 'configured_average') return `при заданому споживанні ${Math.round(a.load_w)} Вт`;
+  if (a.load_basis === 'measured_discharge') return `при поточному розряді ≈ ${Math.round(a.load_w)} Вт (оцінка)`;
   return '';
 }
-function renderSparkline(points = []) {
-  const svg = $('soc-sparkline'); if (!svg) return;
-  const ns = 'http://www.w3.org/2000/svg';
-  svg.replaceChildren();
-  for (const level of [25, 50, 75]) {
-    const grid = document.createElementNS(ns, 'line');
-    const y = 62 - level / 100 * 60;
-    grid.setAttribute('x1', '0'); grid.setAttribute('x2', '300'); grid.setAttribute('y1', String(y)); grid.setAttribute('y2', String(y));
-    grid.setAttribute('class', 'spark-grid'); svg.append(grid);
+function shortDuration(seconds) {
+  const s = finiteOrNull(seconds);
+  if (s === null) return '—';
+  const total = Math.round(s / 60), h = Math.floor(total / 60), m = total % 60;
+  return h ? `${h}г ${m}хв` : `${m}хв`;
+}
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(name, attrs = {}, text) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function floorPct(outage) { return finiteOrNull(outage?.autonomy?.floor_pct); }
+/** Light state for the hero: ONLY from the backup output; a lost connection is never «світла нема». */
+function lightView(data, fetchFailed) {
+  const outage = data?.power_outage || {}, methods = data?.methods || {};
+  const collected = data?.collected_at ? Date.parse(data.collected_at) : NaN;
+  const interval = Number(data?.poll_interval_seconds) || 30;
+  const stale = !Number.isFinite(collected) || Date.now() - collected > Math.max(180, interval * 6) * 1000;
+  const noLink = fetchFailed || data?.connection?.lost || !methods['ES.GetStatus']?.ok || stale;
+  const cur = outage.current_outage, now = Date.now();
+  const scheduledNow = Boolean(cur && Date.parse(cur.start) <= now && Date.parse(cur.end) > now);
+  if (noLink) return {state: 'nolink', title: 'Немає зв’язку з батареєю', hint: scheduledNow ? 'за графіком зараз відключення' : null};
+  if (outage.grid_state === 'off') return {state: 'off', title: 'Світла немає', hint: null};
+  if (outage.grid_state === 'on') return {state: 'on', title: 'Світло є', hint: null};
+  return {state: 'unknown', title: 'Світло: —', hint: null};
+}
+function renderToday(today = {}) {
+  set('today-charge', shortDuration(today.charge_seconds));
+  set('today-discharge', shortDuration(today.discharge_seconds));
+  set('today-outage', shortDuration(today.outage_seconds));
+}
+function kyivMidnight(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).formatToParts(now).map(p => [p.type, p.value]));
+  const sinceMidnight = (Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second)) * 1000;
+  return now.getTime() - sinceMidnight - now.getMilliseconds();
+}
+function renderScheduleBar(outage = {}) {
+  const bar = $('schedule-bar'); if (!bar) return;
+  bar.replaceChildren();
+  const start = kyivMidnight(), span = 48 * 3600 * 1000;
+  const frac = t => Math.max(0, Math.min(1, (t - start) / span));
+  for (const w of outage.windows || []) {
+    const a = frac(Date.parse(w.start)), b = frac(Date.parse(w.end));
+    if (!(b > a)) continue;
+    const seg = document.createElement('i');
+    seg.className = w.kind === 'maybe' ? 'seg maybe' : 'seg off';
+    seg.style.left = `${(a * 100).toFixed(2)}%`; seg.style.width = `${((b - a) * 100).toFixed(2)}%`;
+    bar.append(seg);
   }
-  const clean = points.map(p => ({t: Date.parse(p.t), soc: finiteOrNull(p.soc)})).filter(p => Number.isFinite(p.t) && p.soc !== null);
+  const mid = document.createElement('i'); mid.className = 'midnight'; bar.append(mid);
+  const marker = document.createElement('i'); marker.className = 'now'; marker.style.left = `${(frac(Date.now()) * 100).toFixed(2)}%`; bar.append(marker);
+  const hasWindows = (outage.windows || []).length > 0;
+  set('schedule-caption', `Сьогодні і завтра${outage.group ? ` · черга ${outage.group}` : ''}${!outage.available ? ' · графік вимкнено' : (!hasWindows && !outage.schedule_published ? ' · графік не опубліковано' : '')}`);
+}
+const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світло зникло'}, light_returned: {label: '○', cls: 'ev-back', title: 'Світло повернулось'},
+  charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'}};
+function renderSocChart(insights = {}, outage = {}) {
+  const svg = $('soc-chart'); if (!svg) return;
+  svg.replaceChildren();
+  const W = 320, H = 150, L = 4, R = 286, T = 10, B = 132;
+  const end = Date.now(), start = end - 24 * 3600 * 1000;
+  const x = t => L + Math.max(0, Math.min(1, (t - start) / (end - start))) * (R - L);
+  const y = soc => B - Math.max(0, Math.min(100, soc)) / 100 * (B - T);
+  for (const p of insights.outage_periods || []) {
+    const a = x(Date.parse(p.start)), b = x(Date.parse(p.end));
+    if (b - a > 0.3) svg.append(svgEl('rect', {x: a.toFixed(1), y: T, width: (b - a).toFixed(1), height: B - T, class: 'chart-outage'}));
+  }
+  for (const level of [25, 50, 75, 100]) {
+    svg.append(svgEl('line', {x1: L, x2: R, y1: y(level), y2: y(level), class: 'spark-grid'}));
+    svg.append(svgEl('text', {x: R + 4, y: y(level) + 3.5, class: 'chart-label'}, `${level}%`));
+  }
+  const floor = floorPct(outage);
+  if (floor !== null) {
+    svg.append(svgEl('line', {x1: L, x2: R, y1: y(floor), y2: y(floor), class: 'chart-floor'}));
+    svg.append(svgEl('text', {x: R + 4, y: y(floor) + 3.5, class: 'chart-label floor'}, `${Math.round(floor)}%`));
+  }
+  for (const [i, label] of ['−24 год', '−12 год', 'зараз'].entries()) {
+    svg.append(svgEl('text', {x: L + i * (R - L) / 2, y: H - 3, class: 'chart-label', 'text-anchor': i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}, label));
+  }
+  const clean = (insights.soc_history || []).map(p => ({t: Date.parse(p.t), soc: finiteOrNull(p.soc)})).filter(p => Number.isFinite(p.t) && p.soc !== null);
   if (clean.length < 2) {
     set('spark-range', clean.length ? `${Math.round(clean[0].soc)}% · історія збирається` : 'Історія збирається');
     return;
   }
-  const end = Date.now(), start = end - 24 * 3600 * 1000;
-  const x = t => Math.max(0, Math.min(300, (t - start) / (end - start) * 300));
-  const y = soc => 62 - Math.max(0, Math.min(100, soc)) / 100 * 60;
   const coords = clean.map(p => `${x(p.t).toFixed(1)},${y(p.soc).toFixed(1)}`);
-  const area = document.createElementNS(ns, 'path');
-  area.setAttribute('d', `M${x(clean[0].t).toFixed(1)},62 L${coords.join(' L')} L${x(clean[clean.length - 1].t).toFixed(1)},62 Z`);
-  area.setAttribute('class', 'spark-area');
-  const line = document.createElementNS(ns, 'polyline');
-  line.setAttribute('points', coords.join(' ')); line.setAttribute('class', 'spark-line');
-  line.setAttribute('vector-effect', 'non-scaling-stroke');
-  svg.append(area, line);
+  svg.append(svgEl('path', {d: `M${x(clean[0].t).toFixed(1)},${B} L${coords.join(' L')} L${x(clean[clean.length - 1].t).toFixed(1)},${B} Z`, class: 'spark-area'}));
+  svg.append(svgEl('polyline', {points: coords.join(' '), class: 'spark-line'}));
+  const last = clean[clean.length - 1];
+  svg.append(svgEl('circle', {cx: x(last.t).toFixed(1), cy: y(last.soc).toFixed(1), r: 3.5, class: 'chart-now'}));
+  const socAt = t => { let best = clean[0]; for (const p of clean) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p; return best.soc; };
+  for (const ev of insights.chart_events || []) {
+    const mark = EVENT_MARK[ev.kind]; const t = Date.parse(ev.t);
+    if (!mark || !Number.isFinite(t) || t < start) continue;
+    const g = svgEl('g', {class: `chart-event ${mark.cls}`});
+    g.append(svgEl('line', {x1: x(t), x2: x(t), y1: T, y2: B, class: 'chart-event-line'}));
+    const cy = Math.max(T + 6, y(socAt(t)) - 9);
+    g.append(svgEl('circle', {cx: x(t), cy, r: 6}));
+    g.append(svgEl('text', {x: x(t), y: cy + 3, 'text-anchor': 'middle'}, mark.label));
+    g.append(svgEl('title', {}, `${mark.title} · ${formatClock(ev.t)}`));
+    svg.append(g);
+  }
   const socs = clean.map(p => p.soc);
   set('spark-range', `${Math.round(Math.min(...socs))}–${Math.round(Math.max(...socs))}%`);
 }
-function renderHero(data, bat, socValue) {
+function renderHero(data, bat, socValue, fetchFailed = false) {
   const hero = $('hero'); if (!hero) return;
   const outage = data.power_outage || {}, insights = data.insights || {}, flow = data.battery_flow || {};
   const a = outage.autonomy || {};
   const soc = finiteOrNull(socValue);
+  const light = lightView(data, fetchFailed);
   set('outage-group', outage.group);
   set('outage-source', outageSourceText(outage));
-  set('hero-soc', soc === null ? '—' : `${Math.round(soc)}%`);
-  const temp = finiteOrNull(insights.temperature_c);
-  set('hero-temp', temp === null ? '—' : `${temp.toLocaleString('uk-UA', {maximumFractionDigits:1})} °C`);
   set('backup-today', formatKwh(insights.backup_energy_today_wh));
-  renderSparkline(insights.soc_history || []);
+  renderToday(insights.today || {});
+  renderScheduleBar(outage);
+  renderSocChart(insights, outage);
   const runtime = finiteOrNull(a.runtime_seconds);
+  const floor = floorPct(outage);
+  const floorText = floor !== null ? `понад резерв ${Math.round(floor)}%` : 'до 0%';
   const err = outage.error && outage.error !== 'not_fetched_yet' ? ` Графік не оновився (${outage.error}).` : '';
-  let state = 'unknown';
-  if (outage.grid_state === 'off') {
-    state = 'off';
-    set('hero-title', `Світла нема · від батареї ${watts(insights.backup_output_w)}`);
+  set('hero-title', light.title);
+  const forecast = $('hero-forecast');
+  forecast.className = 'hero-forecast';
+  if (light.state === 'nolink') {
+    set('hero-forecast', 'Стан світла невідомий');
+    set('hero-sub', light.hint ? `${light.hint} · ${outageWindowText(outage)}` : outageWindowText(outage));
+    set('hero-note', `Світло визначається лише за потужністю на резервному виході батареї. Без відповіді батареї стан невідомий — це не означає, що світла немає.${err}`);
+  } else if (light.state === 'off') {
     const current = outage.current_outage;
-    set('hero-sub', current?.end ? `Світло повернуть о ${formatClock(current.end)}${current.kind === 'schedule' ? ' (за графіком)' : ''}` : 'Світло повернуть: невідомо');
-    const verdict = a.covers_next_outage === true ? 'Запасу вистачить' : a.covers_next_outage === false ? 'Запасу не вистачить' : 'Запас';
-    set('hero-forecast', runtime === null ? 'Прогноз запасу: збираю виміри розряду…' : `${verdict} · ≈ ${formatDuration(runtime)} до 0% (оцінка)`);
-    set('hero-extra-label', 'До 0% (оцінка)'); set('hero-extra', runtime === null ? '—' : formatDuration(runtime));
-    set('hero-note', `Потужність — вимір резервного виходу; час — оцінка${autonomyBasisText(a) ? ` ${autonomyBasisText(a)}` : ''}, без резерву/DOD.${err}`);
-  } else if (flow.available && flow.direction === 'charging') {
-    state = 'charging';
-    set('hero-title', `Заряджається · +${watts(flow.power_w)} (оцінка)`);
-    set('hero-sub', `До 100% · ${formatDuration(flow.charge_eta_seconds)}`);
-    set('hero-forecast', outageWindowText(outage));
-    set('hero-extra-label', 'Запас'); set('hero-extra', formatKwh(bat.bat_capacity));
-    set('hero-note', `Потужність і час — оцінка за трендом ємності (до 5 хв).${err}`);
-  } else if (outage.grid_state === 'on') {
-    state = 'on';
-    set('hero-title', outage.current_outage ? 'Світло є (за графіком мало б не бути)' : 'Світло є');
-    set('hero-sub', outageWindowText(outage));
-    set('hero-forecast', runtime === null
-      ? 'Запас: прогноз з’явиться після першого відключення (споживання міряється на резервному виході)'
-      : `Запасу на ≈ ${formatDuration(runtime)} ${autonomyBasisText(a)}`);
-    if (flow.available && flow.direction === 'discharging') {
-      set('hero-extra-label', 'До 0% (оцінка)'); set('hero-extra', formatDuration(flow.discharge_eta_seconds));
-    } else {
-      set('hero-extra-label', 'Запас'); set('hero-extra', formatKwh(bat.bat_capacity));
-    }
-    set('hero-note', `Час — оцінка до 0%, без резерву/DOD. Стан мережі — за резервним виходом Venus.${err}`);
+    const covers = a.covers_next_outage;
+    if (runtime === null) set('hero-forecast', 'Запас: збираю виміри навантаження…');
+    else if (covers === false) { set('hero-forecast', `Вистачить лише на ${formatDuration(runtime)}`); forecast.classList.add('bad'); }
+    else { set('hero-forecast', `Вистачить на ${formatDuration(runtime)}`); forecast.classList.add('good'); }
+    const parts = [finiteOrNull(insights.backup_output_w) !== null ? `${Math.round(Math.abs(insights.backup_output_w))} Вт` : null,
+      current?.end ? `світло о ${formatClock(current.end)}${current.kind === 'schedule' ? ' (за графіком)' : ''}` : 'час повернення невідомий'];
+    set('hero-sub', parts.filter(Boolean).join(' · '));
+    set('hero-note', `Час — енергія ${floorText} ${autonomyBasisText(a)}.${err}`);
   } else {
-    set('hero-title', 'Стан мережі невідомий');
+    if (flow.available && flow.direction === 'charging') set('hero-forecast', `Заряджається · до 100% ≈ ${formatDuration(flow.charge_eta_seconds)}`);
+    else if (soc !== null && soc >= 99 && (!flow.available || flow.direction === 'idle')) set('hero-forecast', 'Заряджено');
+    else if (runtime !== null) set('hero-forecast', `Запасу на ${formatDuration(runtime)}`);
+    else set('hero-forecast', flow.direction === 'discharging' ? 'Розряджається' : 'Очікування');
     set('hero-sub', outageWindowText(outage));
-    set('hero-forecast', '—');
-    set('hero-extra-label', 'Запас'); set('hero-extra', formatKwh(bat.bat_capacity));
-    set('hero-note', `Немає свіжих даних від Venus.${err}`);
+    set('hero-note', runtime === null
+      ? `Прогноз запасу з’явиться після першого відключення (навантаження міряється на резервному виході).${err}`
+      : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${err}`);
   }
-  hero.dataset.state = state;
+  hero.dataset.state = light.state;
 }
 function render(data) {
   const m=data.methods||{}, wifi=good(m['Wifi.GetStatus']), ble=good(m['BLE.GetStatus']), bat=good(m['Bat.GetStatus']), es=good(m['ES.GetStatus']), mode=good(m['ES.GetMode']), em=good(m['EM.GetStatus']);
@@ -279,6 +349,11 @@ function render(data) {
   set('mode',ukMode(mode.mode));
   set('charge-permission',`Заряджання: ${yesNo(bat.charg_flag)}`); set('discharge-permission',`Розряджання: ${yesNo(bat.dischrg_flag)}`);
   renderBatteryFlow(data.battery_flow || {});
+  const usable = finiteOrNull(data.power_outage?.autonomy?.usable_wh), flowW = finiteOrNull(data.battery_flow?.power_w);
+  if (data.battery_flow?.direction === 'discharging' && usable !== null && flowW) set('discharge-eta', formatDuration(usable / Math.abs(flowW) * 3600));
+  const floor = floorPct(data.power_outage);
+  set('discharge-eta-label', floor !== null ? `До резерву ${Math.round(floor)}%` : 'До 0%');
+  lastData = data;
   renderHero(data, bat, soc);
   set('grid-sign-note', 'Знак +/− як у пристрої');
   set('grid-power',num(es.ongrid_power,'W')); set('offgrid-power',num(es.offgrid_power,'W'));
@@ -300,8 +375,54 @@ async function refresh() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     render(await r.json());
   }
-  catch(e){$('conn-dot').className='status-led off';set('conn-label','Дашборд не отримує дані');set('last-updated',e.message);}
+  catch(e){
+    $('conn-dot').className='status-led off';set('conn-label','Дашборд не отримує дані');set('last-updated',e.message);
+    if (lastData) { const m = lastData.methods || {}; renderHero(lastData, good(m['Bat.GetStatus']), good(m['Bat.GetStatus']).soc, true); }
+  }
 }
+let lastData = null;
+let journalEvents = [];
+let journalFilter = '';
+const CATEGORY_LABEL = {light: 'Світло', battery: 'Батарея', connection: 'Зв’язок', anomaly: 'Аномалія'};
+function journalTime(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('uk-UA', {timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'});
+}
+function renderJournal() {
+  const list = $('journal-list'); if (!list) return;
+  list.replaceChildren();
+  const rows = journalEvents.filter(e => !journalFilter || e.category === journalFilter);
+  if (!rows.length) { const li = document.createElement('li'); li.className = 'journal-empty'; li.textContent = 'Подій ще немає'; list.append(li); return; }
+  for (const e of rows) {
+    const li = document.createElement('li'); li.className = `journal-row cat-${e.category}`;
+    const time = document.createElement('time'); time.dateTime = e.ts; time.textContent = journalTime(e.ts);
+    const cat = document.createElement('b'); cat.textContent = CATEGORY_LABEL[e.category] || e.category;
+    const text = document.createElement('span'); text.textContent = e.text;
+    li.append(time, cat, text); list.append(li);
+  }
+}
+async function loadJournal() {
+  try {
+    const r = await apiFetch('/api/events?limit=200');
+    if (!r.ok) return;
+    journalEvents = (await r.json()).events || [];
+    renderJournal();
+  } catch (e) { /* keep the last list */ }
+}
+function csvCell(value) { const s = value === null || value === undefined ? '' : String(value); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function exportJournalCsv() {
+  const rows = journalEvents.filter(e => !journalFilter || e.category === journalFilter);
+  const lines = ['time;category;kind;value;text', ...rows.map(e => [e.ts, e.category, e.kind, e.value, e.text].map(csvCell).join(';'))];
+  const blob = new Blob(['\ufeff' + lines.join('\n')], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'marstek-journal.csv';
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+document.querySelectorAll('.journal-filter button').forEach(button => button.addEventListener('click', () => {
+  journalFilter = button.dataset.filter || '';
+  document.querySelectorAll('.journal-filter button').forEach(b => b.classList.toggle('active', b === button));
+  renderJournal();
+}));
+$('journal-csv')?.addEventListener('click', exportJournalCsv);
 let deferredInstallPrompt = null;
 const installButton = $('install-app');
 window.addEventListener('beforeinstallprompt', event => {
@@ -321,4 +442,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(error => console.warn('PWA offline shell registration failed', error));
 }
 document.querySelector('.diagnostics')?.addEventListener('toggle', drawChart);
-refresh(); setInterval(refresh,20000); window.addEventListener('resize',drawChart);
+refresh(); loadJournal(); setInterval(refresh,20000); setInterval(loadJournal,60000); window.addEventListener('resize',drawChart);
