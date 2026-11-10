@@ -7,6 +7,7 @@ import com.doloh.marstekwidget.direct.BatteryFlow
 import com.doloh.marstekwidget.direct.GridStateDetector
 import com.doloh.marstekwidget.domain.BatterySnapshot
 import com.doloh.marstekwidget.domain.BatterySnapshotParser
+import com.doloh.marstekwidget.domain.JournalEvent
 import com.doloh.marstekwidget.notify.AlertNotifier
 import com.doloh.marstekwidget.outage.KYIV
 import com.doloh.marstekwidget.outage.OutageStatusBuilder
@@ -53,7 +54,18 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
 
     suspend fun fetchRaw(): Raw {
         val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return Raw.Failed("Не вказано адресу сервера")
-        val statusUrl = ServerUrlValidator.statusUrl(base)
+        return fetchJson(ServerUrlValidator.statusUrl(base))
+    }
+
+    /** Server journal (GET /api/events, newest first); null when unreachable or older server without it. */
+    suspend fun fetchEvents(limit: Int = 200): List<JournalEvent>? {
+        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return null
+        val raw = fetchJson("${base.trimEnd('/')}/api/events?limit=$limit") as? Raw.Ok ?: return null
+        val arr = raw.root.optJSONArray("events") ?: return null
+        return (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(JournalEvent::fromJson) }
+    }
+
+    private suspend fun fetchJson(statusUrl: String): Raw {
         var cookies: String? = null
         var userAgent: String? = null
         if (settings.serverAuth == ServerAuth.CF_ACCESS) {
@@ -154,7 +166,24 @@ object TelemetryRepository {
             GridStateDetector.detect(offgrid, es?.optBoolean("ok", false) == true, settings.backupThresholdW),
             bat?.optDouble("bat_capacity", Double.NaN)?.takeIf(Double::isFinite), flow, settings.averageLoadW, measured,
             outage?.fetchedAt,
+            backupOutputW = offgrid,
+            ratedWh = bat?.optDouble("rated_capacity", Double.NaN)?.takeIf(Double::isFinite),
+            socPercent = bat?.optDouble("soc", Double.NaN)?.takeIf(Double::isFinite),
+            floorPct = settings.dischargeFloorPct,
+            backupThresholdW = settings.backupThresholdW,
         )
+    }
+
+    /** Server mode: post anomaly notifications for server journal events not seen yet (first run only marks). */
+    private suspend fun notifyServerJournal(context: Context) {
+        val settings = SettingsStore(context).load()
+        val preferences = WidgetPreferences(context)
+        if (settings.mode != ConnectionMode.SERVER || !preferences.anomalyNotificationsEnabled()) return
+        val events = runCatching { MarstekApiClient(context, settings, SettingsStore(context).token()).fetchEvents(50) }.getOrNull() ?: return
+        val newest = events.maxOfOrNull { it.tsMillis } ?: return
+        val seen = preferences.lastSeenServerEventMillis()
+        if (seen >= 0) AlertNotifier.notifyJournal(context, events.filter { it.tsMillis > seen })
+        preferences.setLastSeenServerEventMillis(maxOf(newest, seen))
     }
 
     suspend fun refreshAndStore(context: Context): TelemetryFetchResult {
@@ -165,6 +194,7 @@ object TelemetryRepository {
                 preferences.saveSnapshot(result.snapshot)
                 WidgetRenderer.updateAll(context)
                 AlertNotifier.process(context, result.snapshot)
+                notifyServerJournal(context)
             }
             TelemetryFetchResult.NeedsSignIn -> {
                 preferences.setNeedsSignIn()

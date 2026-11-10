@@ -31,7 +31,16 @@ data class PowerOutageInfo(
     val maybeEnd: String? = null,
     /** A region is set but no source publishes its schedule (grid state still comes from the backup output). */
     val scheduleUnavailable: Boolean = false,
+    val currentStart: String? = null,
+    /** Today + tomorrow schedule windows (definite and «можливе») for the schedule bar. */
+    val windows: List<ScheduleWindow> = emptyList(),
+    /** Discharge floor (% SOC) the reserve runtime is computed above; null = to 0 %. */
+    val floorPct: Double? = null,
+    val usableWh: Double? = null,
+    val storedWh: Double? = null,
 )
+
+data class ScheduleWindow(val startMillis: Long, val endMillis: Long, val maybe: Boolean)
 
 object PowerOutageParser {
     fun parse(block: JSONObject?): PowerOutageInfo? {
@@ -41,7 +50,17 @@ object PowerOutageParser {
         val current = block.optJSONObject("current_outage")
         val next = block.optJSONObject("next_outage")
         val autonomy = block.optJSONObject("autonomy") ?: JSONObject()
-        val maybe = block.optJSONObject("maybe_outage")
+        // direct mode emits one `maybe_outage`, the server a `maybe_outages` list
+        val maybe = block.optJSONObject("maybe_outage") ?: block.optJSONArray("maybe_outages")?.optJSONObject(0)
+        val windows = buildList {
+            val arr = block.optJSONArray("windows")
+            if (arr != null) for (i in 0 until arr.length()) {
+                val w = arr.optJSONObject(i) ?: continue
+                val start = w.optStringOrNull("start")?.let(::millis) ?: continue
+                val end = w.optStringOrNull("end")?.let(::millis) ?: continue
+                if (end > start) add(ScheduleWindow(start, end, w.optString("kind") == "maybe"))
+            }
+        }.sortedBy { it.startMillis }
         return PowerOutageInfo(
             gridState = when (block.optString("grid_state")) {
                 "on" -> GridState.ON
@@ -70,8 +89,15 @@ object PowerOutageParser {
             maybeStart = maybe?.optStringOrNull("start"),
             maybeEnd = maybe?.optStringOrNull("end"),
             scheduleUnavailable = unavailable,
+            currentStart = current?.optStringOrNull("start"),
+            windows = windows,
+            floorPct = autonomy.optDouble("floor_pct", Double.NaN).takeIf { it.isFinite() && it > 0 },
+            usableWh = autonomy.optDouble("usable_wh", Double.NaN).takeIf(Double::isFinite),
+            storedWh = autonomy.optDouble("stored_wh", Double.NaN).takeIf(Double::isFinite),
         )
     }
+
+    private fun millis(value: String): Long? = runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }.getOrNull()
 
     private fun JSONObject.optStringOrNull(key: String): String? =
         if (!has(key) || isNull(key)) null else optString(key).takeIf(String::isNotBlank)
@@ -136,6 +162,13 @@ object PowerOutageFormatter {
         val start = info.nextStart?.let(::toKyiv) ?: return null
         if (start.toLocalDate() != now.withZoneSameInstant(kyiv).toLocalDate()) return null
         return "відкл. ${start.format(clock)}"
+    }
+
+    /** True while the schedule (not the battery) says an outage is going on right now. */
+    fun scheduledNow(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv)): Boolean {
+        val start = info.currentStart?.let(::toKyiv) ?: return false
+        val end = info.currentEnd?.let(::toKyiv) ?: return false
+        return !now.isBefore(start) && now.isBefore(end)
     }
 
     fun reserve(info: PowerOutageInfo): String? {

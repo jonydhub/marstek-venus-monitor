@@ -31,6 +31,8 @@ data class AppSettings(
     val averageLoadW: Double? = null,
     val ratedCapacityWh: Double = DEFAULT_RATED_WH,
     val detectedRatedWh: Double? = null,
+    /** BMS discharge floor (% SOC); the reserve forecast counts only energy above it. No Get method exposes it. */
+    val dischargeFloorPct: Double = DEFAULT_DISCHARGE_FLOOR_PCT,
 ) {
     val outageConfig: OutageConfig?
         get() = if (outageRegionId != null && !outageQueue.isNullOrBlank()) OutageConfig(outageRegionId, outageQueue) else null
@@ -38,6 +40,7 @@ data class AppSettings(
     companion object {
         const val DEFAULT_BACKUP_THRESHOLD_W = 5.0
         const val DEFAULT_RATED_WH = 5120.0
+        const val DEFAULT_DISCHARGE_FLOOR_PCT = 11.0
     }
 }
 
@@ -60,6 +63,7 @@ class SettingsStore(context: Context) {
         averageLoadW = prefs.getFloat("load.average_w", -1f).toDouble().takeIf { it > 0 },
         ratedCapacityWh = prefs.getFloat("battery.rated_wh", AppSettings.DEFAULT_RATED_WH.toFloat()).toDouble(),
         detectedRatedWh = prefs.getFloat("battery.detected_rated_wh", -1f).toDouble().takeIf { it > 0 },
+        dischargeFloorPct = prefs.getFloat("battery.floor_pct", AppSettings.DEFAULT_DISCHARGE_FLOOR_PCT.toFloat()).toDouble(),
     )
 
     fun save(s: AppSettings) {
@@ -77,6 +81,7 @@ class SettingsStore(context: Context) {
             .putFloat("load.average_w", (s.averageLoadW ?: -1.0).toFloat())
             .putFloat("battery.rated_wh", s.ratedCapacityWh.toFloat())
             .putFloat("battery.detected_rated_wh", (s.detectedRatedWh ?: -1.0).toFloat())
+            .putFloat("battery.floor_pct", s.dischargeFloorPct.toFloat())
             .apply()
     }
 

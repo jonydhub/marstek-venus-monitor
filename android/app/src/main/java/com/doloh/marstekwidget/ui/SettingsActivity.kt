@@ -70,6 +70,7 @@ class SettingsActivity : Activity() {
     private lateinit var loadEdit: EditText
     private lateinit var ratedEdit: EditText
     private lateinit var ratedNote: TextView
+    private lateinit var floorEdit: EditText
     private lateinit var errorText: TextView
     private var scanning = false
 
@@ -201,7 +202,19 @@ class SettingsActivity : Activity() {
         reserveCard.addView(ratedEdit)
         ratedNote = ui.hint("")
         reserveCard.addView(ratedNote)
+        reserveCard.addView(ui.label("Резерв розряду (поріг BMS), %", 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
+        floorEdit = ui.field("11", numeric = true)
+        reserveCard.addView(floorEdit)
+        reserveCard.addView(ui.hint("Нижче цього заряду Venus не віддає енергію (типово ≈ 11–12 %; Open API його не повідомляє). " +
+            "«Вистачить на…» рахує лише енергію понад цей поріг; на графіку — червона пунктирна лінія. 0 = до 0 %."))
         page.addView(reserveCard, ui.matchWrap(10))
+        if (!onboarding && draft.mode == ConnectionMode.SERVER && draft.serverUrl != null) {
+            val web = ui.card()
+            web.addView(ui.title("Веб-дашборд сервера"))
+            web.addView(ui.hint("Те саме, що на головному екрані, у браузерному вигляді сервера (журнал з CSV, сирі показники)."))
+            web.addView(ui.button("Відкрити веб-дашборд сервера") { startActivity(Intent(this, DashboardWebActivity::class.java)) }, ui.matchWrap(6))
+            page.addView(web, ui.matchWrap(10))
+        }
 
         errorText = ui.label("", 12f, Ui.CORAL, true).apply { visibility = View.GONE }
         page.addView(errorText, ui.matchWrap(10))
@@ -234,6 +247,7 @@ class SettingsActivity : Activity() {
         thresholdEdit.setText(trim(draft.backupThresholdW))
         loadEdit.setText(draft.averageLoadW?.let(::trim).orEmpty())
         ratedEdit.setText(trim(draft.ratedCapacityWh))
+        floorEdit.setText(trim(draft.dischargeFloorPct))
         ratedNote.text = draft.detectedRatedWh?.let { "Батарея повідомляє ${trim(it)} Wh — використовується це значення; поле вище — запасне." }
             ?: "Визначається автоматично з батареї (rated_capacity); поле — запасне значення."
         updatePanels()
@@ -448,13 +462,15 @@ class SettingsActivity : Activity() {
         if (loadEdit.text.isNotBlank() && (load == null || load !in 1.0..20_000.0)) errors += "Середнє споживання: 1–20000 W або порожньо."
         val rated = ratedEdit.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it in 100.0..100_000.0 }
         if (rated == null) errors += "Ємність батареї: 100–100000 Wh."
+        val floor = floorEdit.text.toString().replace(',', '.').trim().ifEmpty { "11" }.toDoubleOrNull()?.takeIf { it in 0.0..50.0 }
+        if (floor == null) errors += "Резерв розряду: 0–50 %."
         if (errors.isNotEmpty()) {
             errorText.visibility = View.VISIBLE
             errorText.text = errors.joinToString("\n")
             return
         }
         persistToken()
-        next = next.copy(configured = true, backupThresholdW = threshold!!, averageLoadW = load, ratedCapacityWh = rated!!)
+        next = next.copy(configured = true, backupThresholdW = threshold!!, averageLoadW = load, ratedCapacityWh = rated!!, dischargeFloorPct = floor!!)
         store.save(next)
         WidgetRefreshScheduler.ensurePeriodic(this)
         WidgetRefreshScheduler.refreshNow(this)

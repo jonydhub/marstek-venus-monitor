@@ -4,6 +4,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 enum class SummaryMode { OUTAGE, CHARGING, DISCHARGING, IDLE, UNKNOWN }
 enum class SummaryTone { NEUTRAL, GOOD, WARNING, CRITICAL }
@@ -37,10 +38,40 @@ object WidgetSummaryResolver {
     private const val SEP = " · "
     private const val FULL_SOC = 99
 
-    fun resolve(snapshot: BatterySnapshot, now: ZonedDateTime = ZonedDateTime.now(kyiv)): WidgetSummary {
+    /** «11%» when the reserve is computed above a discharge floor, else «0%». */
+    fun floorTarget(info: PowerOutageInfo?): String = info?.floorPct?.let { "${it.roundToInt()}%" } ?: "0%"
+
+    /** Time to the discharge floor at the current trend power (falls back to the device ETA to 0 %). */
+    fun dischargeEtaSeconds(snapshot: BatterySnapshot): Long? {
+        val usable = snapshot.powerOutage?.usableWh
+        val power = snapshot.batteryPowerWatts?.takeIf { it.isFinite() && abs(it) >= 1.0 }
+        if (usable != null && power != null && snapshot.powerOutage?.floorPct != null) return (usable / abs(power) * 3600.0).toLong()
+        return snapshot.etaSeconds
+    }
+
+    fun resolve(snapshot: BatterySnapshot, now: ZonedDateTime = ZonedDateTime.now(kyiv), linkLost: Boolean = false): WidgetSummary {
         val info = snapshot.powerOutage
-        val light = info?.gridState ?: GridState.UNKNOWN
         val temperature = (snapshot.temperatureCelsius ?: snapshot.insights?.temperatureCelsius)?.let(::formatTemperature)
+        if (linkLost || snapshot.batteryLinkLost) {
+            // Light comes only from the backup output: without an answer from the battery it is unknown, not «нема».
+            val status = LightStatusResolver.resolve(snapshot, fetchFailed = true, now = now)
+            val schedule = info?.let { PowerOutageFormatter.detail(it, now) }
+            return WidgetSummary(
+                mode = SummaryMode.UNKNOWN,
+                lightState = GridState.UNKNOWN,
+                primary = status.headline,
+                primaryTone = SummaryTone.WARNING,
+                secondary = status.hint?.replaceFirstChar { it.titlecase(uk) } ?: schedule,
+                trailingPrimary = "—",
+                trailingSecondary = null,
+                lines = listOfNotNull(
+                    status.hint?.let { SummaryLine(SummaryLineKind.LIGHT, it.replaceFirstChar { c -> c.titlecase(uk) }, SummaryTone.WARNING) },
+                    schedule?.let { SummaryLine(SummaryLineKind.RETURN_TIME, it) },
+                ),
+                batteryState = status.headline,
+            )
+        }
+        val light = info?.gridState ?: GridState.UNKNOWN
         val temperatureLine = temperature?.let { SummaryLine(SummaryLineKind.TEMPERATURE, "Температура $it") }
         val reserve = info?.let(PowerOutageFormatter::reserve)
         val reserveTone = when (info?.coversOutage) {
@@ -53,7 +84,7 @@ object WidgetSummaryResolver {
             val backup = (snapshot.insights?.backupOutputWatts ?: snapshot.offgridPowerWatts)?.let(::formatWatts)
             val returnAt = info.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now) }
             // One runtime number during an outage: autonomy runtime if known, else the battery ETA to 0%.
-            val runtime = info.runtimeSeconds ?: snapshot.etaSeconds?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
+            val runtime = info.runtimeSeconds ?: dischargeEtaSeconds(snapshot)?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
             val remaining = info.currentEnd?.let { end ->
                 runCatching { java.time.Duration.between(now, java.time.OffsetDateTime.parse(end)).seconds }.getOrNull()
             }?.takeIf { it > 0 }
@@ -76,10 +107,10 @@ object WidgetSummaryResolver {
                     runtimeValue == null -> reserveText
                     covers == true -> "Запасу вистачить"
                     covers == false -> "Запасу не вистачить"
-                    else -> "Запас до 0% · оцінка"
+                    else -> "Запас до ${floorTarget(info)} · оцінка"
                 },
                 trailingPrimary = returnAt ?: "до —",
-                trailingSecondary = listOfNotNull("0% · ${runtimeValue ?: "—"}", temperature).joinToString(SEP),
+                trailingSecondary = listOfNotNull("${floorTarget(info)} · ${runtimeValue ?: "—"}", temperature).joinToString(SEP),
                 lines = listOfNotNull(
                     SummaryLine(
                         SummaryLineKind.RETURN_TIME,
@@ -103,8 +134,9 @@ object WidgetSummaryResolver {
             BatteryDirection.CHARGING, BatteryDirection.DISCHARGING -> {
                 val charging = snapshot.direction == BatteryDirection.CHARGING
                 val power = snapshot.batteryPowerWatts?.takeIf(Double::isFinite)?.let(::formatKw)
-                val eta = EtaTextFormatter.formatSeconds(snapshot.etaSeconds)
-                val target = if (charging) "100%" else "0%"
+                val etaSeconds = if (charging) snapshot.etaSeconds else dischargeEtaSeconds(snapshot)
+                val eta = EtaTextFormatter.formatSeconds(etaSeconds)
+                val target = if (charging) "100%" else floorTarget(info)
                 return WidgetSummary(
                     mode = if (charging) SummaryMode.CHARGING else SummaryMode.DISCHARGING,
                     lightState = light,
@@ -115,13 +147,13 @@ object WidgetSummaryResolver {
                     trailingSecondary = listOfNotNull("до $target", temperature).joinToString(SEP),
                     // Power is already the headline, so the detail list starts with the ETA.
                     lines = listOfNotNull(
-                        SummaryLine(SummaryLineKind.ETA, if (snapshot.etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —"),
+                        SummaryLine(SummaryLineKind.ETA, if (etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —"),
                         lightLine,
                         reserveLine,
                         temperatureLine,
                     ),
                     batteryState = listOfNotNull(if (charging) "Заряджається" else "Розряджається", power?.let { "≈ $it" }).joinToString(SEP),
-                    etaText = if (snapshot.etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —",
+                    etaText = if (etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —",
                 )
             }
             BatteryDirection.IDLE, BatteryDirection.UNKNOWN -> {

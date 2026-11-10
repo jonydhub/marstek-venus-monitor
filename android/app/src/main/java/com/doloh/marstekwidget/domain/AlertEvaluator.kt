@@ -149,7 +149,9 @@ object AlertEvaluator {
         val soc = snapshot.socPercent
         val direction = snapshot.direction
         val lastGrid = m0.gridState
-        val grid = info?.gridState?.takeIf { it != GridState.UNKNOWN } ?: lastGrid
+        // Light only from the backup output of a battery that answered: a lost link keeps the last known state,
+        // so a dead router/Wi-Fi or an unreachable server never fires LIGHT_LOST (even if the schedule says outage).
+        val grid = info?.gridState?.takeIf { it != GridState.UNKNOWN && !snapshot.batteryLinkLost } ?: lastGrid
         val prevDirection = m0.direction?.takeIf { it != BatteryDirection.UNKNOWN }
         val backupW = snapshot.offgridPowerWatts ?: snapshot.insights?.backupOutputWatts
         val runtime = unifiedRuntime(snapshot)

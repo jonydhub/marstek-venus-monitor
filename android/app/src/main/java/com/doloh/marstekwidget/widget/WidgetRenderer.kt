@@ -24,6 +24,12 @@ import com.doloh.marstekwidget.domain.BatterySnapshot
 import com.doloh.marstekwidget.domain.BatteryWarning
 import com.doloh.marstekwidget.domain.BatteryWarningResolver
 import com.doloh.marstekwidget.domain.GridState
+import com.doloh.marstekwidget.domain.LightKind
+import com.doloh.marstekwidget.domain.LightStatusResolver
+import com.doloh.marstekwidget.domain.ScheduleBar
+import com.doloh.marstekwidget.domain.TodayFormatter
+import com.doloh.marstekwidget.ui.ScheduleBarPainter
+import com.doloh.marstekwidget.ui.SocChartPainter
 import com.doloh.marstekwidget.domain.OperatingModeFormatter
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
 import com.doloh.marstekwidget.domain.SummaryLine
@@ -105,6 +111,7 @@ object WidgetRenderer {
     fun layoutFor(shape: WidgetShape): Int = when (shape) {
         WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> R.layout.widget_shape_flat
         WidgetShape.SMALL -> R.layout.widget_shape_small
+        WidgetShape.SQUARE -> R.layout.widget_shape_square
         WidgetShape.WIDE -> R.layout.widget_shape_wide
         WidgetShape.TALL -> R.layout.widget_shape_tall
         WidgetShape.LARGE -> R.layout.widget_shape_large
@@ -112,8 +119,8 @@ object WidgetRenderer {
     }
 
     private fun lineCount(shape: WidgetShape): Int = when (shape) {
-        WidgetShape.WIDE, WidgetShape.LARGE -> 4
-        WidgetShape.XLARGE -> 5
+        WidgetShape.WIDE, WidgetShape.LARGE -> 3
+        WidgetShape.XLARGE -> 4
         WidgetShape.TALL -> 5
         else -> 0
     }
@@ -123,7 +130,9 @@ object WidgetRenderer {
         val views = RemoteViews(context.packageName, layoutFor(shape))
         val snapshot = input.snapshot
         val options = input.options
-        val summary = snapshot?.let { WidgetSummaryResolver.resolve(it, input.now) }
+        // Light only from the backup output: a failed fetch (past the freshness window) is «немає зв'язку», never «нема».
+        val linkLost = input.state == WidgetFetchState.ERROR
+        val summary = snapshot?.let { WidgetSummaryResolver.resolve(it, input.now, linkLost) }
         val warning = snapshot?.let(BatteryWarningResolver::resolve)
 
         // SOC + light-state dot (all shapes).
@@ -131,17 +140,18 @@ object WidgetRenderer {
         views.setViewVisibility(R.id.widget_soc_text, visibility(options.showSoc))
         val light = summary?.lightState ?: GridState.UNKNOWN
         views.setTextColor(R.id.widget_light_dot, lightColor(light))
-        views.setContentDescription(R.id.widget_light_dot, lightDescription(context, snapshot))
+        views.setContentDescription(R.id.widget_light_dot, LightStatusResolver.resolve(snapshot, linkLost, input.now).headline)
 
         // Primary state line.
         // 4×4 has its own light block («Світло є · черга 1.1»), so its headline names only the battery state.
-        val primary = summary?.let { if (shape.isBlock && snapshot?.powerOutage != null) it.batteryState else it.primary }
+        val primary = summary?.let { if (shape.isBlock && snapshot?.powerOutage != null && !linkLost && !snapshot.batteryLinkLost) it.batteryState else it.primary }
             ?: noDataText(context, input.state)
         views.setTextViewText(R.id.widget_primary, primary)
         views.setTextColor(R.id.widget_primary, summary?.let { modeColor(it.mode) } ?: noDataColor(context, input.state))
 
         // Freshness.
-        val compactUpdated = shape == WidgetShape.FLAT || shape == WidgetShape.FLAT_NARROW || shape == WidgetShape.SMALL || shape == WidgetShape.WIDE
+        val compactUpdated = shape == WidgetShape.FLAT || shape == WidgetShape.FLAT_NARROW || shape == WidgetShape.SMALL ||
+            shape == WidgetShape.SQUARE || shape == WidgetShape.WIDE
         views.setTextViewText(
             R.id.widget_updated,
             if (compactUpdated) compactUpdatedText(context, snapshot, input) else fullUpdatedText(context, snapshot, input, variant),
@@ -152,7 +162,7 @@ object WidgetRenderer {
 
         when (shape) {
             WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> renderFlat(views, context, shape, summary, warning, input)
-            WidgetShape.SMALL -> renderSmall(views, context, summary, warning, input)
+            WidgetShape.SMALL, WidgetShape.SQUARE -> renderSmall(views, context, shape, summary, warning, input)
             WidgetShape.WIDE, WidgetShape.TALL -> {
                 renderCapacity(views, context, snapshot, options, full = true)
                 renderLines(views, context, shape, summary, warning, input)
@@ -164,6 +174,9 @@ object WidgetRenderer {
                 renderFlows(views, context, snapshot, options)
             }
         }
+        if (shape.showsToday) renderToday(views, shape, snapshot)
+        if (shape.showsScheduleBar) renderSchedule(views, context, shape, snapshot, input)
+        if (shape.isBlock) renderChart(views, context, shape, snapshot, input)
         bindActions(context, views, widgetId, shape)
         return views
     }
@@ -172,6 +185,8 @@ object WidgetRenderer {
         val alert = warning?.takeIf { it != BatteryWarning.HIGH_POWER }
         val narrow = shape == WidgetShape.FLAT_NARROW
         if (narrow && summary != null) views.setTextViewText(R.id.widget_primary, summary.primary.substringBefore(SEP))
+        // 4×1 strip: «Світла нема · 121 W» — the trailing column needs the room.
+        else if (summary?.mode == SummaryMode.OUTAGE) views.setTextViewText(R.id.widget_primary, summary.primary.replace("$SEP" + "вихід ", SEP))
         val secondary = when {
             alert != null -> warningText(context, alert)
             narrow && summary != null -> summary.trailingPrimary
@@ -193,10 +208,48 @@ object WidgetRenderer {
         if (showTrailing && summary != null) setTrailing(views, summary, input.options)
     }
 
-    private fun renderSmall(views: RemoteViews, context: Context, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput) {
+    private fun renderToday(views: RemoteViews, shape: WidgetShape, snapshot: BatterySnapshot?) {
+        val today = snapshot?.insights?.today
+        val text = TodayFormatter.compact(today)?.let { if (shape == WidgetShape.SQUARE) it else "Сьогодні: $it" }
+        views.setViewVisibility(R.id.widget_today, visibility(text != null))
+        text?.let { views.setTextViewText(R.id.widget_today, it) }
+    }
+
+    private fun renderSchedule(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput) {
+        val info = snapshot?.powerOutage
+        views.setViewVisibility(R.id.widget_schedule_group, visibility(info != null && info.scheduleEnabled))
+        info ?: return
+        val model = ScheduleBar.model(info.windows, input.now.toInstant().toEpochMilli())
+        // The 4×4 light chip already names the queue.
+        val caption = listOfNotNull("Сьогодні", info.group?.takeIf { !shape.isBlock }?.let { "черга $it" },
+            if (info.windows.isEmpty()) (if (info.schedulePublished) "без відключень" else "графік не опубліковано") else null).joinToString(" · ")
+        views.setTextViewText(R.id.widget_schedule_caption, caption)
+        val density = context.resources.displayMetrics.density
+        val widthDp = if (shape == WidgetShape.XLARGE) 420f else 320f
+        val heightDp = if (shape == WidgetShape.XLARGE) 12f else 8f
+        val bitmap = Bitmap.createBitmap((widthDp * density).roundToInt(), (heightDp * density).roundToInt(), Bitmap.Config.ARGB_8888)
+        ScheduleBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), model, density)
+        views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
+    }
+
+    /** 4×4+: 24 h SOC line with no-light periods shaded and the reserve floor — fills the card's free height. */
+    private fun renderChart(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput) {
+        val history = snapshot?.insights?.socHistory.orEmpty()
+        views.setViewVisibility(R.id.widget_chart, visibility(history.size >= 2))
+        if (history.size < 2) return
+        val density = context.resources.displayMetrics.density
+        val (w, h) = if (shape == WidgetShape.XLARGE) 420f to 150f else 330f to 110f
+        val bitmap = Bitmap.createBitmap((w * density).roundToInt(), (h * density).roundToInt(), Bitmap.Config.ARGB_8888)
+        SocChartPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), SocChartPainter.Input(
+            history, snapshot?.insights?.outagePeriods.orEmpty(), snapshot?.insights?.chartEvents.orEmpty(),
+            snapshot?.powerOutage?.floorPct, input.now.toInstant().toEpochMilli()), density, labels = false)
+        views.setImageViewBitmap(R.id.widget_chart, bitmap)
+    }
+
+    private fun renderSmall(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput) {
         val snapshot = input.snapshot
         val soc = snapshot?.socPercent?.coerceIn(0, 100)
-        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc))
+        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, if (shape == WidgetShape.SQUARE) 76f else 60f))
         views.setViewVisibility(R.id.widget_soc_ring_container, visibility(input.options.showSoc))
         views.setTextViewText(R.id.widget_capacity_text, compactEnergyText(context, snapshot))
         views.setViewVisibility(R.id.widget_capacity_text, visibility(input.options.showCapacity))
@@ -295,13 +348,14 @@ object WidgetRenderer {
         val info = snapshot?.powerOutage
         views.setViewVisibility(R.id.widget_power_group, visibility(info != null))
         info ?: return
-        val headline = PowerOutageFormatter.headline(info)
+        val light = LightStatusResolver.resolve(snapshot, input.state == WidgetFetchState.ERROR, input.now)
+        val headline = light.headline
         views.setTextViewText(R.id.widget_power_status, context.getString(R.string.widget_power_headline_group, headline, info.group ?: "—"))
-        views.setTextColor(R.id.widget_power_status, lightColor(info.gridState))
-        views.setTextViewText(R.id.widget_power_detail, PowerOutageFormatter.detail(info, input.now))
+        views.setTextColor(R.id.widget_power_status, lightColor(light.gridState))
+        views.setTextViewText(R.id.widget_power_detail, listOfNotNull(light.hint?.replaceFirstChar { it.titlecase() }, PowerOutageFormatter.detail(info, input.now)).joinToString(" · "))
         // Same single runtime + verdict as the summary (autonomy runtime, else battery ETA to 0%).
         val reserveLine = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RESERVE }
-        val reserve = reserveLine?.text ?: PowerOutageFormatter.reserve(info)
+        val reserve = if (light.kind == LightKind.NO_LINK) null else reserveLine?.text ?: PowerOutageFormatter.reserve(info)
             ?: if (info.gridState == GridState.OFF) context.getString(R.string.widget_power_reserve_measuring) else null
         views.setViewVisibility(R.id.widget_power_reserve, visibility(reserve != null))
         reserve?.let { views.setTextViewText(R.id.widget_power_reserve, it) }
@@ -405,9 +459,6 @@ object WidgetRenderer {
         GridState.UNKNOWN -> Color.rgb(111, 130, 144)
     }
 
-    private fun lightDescription(context: Context, snapshot: BatterySnapshot?): String =
-        snapshot?.powerOutage?.let(PowerOutageFormatter::headline) ?: context.getString(R.string.widget_power_status_unknown)
-
     private fun healthText(context: Context, state: WidgetFetchState): String = when (state) {
         WidgetFetchState.NEEDS_SIGN_IN -> context.getString(R.string.widget_health_sign_in)
         WidgetFetchState.ERROR -> context.getString(R.string.widget_health_offline)
@@ -473,10 +524,10 @@ object WidgetRenderer {
         return if (mode != null) "$base · $mode" else base
     }
 
-    private fun socRingBitmap(context: Context, socPercent: Int?): Bitmap {
+    private fun socRingBitmap(context: Context, socPercent: Int?, sizeDp: Float = 60f): Bitmap {
         val density = context.resources.displayMetrics.density
-        val size = (56f * density).roundToInt()
-        val stroke = 5f * density
+        val size = (sizeDp * density).roundToInt()
+        val stroke = (sizeDp / 11f) * density
         val inset = stroke / 2f + density
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)

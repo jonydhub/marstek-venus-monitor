@@ -91,7 +91,59 @@ object HistoryMath {
         return buckets.values.toList().takeLast(SOC_MAX_POINTS).map { Math.round(it.first) to it.second }
     }
 
-    fun insights(rows: List<HistorySample>, now: Double, currentOffgridW: Double?, temperatureC: Double?): JSONObject {
+    private data class StateSpan(val t0: Double, val t1: Double, val sample: HistorySample)
+
+    /** Consecutive samples ≤ MAX_GAP apart, clipped to [start, now]; the state is the earlier sample's. */
+    private fun stateSpans(rows: List<HistorySample>, start: Double, now: Double): List<StateSpan> =
+        rows.sortedBy { it.ts }.zipWithNext().mapNotNull { (a, b) ->
+            val dt = b.ts - a.ts
+            if (dt <= 0 || dt > MAX_GAP_SECONDS) return@mapNotNull null
+            val t0 = maxOf(a.ts, start)
+            val t1 = minOf(b.ts, now)
+            if (t1 > t0) StateSpan(t0, t1, a) else null
+        }
+
+    private fun outage(sample: HistorySample, thresholdW: Double) = sample.offgridW?.takeIf(Double::isFinite)?.let { abs(it) >= thresholdW } == true
+
+    fun localMidnight(now: Double): Double = ZonedDateTime.ofInstant(Instant.ofEpochMilli((now * 1000).toLong()), kyiv)
+        .toLocalDate().atStartOfDay(kyiv).toEpochSecond().toDouble()
+
+    /** Seconds since local midnight charging / discharging / with backup output drawing (= no grid). Gaps count as nothing. */
+    fun todayDurations(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W): Triple<Long, Long, Long> {
+        var charge = 0.0
+        var discharge = 0.0
+        var off = 0.0
+        stateSpans(rows, localMidnight(now), now).forEach { s ->
+            val span = s.t1 - s.t0
+            when (s.sample.flowDir) {
+                "charging" -> charge += span
+                "discharging" -> discharge += span
+            }
+            if (outage(s.sample, thresholdW)) off += span
+        }
+        return Triple(Math.round(charge), Math.round(discharge), Math.round(off))
+    }
+
+    /** Backup-output draw periods in the last 24 h as (startEpochS, endEpochS); gaps split periods. */
+    fun outagePeriods(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W): List<Pair<Long, Long>> {
+        val periods = mutableListOf<DoubleArray>()
+        stateSpans(rows, now - WINDOW_SECONDS, now).filter { outage(it.sample, thresholdW) }.forEach { s ->
+            val last = periods.lastOrNull()
+            if (last != null && abs(last[1] - s.t0) < 1e-6) last[1] = s.t1 else periods += doubleArrayOf(s.t0, s.t1)
+        }
+        return periods.filter { it[1] - it[0] >= 60 }.map { Math.round(it[0]) to Math.round(it[1]) }
+    }
+
+    private fun isoAt(epochS: Long): String = ZonedDateTime.ofInstant(Instant.ofEpochSecond(epochS), kyiv).format(iso)
+
+    fun insights(
+        rows: List<HistorySample>,
+        now: Double,
+        currentOffgridW: Double?,
+        temperatureC: Double?,
+        thresholdW: Double = BACKUP_DRAW_THRESHOLD_W,
+        chartEvents: List<Pair<Long, String>> = emptyList(),
+    ): JSONObject {
         val (energy, covered) = integral(intervals(rows, now - WINDOW_SECONDS))
         val average = if (covered >= MIN_AVG_COVERAGE_SECONDS) Math.round(energy / covered * 10.0) / 10.0 else null
         val midnight = ZonedDateTime.ofInstant(Instant.ofEpochMilli((now * 1000).toLong()), kyiv)
@@ -109,6 +161,15 @@ object HistoryMath {
             .put("backup_energy_today_wh", if (today.isNotEmpty()) Math.round(todayWs / 3600.0 * 10.0) / 10.0 else JSONObject.NULL)
             .put("temperature_c", temperatureC?.takeIf(Double::isFinite) ?: JSONObject.NULL)
             .put("soc_history", history)
+            .put("today", todayDurations(rows, now, thresholdW).let { (c, d, o) ->
+                JSONObject().put("charge_seconds", c).put("discharge_seconds", d).put("outage_seconds", o)
+            })
+            .put("outage_periods", JSONArray().apply {
+                outagePeriods(rows, now, thresholdW).forEach { (a, b) -> put(JSONObject().put("start", isoAt(a)).put("end", isoAt(b))) }
+            })
+            .put("chart_events", JSONArray().apply {
+                chartEvents.forEach { (millis, kind) -> put(JSONObject().put("t", isoAt(millis / 1000)).put("kind", kind)) }
+            })
     }
 
     fun prune(rows: List<HistorySample>, now: Double): List<HistorySample> = rows.filter { it.ts >= now - RETENTION_SECONDS }

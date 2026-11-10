@@ -113,8 +113,8 @@
     <string name="main_intro">Моніторинг батареї Marstek · лише читання.</string>
     <string name="main_sign_in">Увійти через Cloudflare Access</string>
     <string name="main_refresh">Оновити показники</string>
-    <string name="main_refresh_note">На екрані — кожні 5 с напряму (30 с через сервер); віджети оновлюються приблизно кожні 15 хв і лише в домашній мережі в режимі «Напряму». Android може відкласти фонове оновлення.</string>
-    <string name="main_open_web_dashboard">Графік і повна діагностика</string>
+    <string name="main_refresh_note">На екрані — кожні 5 с напряму (30 с через сервер), ↻ — оновити зараз; віджети оновлюються приблизно кожні 15 хв і лише в домашній мережі в режимі «Напряму». Android може відкласти фонове оновлення.</string>
+    <string name="main_open_web_dashboard">Відкрити веб-дашборд сервера</string>
     <string name="main_dashboard_loading">Оновлюю телеметрію…</string>
     <string name="main_dashboard_error">Не вдалося оновити · показано останні збережені дані</string>
     <string name="main_dashboard_needs_signin">Увійдіть через Cloudflare Access, щоб переглядати показники.</string>
@@ -197,4 +197,7 @@
     <string name="main_details_title">Батарея і потоки</string>
     <string name="main_schedule_title">Світло і графік</string>
     <string name="main_energy_moved_note">Накопичені загальні лічильники пристрою, не за день.</string>
+    <string name="widget_schedule_tomorrow">Завтра</string>
+    <string name="widget_schedule_description">Графік відключень: сьогодні і завтра, біла риска — зараз</string>
+    <string name="widget_chart_description">Заряд за 24 год; жовтим — періоди без світла</string>
 </resources>

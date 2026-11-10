@@ -15,6 +15,9 @@ import com.doloh.marstekwidget.domain.AlertEvaluation
 import com.doloh.marstekwidget.domain.AlertEvaluator
 import com.doloh.marstekwidget.domain.AlertSeverity
 import com.doloh.marstekwidget.domain.BatterySnapshot
+import com.doloh.marstekwidget.domain.JournalCategory
+import com.doloh.marstekwidget.domain.JournalEvent
+import com.doloh.marstekwidget.ui.JournalActivity
 import com.doloh.marstekwidget.ui.MainActivity
 import com.doloh.marstekwidget.widget.WidgetPreferences
 import com.doloh.marstekwidget.widget.WidgetRefreshScheduler
@@ -25,6 +28,7 @@ object AlertNotifier {
     const val CHANNEL_WARN = "alerts_warn"
     const val CHANNEL_CRITICAL = "alerts_critical"
     private const val LEGACY_CHANNEL = "power_battery"
+    private const val ANOMALY_NOTIFICATION_BASE = 600
 
     @Synchronized
     fun process(context: Context, snapshot: BatterySnapshot?, nowMillis: Long = System.currentTimeMillis()): AlertEvaluation {
@@ -42,6 +46,28 @@ object AlertNotifier {
             evaluation.notifications.forEach { alert -> manager?.notify(notificationId(alert), build(context, alert)) }
         }
         return evaluation
+    }
+
+    /** Journal anomalies → one notification each (toggle «Сповіщати про аномалії»). Light/connection events stay in the journal. */
+    fun notifyJournal(context: Context, events: List<JournalEvent>) {
+        val anomalies = events.filter { it.category == JournalCategory.ANOMALY }
+        if (anomalies.isEmpty() || !WidgetPreferences(context).anomalyNotificationsEnabled() || !canPost(context)) return
+        ensureChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        anomalies.forEach { event ->
+            val open = PendingIntent.getActivity(context, 950, Intent(context, JournalActivity::class.java),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val notification = Notification.Builder(context, CHANNEL_WARN)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("Аномалія")
+                .setContentText(event.text)
+                .setStyle(Notification.BigTextStyle().bigText(event.text))
+                .setSubText("Журнал подій")
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            manager.notify(ANOMALY_NOTIFICATION_BASE + (event.kind.hashCode() and 0xff), notification)
+        }
     }
 
     /** Conditions true right now (for the main-screen card and widgets); never posts anything. */

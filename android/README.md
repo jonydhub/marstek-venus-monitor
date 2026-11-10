@@ -25,9 +25,16 @@ render identically.
 
 Ported from `server/`: battery power and ETA from the `bat_capacity` trend (linear regression over
 5 min, 10 W deadband), 48 h local history (CSV) for the SOC sparkline and the backup-output averages,
-grid state from the backup output (draw above the threshold, default 5 W, means the grid is absent),
-and reserve runtime/“will it last” using measured discharge, the configured average consumption, or the
-measured backup-output average (≥30 min of draw).
+grid state from the backup output (draw above the threshold, default 5 W, means the grid is absent —
+this is the **only** light signal; no answer from the battery is «Немає зв'язку з батареєю», never «світла
+нема», and never fires LIGHT_LOST), and reserve runtime/“will it last” = energy above the discharge floor
+(setting, default 11 %) ÷ load, with load = measured backup output during an outage → capacity-trend
+discharge → configured average → measured backup-output average (≥30 min of draw).
+
+Since 1.2.0 the phone also keeps today's charge / discharge / no-light durations (`insights.today`, gaps
+not counted), backup-output outage periods for the chart, and a 30-day event journal (`files/journal.jsonl`:
+light lost/returned, charging, connection lost after 3 failed polls / restored, anomalies — discharge above
+threshold, discharge on grid, temperature). In server mode the journal comes from `GET /api/events`.
 
 ## Outage schedules (all of Ukraine)
 

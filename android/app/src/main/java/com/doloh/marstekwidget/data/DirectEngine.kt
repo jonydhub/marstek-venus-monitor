@@ -15,6 +15,12 @@ import com.doloh.marstekwidget.outage.KYIV
 import com.doloh.marstekwidget.outage.OutageStatusBuilder
 import com.doloh.marstekwidget.settings.AppSettings
 import com.doloh.marstekwidget.settings.SettingsStore
+import com.doloh.marstekwidget.domain.BatteryDirection
+import com.doloh.marstekwidget.domain.GridState
+import com.doloh.marstekwidget.domain.JournalDetector
+import com.doloh.marstekwidget.domain.JournalObservation
+import com.doloh.marstekwidget.notify.AlertNotifier
+import com.doloh.marstekwidget.widget.WidgetPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -56,6 +62,25 @@ object DirectEngine {
     private var lastFullAt = 0L
     private var lastHistoryTs = 0.0
 
+    private val CHART_KINDS = setOf("light_lost", "light_returned", "charging_started", "charged_full")
+
+    /** Journal: feed one poll into the detector, persist new events, notify anomalies. Never breaks telemetry. */
+    private fun journal(context: Context, obs: JournalObservation, nowMs: Long) {
+        runCatching {
+            val store = JournalStore(context)
+            val threshold = WidgetPreferences(context).anomalyThresholdWatts()
+            val (events, memory) = JournalDetector.step(store.memory(), obs, nowMs, threshold)
+            store.saveMemory(memory)
+            store.append(events, nowMs)
+            AlertNotifier.notifyJournal(context, events)
+        }
+    }
+
+    private fun failed(context: Context, message: String, nowMs: Long): DirectPoll.Failed {
+        journal(context, JournalObservation(ok = false), nowMs)
+        return DirectPoll.Failed(message)
+    }
+
     @Synchronized
     fun poll(context: Context, settings: AppSettings, cachedOutage: CachedOutage?): DirectPoll {
         val host = settings.deviceHost ?: return DirectPoll.Failed("Не вказано IP батареї")
@@ -69,10 +94,10 @@ object DirectEngine {
                 methods.forEach { method -> results[method] = client.query(method) } // client paces ≥1 s (VenusE drops bursts)
             }
         } catch (e: Exception) {
-            return DirectPoll.Failed("Мережа недоступна: ${e.javaClass.simpleName}")
+            return failed(context, "Мережа недоступна: ${e.javaClass.simpleName}", nowMs)
         }
         if (results["Bat.GetStatus"] !is RpcResult.Ok) {
-            return DirectPoll.Failed("Батарея не відповідає ($host:${settings.devicePort})")
+            return failed(context, "Батарея не відповідає ($host:${settings.devicePort})", nowMs)
         }
         if (full) lastFullAt = nowMs
         results.forEach { (m, r) -> if (r is RpcResult.Ok) lastAnswers[m] = r }
@@ -105,6 +130,7 @@ object DirectEngine {
         }
         val rows = runCatching { history.rows(nowS) }.getOrDefault(emptyList())
         val measured = HistoryMath.measuredBackupLoad(rows, nowS, settings.backupThresholdW)
+        // Light only from the backup-output power (this or the previous ES answer); no ES answer = unknown, never «off».
         val grid = GridStateDetector.detect(offgrid, es != null, settings.backupThresholdW)
         val outage = OutageStatusBuilder.build(
             config = settings.outageConfig,
@@ -117,8 +143,27 @@ object DirectEngine {
             expectedLoadW = settings.averageLoadW,
             measuredLoadW = measured,
             fetchedAt = cachedOutage?.fetchedAt,
+            backupOutputW = offgrid,
+            ratedWh = ratedForEta,
+            socPercent = socValue,
+            floorPct = settings.dischargeFloorPct,
+            backupThresholdW = settings.backupThresholdW,
         )
-        val insights = HistoryMath.insights(rows, nowS, offgrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite))
+        journal(context, JournalObservation(
+            ok = true,
+            gridState = when (grid) { "on" -> GridState.ON; "off" -> GridState.OFF; else -> GridState.UNKNOWN },
+            direction = BatteryDirection.fromApi(flow.direction),
+            batteryWatts = flow.powerW.takeIf { flow.available },
+            backupWatts = offgrid,
+            soc = socValue?.toInt(),
+            temperatureC = bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),
+        ), nowMs)
+        val chart = runCatching {
+            JournalStore(context).events(200).filter { it.kind in CHART_KINDS && it.tsMillis >= nowMs - 24 * 3600_000L }
+                .sortedBy { it.tsMillis }.map { it.tsMillis to it.kind }
+        }.getOrDefault(emptyList())
+        val insights = HistoryMath.insights(rows, nowS, offgrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),
+            settings.backupThresholdW, chart)
         val root = DirectStatusComposer.compose(
             results, flow, outage, insights, Instant.ofEpochMilli(nowMs).toString(), settings.deviceModel,
             fallbackRatedWh = settings.ratedCapacityWh,

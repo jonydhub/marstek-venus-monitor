@@ -35,6 +35,8 @@ import java.time.format.DateTimeFormatter
  * `notify`: saves the fixture and runs the real alert engine + notifier once (for outage it first seeds «grid was on»).
  * `--es showcase outage|charging [--ez main true]`: clean marketing render (no debug labels), fixed clock 18:30 Kyiv.
  * `--es showcase live`: the same clean 4×1 / 2×2 / 4×2 stack fed by the last real stored snapshot.
+ * `--es showcase outage|charging|idle --es sizes 2x2|4x2|4x4`: one Samsung-sized widget; `--es page samsung` for the labelled set.
+ * `--ez journal true`: the journal screen with a demo journal.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -44,6 +46,11 @@ class WidgetPreviewActivity : Activity() {
             // README/manual screenshot of the first-run welcome screen without wiping the saved setup.
             startActivity(Intent(this, com.doloh.marstekwidget.ui.SettingsActivity::class.java)
                 .putExtra(com.doloh.marstekwidget.ui.SettingsActivity.EXTRA_ONBOARDING, true))
+            finish()
+            return
+        }
+        if (intent.getBooleanExtra("journal", false)) {
+            startActivity(Intent(this, com.doloh.marstekwidget.ui.JournalActivity::class.java).putExtra("showcase", true))
             finish()
             return
         }
@@ -78,7 +85,10 @@ class WidgetPreviewActivity : Activity() {
         val alert = AlertEvaluator.top(AlertEvaluator.evaluate(null, snapshot, System.currentTimeMillis(), AlertSettings()).active)
         val input = WidgetRenderInput(snapshot, WidgetFetchState.OK, WidgetDisplayOptions(), System.currentTimeMillis(), alert = alert)
         val page = intent.getStringExtra("page") ?: "1"
-        val sizes = if (page == "1") {
+        val sizes = if (page == "samsung") {
+            // Samsung One UI (4×5 grid, ~412 dp wide screen) cell sizes: 4×1, 2×2, 4×2, 4×4.
+            listOf("4x1" to (370 to 84), "2x2" to (180 to 186), "4x2" to (370 to 186), "4x4" to (370 to 400))
+        } else if (page == "1") {
             listOf("4x1 min" to (340 to 44), "4x1" to (340 to 72), "2x1" to (160 to 72), "2x2" to (160 to 160), "4x2" to (340 to 160))
         } else if (page == "tablet") {
             // Tablet launcher cells (Pixel Tablet-like): 6×1, 5×2, 3×3, 6×3 and 6×4.
@@ -166,7 +176,43 @@ class WidgetPreviewActivity : Activity() {
             .put("backup_avg_coverage_hours", 23.6)
             .put("backup_energy_today_wh", 2140.5)
             .put("temperature_c", temp)
-            .put("soc_history", history))
+            .put("soc_history", history)).let { enrich(it, state, now) }
+    }
+
+    /** v1.2 blocks: today's durations, outage periods, chart events, schedule windows, reserve floor (FIXTURE). */
+    private fun enrich(root: JSONObject, kind: String, now: ZonedDateTime): JSONObject {
+        val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        val midnight = now.toLocalDate().atStartOfDay(now.zone)
+        val outage = kind == "outage"
+        val insights = root.getJSONObject("insights")
+        insights.put("today", JSONObject().put("charge_seconds", if (kind == "charging") 2 * 3600 + 10 * 60 else 3840)
+            .put("discharge_seconds", if (outage) 35_820 else 1500).put("outage_seconds", if (outage) 36_180 else 0))
+        insights.put("outage_periods", JSONArray().apply {
+            put(JSONObject().put("start", now.minusHours(19).format(iso)).put("end", now.minusHours(15).format(iso)))
+            if (outage) put(JSONObject().put("start", now.minusHours(5).format(iso)).put("end", now.format(iso)))
+        })
+        insights.put("chart_events", JSONArray().apply {
+            put(JSONObject().put("t", now.minusHours(19).format(iso)).put("kind", "light_lost"))
+            put(JSONObject().put("t", now.minusHours(15).format(iso)).put("kind", "light_returned"))
+            put(JSONObject().put("t", now.minusHours(15).plusMinutes(5).format(iso)).put("kind", "charging_started"))
+            put(JSONObject().put("t", now.minusHours(12).format(iso)).put("kind", "charged_full"))
+            if (outage) put(JSONObject().put("t", now.minusHours(5).format(iso)).put("kind", "light_lost"))
+        })
+        val po = root.getJSONObject("power_outage")
+        po.put("windows", JSONArray().apply {
+            put(JSONObject().put("start", midnight.plusHours(4).format(iso)).put("end", midnight.plusHours(8).format(iso)).put("kind", "off"))
+            listOfNotNull(po.optJSONObject("current_outage"), po.optJSONObject("next_outage")).forEach { w ->
+                put(JSONObject().put("start", w.getString("start")).put("end", w.getString("end")).put("kind", "off"))
+            }
+            put(JSONObject().put("start", midnight.plusDays(1).plusHours(9).format(iso)).put("end", midnight.plusDays(1).plusHours(13).format(iso)).put("kind", "off"))
+            put(JSONObject().put("start", midnight.plusDays(1).plusHours(17).format(iso)).put("end", midnight.plusDays(1).plusHours(19).format(iso)).put("kind", "maybe"))
+        })
+        val autonomy = po.getJSONObject("autonomy")
+        val stored = root.getJSONObject("methods").getJSONObject("Bat.GetStatus").getJSONObject("data").getDouble("bat_capacity")
+        val usable = (stored - 563.2).coerceAtLeast(0.0)
+        autonomy.put("floor_pct", 11).put("floor_wh", 563).put("usable_wh", Math.round(usable)).put("stored_wh", Math.round(stored))
+        if (autonomy.has("load_w") && !autonomy.isNull("load_w")) autonomy.put("runtime_seconds", Math.round(usable / autonomy.getDouble("load_w") * 3600))
+        return root
     }
 
     private fun showcase(kind: String, main: Boolean) {
@@ -178,6 +224,8 @@ class WidgetPreviewActivity : Activity() {
         val now = if (main || live) realNow else realNow.withHour(18).withMinute(30).withSecond(0).withNano(0)
         // `live`: clean render (no labels) of the last snapshot the app actually fetched — README screenshots.
         val snapshot = if (live) WidgetPreferences(this).snapshot() ?: run { finish(); return }
+            else if (kind == "nolink") BatterySnapshotParser.parse(showcaseFixture("outage", now))
+                .copy(collectedAt = now.minusMinutes(12).toInstant().toString())
             else BatterySnapshotParser.parse(showcaseFixture(kind, now))
         if (live && main) {
             startActivity(Intent(this, MainActivity::class.java))
@@ -186,6 +234,8 @@ class WidgetPreviewActivity : Activity() {
         }
         if (main) {
             WidgetPreferences(this).saveSnapshot(snapshot)
+            // «nolink»: last data 12 min old and the latest poll failed → «Немає зв'язку з батареєю».
+            if (kind == "nolink") WidgetPreferences(this).setError("Батарея не відповідає")
             startActivity(Intent(this, MainActivity::class.java).putExtra("showcase", true))
             finish()
             return
@@ -204,7 +254,13 @@ class WidgetPreviewActivity : Activity() {
             )
             setPadding(px(24), px(72), px(24), px(40))
         }
-        listOf(340 to 72, 160 to 160, 340 to 160).forEachIndexed { index, (w, h) ->
+        val showcaseSizes = when (intent.getStringExtra("sizes")) {
+            "2x2" -> listOf(180 to 186)
+            "4x2" -> listOf(360 to 186)
+            "4x4" -> listOf(360 to 390)
+            else -> listOf(340 to 72, 180 to 186, 340 to 186)
+        }
+        showcaseSizes.forEachIndexed { index, (w, h) ->
             val shape = WidgetShapeSelector.select(w.toFloat(), h.toFloat())
             val frame = FrameLayout(this)
             val views = WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0)
@@ -218,34 +274,45 @@ class WidgetPreviewActivity : Activity() {
     private fun showcaseFixture(kind: String, now: ZonedDateTime): JSONObject {
         val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
         fun today(hour: Int) = now.withHour(hour).withMinute(0).withSecond(0).withNano(0).format(iso)
+        // Outage windows relative to `now` (main showcase runs on the real clock): started 5 h ago, back in ~3 h.
+        val hourStart = now.withMinute(0).withSecond(0).withNano(0)
+        val outageStart = hourStart.minusHours(5).format(iso)
+        val outageEnd = hourStart.plusHours(3).format(iso)
         val outage = kind == "outage"
-        val soc = if (outage) 64 else 72
-        val stored = if (outage) 3280.0 else 72 * 51.2
+        val full = kind == "idle"
+        val soc = if (outage) 63 else if (full) 100 else 72
+        val stored = soc * 51.2
         val temp = if (outage) 24.0 else 27.0
         val history = JSONArray().apply {
             for (i in 0..95) {
-                val v = if (outage) (if (i < 70) 92 else 92 - (i - 70)) else (if (i < 60) 40 else 40 + (i - 60))
+                val v = when {
+                    outage -> when { i < 20 -> 100; i < 36 -> 100 - (i - 20); i < 44 -> 84 + (i - 36) * 2; i < 76 -> 100; else -> 100 - (i - 76) * 2 }
+                    full -> when { i < 20 -> 100; i < 36 -> 100 - (i - 20); i < 44 -> 84 + (i - 36) * 2; else -> 100 }
+                    else -> if (i < 60) 40 else 40 + (i - 60)
+                }
                 put(JSONObject().put("t", now.minusMinutes(15L * (95 - i)).format(iso)).put("soc", v.coerceIn(0, 100)))
             }
         }
-        val runtime = (stored / 48.0 * 3600).toLong()
+        val load = 121.0
+        val runtime = (stored / load * 3600).toLong()
         val powerOutage = if (outage) JSONObject("""{"available":true,"group":"1.1","grid_state":"off",
-            "current_outage":{"kind":"schedule","start":"${today(17)}","end":"${today(21)}","duration_seconds":14400},
+            "current_outage":{"kind":"schedule","start":"$outageStart","end":"$outageEnd","duration_seconds":28800},
             "next_outage":null,"schedule_published":true,
-            "autonomy":{"load_w":48.0,"load_basis":"measured_discharge","stored_wh":$stored,"runtime_seconds":$runtime,"outage_seconds":9000,"covers_next_outage":true}}""")
+            "autonomy":{"load_w":$load,"load_basis":"measured_backup_output","stored_wh":$stored,"runtime_seconds":$runtime,"outage_seconds":9000,"covers_next_outage":true}}""")
         else JSONObject("""{"available":true,"group":"1.1","grid_state":"on","current_outage":null,
-            "next_outage":{"kind":"schedule","start":"${today(20)}","end":"${now.withHour(23).withMinute(59).withSecond(0).withNano(0).plusMinutes(1).format(iso)}","duration_seconds":14400},
+            "next_outage":{"kind":"schedule","start":"${hourStart.plusHours(2).format(iso)}","end":"${hourStart.plusHours(6).format(iso)}","duration_seconds":14400},
             "schedule_published":true,
             "autonomy":{"load_w":52.0,"load_basis":"measured_average_24h","stored_wh":$stored,"runtime_seconds":${(stored / 52.0 * 3600).toLong()},"outage_seconds":14400,"covers_next_outage":true}}""")
         val chargeEta = ((5120.0 - stored) / 820.0 * 3600).toLong()
-        val flow = if (outage) """{"available":true,"power_w":-48.0,"direction":"discharging","charge_eta_seconds":null,"discharge_eta_seconds":$runtime}"""
+        val flow = if (outage) """{"available":true,"power_w":-130.0,"direction":"discharging","charge_eta_seconds":null,"discharge_eta_seconds":$runtime}"""
+        else if (full) """{"available":true,"power_w":0.0,"direction":"idle","charge_eta_seconds":null,"discharge_eta_seconds":null}"""
         else """{"available":true,"power_w":820.0,"direction":"charging","charge_eta_seconds":$chargeEta,"discharge_eta_seconds":null}"""
-        val offgrid = if (outage) 48.0 else 0.0
+        val offgrid = if (outage) load else 0.0
         return JSONObject("""{
             "collected_at":"${now.toInstant()}",
             "methods":{
               "Bat.GetStatus":{"data":{"soc":$soc,"bat_capacity":$stored,"rated_capacity":5120,"bat_temp":$temp}},
-              "ES.GetStatus":{"data":{"ongrid_power":${if (outage) 0 else -840},"offgrid_power":$offgrid,"total_grid_input_energy":412340,"total_grid_output_energy":380120,"total_load_energy":96210}},
+              "ES.GetStatus":{"data":{"ongrid_power":${if (outage || full) 0 else -840},"offgrid_power":$offgrid,"total_grid_input_energy":412340,"total_grid_output_energy":380120,"total_load_energy":96210}},
               "ES.GetMode":{"data":{"mode":"Manual","ct_state":0}}
             },
             "battery_flow":$flow
@@ -254,6 +321,6 @@ class WidgetPreviewActivity : Activity() {
             .put("backup_avg_w_24h", 52.0)
             .put("backup_energy_today_wh", 410.0)
             .put("temperature_c", temp)
-            .put("soc_history", history))
+            .put("soc_history", history)).let { enrich(it, kind, now) }
     }
 }

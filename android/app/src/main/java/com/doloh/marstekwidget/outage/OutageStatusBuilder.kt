@@ -33,6 +33,11 @@ object OutageStatusBuilder {
         expectedLoadW: Double?,
         measuredLoadW: Double?,
         fetchedAt: String?,
+        backupOutputW: Double? = null,
+        ratedWh: Double? = null,
+        socPercent: Double? = null,
+        floorPct: Double? = null,
+        backupThresholdW: Double = 5.0,
     ): JSONObject {
         val windows = schedule?.windows.orEmpty().filter { it.end.isAfter(now) }
         val definite = windows.filter { !it.maybe }
@@ -41,7 +46,16 @@ object OutageStatusBuilder {
         val maybe = windows.firstOrNull { it.maybe }
         val outage = current ?: next
         val remaining = outage?.let { window(it, now).getLong("remaining_seconds") }
-        val autonomy = AutonomyCalculator.calculate(gridState, storedWh, flow, expectedLoadW, measuredLoadW, remaining)
+        val autonomy = AutonomyCalculator.calculate(gridState, storedWh, flow, expectedLoadW, measuredLoadW, remaining,
+            backupOutputW, ratedWh, socPercent, floorPct, backupThresholdW)
+        // Schedule bar: every window touching today 00:00 … tomorrow 24:00 (past ones today included).
+        val midnight = now.withZoneSameInstant(KYIV).toLocalDate().atStartOfDay(KYIV)
+        val barEnd = midnight.plusDays(2)
+        val bar = JSONArray()
+        schedule?.windows.orEmpty().filter { it.end.isAfter(midnight) && it.start.isBefore(barEnd) }.sortedBy { it.start }.forEach { w ->
+            bar.put(JSONObject().put("start", w.start.withZoneSameInstant(KYIV).format(iso)).put("end", w.end.withZoneSameInstant(KYIV).format(iso))
+                .put("kind", if (w.maybe) "maybe" else "off"))
+        }
         return JSONObject()
             .put("available", true)
             .put("provider", schedule?.source?.displayName ?: JSONObject.NULL)
@@ -60,6 +74,7 @@ object OutageStatusBuilder {
             .put("schedule_dates", JSONArray(schedule?.publishedDates.orEmpty().map { it.toString() }))
             .put("schedule_updated_at", schedule?.updatedAt ?: JSONObject.NULL)
             .put("autonomy", autonomy.toJson())
+            .put("windows", bar)
             .put("fetched_at", fetchedAt ?: JSONObject.NULL)
             .put("error", error ?: JSONObject.NULL)
     }

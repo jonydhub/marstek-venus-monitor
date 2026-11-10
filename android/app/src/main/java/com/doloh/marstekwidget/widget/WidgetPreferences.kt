@@ -8,6 +8,7 @@ import com.doloh.marstekwidget.domain.AlertGroup
 import com.doloh.marstekwidget.domain.AlertMemory
 import com.doloh.marstekwidget.domain.AlertMemoryCodec
 import com.doloh.marstekwidget.domain.AlertSettings
+import com.doloh.marstekwidget.domain.JournalDetector
 import org.json.JSONObject
 
 data class WidgetDisplayOptions(
@@ -98,6 +99,7 @@ class WidgetPreferences(context: Context) {
             .putNullable("ctState", snapshot.ctState)
             .putNullable("powerOutageJson", snapshot.powerOutageJson)
             .putNullable("insightsJson", snapshot.insightsJson)
+            .put("batteryLinkLost", snapshot.batteryLinkLost)
         prefs.edit()
             .putString(KEY_SNAPSHOT, value.toString())
             .putLong(KEY_FETCHED_AT, System.currentTimeMillis())
@@ -138,6 +140,7 @@ class WidgetPreferences(context: Context) {
                 ctState = json.optNullableInt("ctState"),
                 powerOutageJson = json.optString("powerOutageJson").takeIf { it.isNotBlank() && it != "null" },
                 insightsJson = json.optString("insightsJson").takeIf { it.isNotBlank() && it != "null" },
+                batteryLinkLost = json.optBoolean("batteryLinkLost", false),
             )
         } catch (_: Exception) {
             null
@@ -178,7 +181,16 @@ class WidgetPreferences(context: Context) {
         prefs.edit().putInt(KEY_HIGH_LOAD_W, watts).apply()
     }
 
-    fun anyAlertsEnabled(): Boolean = alertSettings().enabledGroups.isNotEmpty()
+    fun anyAlertsEnabled(): Boolean = alertSettings().enabledGroups.isNotEmpty() || anomalyNotificationsEnabled()
+
+    /** «Сповіщати про аномалії» (journal anomalies: discharge above threshold, discharge on grid, temperature). */
+    fun anomalyNotificationsEnabled(): Boolean = prefs.getBoolean(KEY_ANOMALY_NOTIFY, true)
+    fun setAnomalyNotificationsEnabled(enabled: Boolean) { prefs.edit().putBoolean(KEY_ANOMALY_NOTIFY, enabled).apply() }
+    fun anomalyThresholdWatts(): Int = JournalDetector.clampThreshold(prefs.getInt(KEY_ANOMALY_W, JournalDetector.DEFAULT_ANOMALY_DISCHARGE_W))
+    fun setAnomalyThresholdWatts(watts: Int) { prefs.edit().putInt(KEY_ANOMALY_W, JournalDetector.clampThreshold(watts)).apply() }
+    /** Newest server journal event already seen (server mode notifications). */
+    fun lastSeenServerEventMillis(): Long = prefs.getLong(KEY_SERVER_EVENT_SEEN, -1L)
+    fun setLastSeenServerEventMillis(value: Long) { prefs.edit().putLong(KEY_SERVER_EVENT_SEEN, value).apply() }
 
     fun alertMemory(): AlertMemory? = AlertMemoryCodec.decode(prefs.getString(KEY_ALERT_MEMORY, null))
 
@@ -226,6 +238,9 @@ class WidgetPreferences(context: Context) {
         const val KEY_ERROR = "error"
         const val KEY_HIGH_LOAD_W = "notify.high_load_w"
         const val KEY_ALERT_MEMORY = "alerts.memory"
+        const val KEY_ANOMALY_NOTIFY = "notify.anomalies"
+        const val KEY_ANOMALY_W = "journal.anomaly_discharge_w"
+        const val KEY_SERVER_EVENT_SEEN = "journal.server_seen_ms"
         const val LEGACY_LIGHT_LOST = "notify.light_lost"
         const val LEGACY_LIGHT_RETURNED = "notify.light_returned"
         const val LEGACY_RESERVE = "notify.reserve_short"

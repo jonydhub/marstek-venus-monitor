@@ -30,6 +30,8 @@ data class BatterySnapshot(
     val ctState: Int? = null,
     val powerOutageJson: String? = null,
     val insightsJson: String? = null,
+    /** The server/poller got no answer from the battery (ES status failed or `connection.lost`): light is unknown. */
+    val batteryLinkLost: Boolean = false,
 ) {
     val powerOutage: PowerOutageInfo? by lazy {
         powerOutageJson?.let { raw -> runCatching { PowerOutageParser.parse(JSONObject(raw)) }.getOrNull() }
@@ -106,6 +108,9 @@ object BatterySnapshotParser {
             ctState = (mode.optFiniteDouble("ct_state") ?: meter.optFiniteDouble("ct_state"))?.toInt()?.takeIf { it in 0..1 },
             powerOutageJson = root.optJSONObject("power_outage")?.toString(),
             insightsJson = root.optJSONObject("insights")?.toString(),
+            // Server ≥ 1.2 reports 3 failed polls in a row as `connection.lost`; older servers only per-method `ok`.
+            batteryLinkLost = root.optJSONObject("connection")?.optBoolean("lost", false)
+                ?: (methods.optJSONObject("ES.GetStatus")?.let { it.has("ok") && !it.optBoolean("ok", true) } == true),
         )
     }
 

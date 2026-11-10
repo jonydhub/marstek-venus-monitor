@@ -19,7 +19,12 @@ class WidgetShapeSelectorTest {
 
     @Test
     fun gridSizesPickTheLayoutThatFillsThem() {
+        assertEquals(WidgetShape.SMALL, WidgetShapeSelector.select(120f, 120f))
         assertEquals(WidgetShape.SMALL, WidgetShapeSelector.select(160f, 160f))
+        // Samsung One UI 2×2 cells (≈ 170–190 dp) get the roomier square layout, not the compact one.
+        assertEquals(WidgetShape.SQUARE, WidgetShapeSelector.select(178f, 186f))
+        // …but a 4×2 never falls back to the square layout.
+        assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(340f, 186f))
         assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(340f, 160f))
         assertEquals(WidgetShape.TALL, WidgetShapeSelector.select(340f, 250f))
         assertEquals(WidgetShape.TALL, WidgetShapeSelector.select(200f, 260f))

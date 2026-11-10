@@ -21,17 +21,27 @@ data class Autonomy(
     val runtimeSeconds: Long?,
     val outageSeconds: Long?,
     val coversNextOutage: Boolean?,
+    val usableWh: Long? = null,
+    val floorPct: Double? = null,
+    val floorWh: Long? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("load_w", loadW ?: JSONObject.NULL)
         .put("load_basis", loadBasis ?: JSONObject.NULL)
         .put("stored_wh", storedWh ?: JSONObject.NULL)
+        .put("usable_wh", usableWh ?: JSONObject.NULL)
+        .put("floor_pct", floorPct ?: JSONObject.NULL)
+        .put("floor_wh", floorWh ?: JSONObject.NULL)
         .put("runtime_seconds", runtimeSeconds ?: JSONObject.NULL)
         .put("outage_seconds", outageSeconds ?: JSONObject.NULL)
         .put("covers_next_outage", coversNextOutage ?: JSONObject.NULL)
 }
 
-/** Port of outage.py `_autonomy`. */
+/**
+ * Port of outage.py `_autonomy`: runtime = usable energy above the discharge floor / load.
+ * Load: (1) during an outage the measured backup output; (2) the capacity-trend discharge; (3) configured average;
+ * (4) the 24 h measured backup average.
+ */
 object AutonomyCalculator {
     fun calculate(
         gridState: String,
@@ -40,27 +50,36 @@ object AutonomyCalculator {
         expectedLoadW: Double?,
         measuredLoadW: Double?,
         outageRemainingSeconds: Long?,
+        backupOutputW: Double? = null,
+        ratedWh: Double? = null,
+        socPercent: Double? = null,
+        floorPct: Double? = null,
+        backupThresholdW: Double = GridStateDetector.DEFAULT_THRESHOLD_W,
     ): Autonomy {
         val none = Autonomy(null, null, null, null, null, null)
         if (storedWh == null || !storedWh.isFinite() || storedWh < 0) return none
         val stored = Math.round(storedWh)
+        val rated = ratedWh?.takeIf { it.isFinite() && it > 0 }
+            ?: socPercent?.takeIf { it.isFinite() && it > 0 }?.let { storedWh / it * 100.0 }
+        val floorWh = if (floorPct != null && floorPct > 0 && rated != null) rated * floorPct / 100.0 else null
+        val usable = (storedWh - (floorWh ?: 0.0)).coerceAtLeast(0.0)
+        val base = none.copy(storedWh = stored, outageSeconds = outageRemainingSeconds, usableWh = Math.round(usable),
+            floorPct = floorWh?.let { floorPct }, floorWh = floorWh?.let { Math.round(it) })
         val measured = flow?.powerW
+        val backup = backupOutputW?.takeIf(Double::isFinite)
         val (load, basis) = when {
+            gridState == "off" && backup != null && abs(backup) >= backupThresholdW -> abs(backup) to "measured_backup_output"
             gridState == "off" && flow?.direction == "discharging" && measured != null -> abs(measured) to "measured_discharge"
             expectedLoadW != null && expectedLoadW > 0 -> expectedLoadW to "configured_average"
             measuredLoadW != null && measuredLoadW > 0 -> measuredLoadW to "measured_average_24h"
             else -> null to null
         }
-        if (load == null || !load.isFinite() || load <= 0.0) {
-            return none.copy(storedWh = stored, outageSeconds = outageRemainingSeconds)
-        }
-        val runtime = (storedWh / load * 3600.0).roundToLong()
-        return Autonomy(
+        if (load == null || !load.isFinite() || load <= 0.0) return base
+        val runtime = (usable / load * 3600.0).roundToLong()
+        return base.copy(
             loadW = Math.round(load * 10.0) / 10.0,
             loadBasis = basis,
-            storedWh = stored,
             runtimeSeconds = runtime,
-            outageSeconds = outageRemainingSeconds,
             coversNextOutage = outageRemainingSeconds?.let { runtime >= it },
         )
     }

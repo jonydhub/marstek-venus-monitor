@@ -9,6 +9,9 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
     FLAT_NARROW(100f, 40f),
     FLAT(220f, 40f),
     SMALL(100f, 110f),
+
+    /** Roomier 2×2 (Samsung One UI ≈ 170–190 dp cells): bigger ring/type plus today's durations. */
+    SQUARE(165f, 150f),
     WIDE(250f, 100f),
     TALL(180f, 190f),
     LARGE(250f, 280f),
@@ -20,6 +23,12 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
 
     /** The 4×4-style block (light chip + flows), at phone or tablet scale. */
     val isBlock: Boolean get() = this == LARGE || this == XLARGE
+
+    /** Shapes that show today's charge / discharge / no-light durations. */
+    val showsToday: Boolean get() = this == SQUARE || this == WIDE || this == TALL || isBlock
+
+    /** Shapes with the today + tomorrow schedule bar. */
+    val showsScheduleBar: Boolean get() = this == WIDE || isBlock
 }
 
 object WidgetShapeSelector {
