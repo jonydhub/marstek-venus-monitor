@@ -10,6 +10,12 @@
 
 <sub>Скриншоти з реальної Venus E 3.0 (режим «Напряму по Wi‑Fi», графік — Львівська область, черга 1.1). Більше — у [посібнику](docs/MANUAL.md).</sub>
 
+## ⬇️ Завантажити
+
+**[Завантажити APK (остання версія)](https://github.com/jonydhub/marstek-venus-monitor/releases/latest/download/Marstek-Venus-Monitor.apk)** — Android 8.0+ · [усі версії](https://github.com/jonydhub/marstek-venus-monitor/releases)
+
+Відкрийте посилання з телефона, встановіть файл (Android попросить дозвіл на встановлення з невідомих джерел) і пройдіть налаштування: [посібник](docs/MANUAL.md).
+
 ## Два режими
 
 | | **Напряму по Wi‑Fi** | **Сервер** |
