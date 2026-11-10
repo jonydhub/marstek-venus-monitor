@@ -48,7 +48,8 @@ def tooltip(status, stale=False, configured=True) -> str:
         v = view(status)
         head = "Marstek " + " · ".join(p for p in [f"{v.soc}%" if v.soc is not None else None,
                                                   kwh(v.capacity_wh) if v.capacity_wh is not None else None] if p)
-        light = {"on": "Світло є", "off": "Світла немає"}.get(v.grid, "Світло: —")
+        # Light comes only from the backup output of a FRESH poll; without a link it is unknown.
+        light = "Світло: невідомо" if stale else {"on": "Світло є", "off": "Світла немає"}.get(v.grid, "Світло: —")
         parts = [light]
         if v.direction == "charging":
             parts.append("заряджається" + (f", до 100% ≈ {duration(v.charge_eta_s)}" if v.charge_eta_s else ""))

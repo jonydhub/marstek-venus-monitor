@@ -64,6 +64,12 @@ class TrayApp:
             return self.open_settings()
         self.open_window("dashboard", self.ctl.dashboard_url(), APP_NAME)
 
+    def open_journal(self, *_):
+        """The server's journal section (light / connection / anomalies, CSV export) in the dashboard window."""
+        if not self.ctl.dashboard_url():
+            return self.open_settings()
+        self.open_window("dashboard", self.ctl.dashboard_url() + "#journal", APP_NAME)
+
     def open_settings(self, *_, anchor=""):
         self.open_window("settings", self.ctl.setup_url(anchor), f"Налаштування · {APP_NAME}")
 
@@ -100,6 +106,7 @@ class TrayApp:
         item, menu = self.pystray.MenuItem, self.pystray.Menu
         return menu(
             item("Відкрити дашборд", self.open_dashboard, default=True),
+            item("Журнал подій", self.open_journal),
             item("Налаштування", self.open_settings),
             menu.SEPARATOR,
             item("Запускати з Windows", self.toggle_autostart,

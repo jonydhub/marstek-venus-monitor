@@ -48,6 +48,12 @@ class TextTests(unittest.TestCase):
     def test_tooltip_stale(self):
         self.assertIn("немає зв", trayicon.tooltip(status(), stale=True).lower())
 
+    def test_lost_connection_never_reports_no_light(self):
+        tip = trayicon.tooltip(status(grid="off", direction="discharging", offgrid=210.0), stale=True)
+        self.assertNotIn("Світла немає", tip)
+        self.assertIn("Світло: невідомо", tip)
+        self.assertEqual("stale", trayicon.icon_state(status(grid="off"), stale=True))
+
 
 class RenderTests(unittest.TestCase):
     def test_render_returns_rgba_square(self):

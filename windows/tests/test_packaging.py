@@ -9,12 +9,20 @@ PACK = _path.WINDOWS / "packaging"
 
 
 class VersionTests(unittest.TestCase):
-    def test_version_is_1_1_0_everywhere(self):
-        self.assertEqual("1.1.0", VERSION)
+    def test_version_is_1_2_0_everywhere(self):
+        self.assertEqual("1.2.0", VERSION)
         info = (PACK / "version_info.txt").read_text("utf-8")
-        self.assertIn("filevers=(1, 1, 0, 0)", info)
+        self.assertIn("filevers=(1, 2, 0, 0)", info)
         self.assertEqual({VERSION}, set(re.findall(r"Version', '([0-9.]+)'", info)))
         self.assertIn(f'#define AppVersion "{VERSION}"', (PACK / "installer.iss").read_text("utf-8"))
+
+
+class JournalMenuTests(unittest.TestCase):
+    def test_tray_menu_opens_the_server_journal(self):
+        source = (_path.WINDOWS / "mvm" / "app.py").read_text("utf-8")
+        self.assertIn('item("Журнал подій", self.open_journal)', source)
+        self.assertIn('"#journal"', source)
+        self.assertIn('id="journal"', (_path.SERVER / "index.html").read_text("utf-8"))
 
 
 class PackagingInputsTests(unittest.TestCase):
