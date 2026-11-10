@@ -305,7 +305,7 @@ class AlertEvaluatorTest {
     @Test
     fun highTemperatureWithThreeDegreeHysteresis() {
         val hot = eval(null, snap(temp = 46.0))
-        assertTrue(hot.one(AlertId.TEMPERATURE_HIGH).text.contains("46,0 °C"))
+        assertTrue(hot.one(AlertId.TEMPERATURE_HIGH).text.contains("46,0 °C"))
         val cooler = eval(hot.memory, snap(temp = 43.0))
         assertFalse(AlertId.TEMPERATURE_HIGH in eval(cooler.memory, snap(temp = 46.0)).ids())
         val cool = eval(cooler.memory, snap(temp = 41.5)).memory

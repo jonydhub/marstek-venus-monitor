@@ -54,14 +54,14 @@ class WidgetSummaryResolverTest {
         // Autonomy runtime wins over the battery ETA: one number (trailing), verdict in the middle line.
         assertEquals("Запасу вистачить", s.secondary)
         assertEquals("до 22:00", s.trailingPrimary)
-        assertEquals("0% · 3 год 20 хв · 24,5 °C", s.trailingSecondary)
+        assertEquals("0% · 3 год 20 хв · 24,5 °C", s.trailingSecondary)
         val kinds = s.lines.map { it.kind }
         // No backup-output line (already in the headline) and no second runtime (ETA) line.
         assertEquals(listOf(SummaryLineKind.RETURN_TIME, SummaryLineKind.RESERVE, SummaryLineKind.TEMPERATURE), kinds)
         assertEquals("Повернення о 22:00", s.lines[0].text)
         assertEquals(SummaryTone.GOOD, s.lines[1].tone)
         assertEquals("Запас ≈ 3 год 20 хв · вистачить", s.lines[1].text)
-        assertEquals("Температура 24,5 °C", s.lines[2].text)
+        assertEquals("Температура 24,5 °C", s.lines[2].text)
         assertFalse(s.lines.any { it.text.contains("Резервний вихід") })
     }
 
@@ -73,7 +73,7 @@ class WidgetSummaryResolverTest {
         val enough = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.DISCHARGING, eta = 4 * 3600L, outage = noRuntime, offgrid = 400.0), now)
         assertEquals("Запасу вистачить", enough.secondary)
         assertEquals("Запас ≈ 4 год 0 хв · вистачить", enough.lines.first { it.kind == SummaryLineKind.RESERVE }.text)
-        assertEquals("0% · 4 год 0 хв · 24,5 °C", enough.trailingSecondary)
+        assertEquals("0% · 4 год 0 хв · 24,5 °C", enough.trailingSecondary)
         val short = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.DISCHARGING, eta = 2 * 3600L, outage = noRuntime, offgrid = 400.0), now)
         assertEquals("Запасу не вистачить", short.secondary)
         assertEquals("Запас ≈ 2 год 0 хв · не вистачить", short.lines.first { it.kind == SummaryLineKind.RESERVE }.text)
@@ -92,7 +92,7 @@ class WidgetSummaryResolverTest {
         assertEquals("Запасу не вистачить", s.secondary)
         assertEquals("Запас ≈ 3 год 20 хв · не вистачить", s.lines.first { it.kind == SummaryLineKind.RESERVE }.text)
         assertEquals(SummaryTone.CRITICAL, s.lines.first { it.kind == SummaryLineKind.RESERVE }.tone)
-        assertEquals("0% · 3 год 20 хв · 24,5 °C", s.trailingSecondary)
+        assertEquals("0% · 3 год 20 хв · 24,5 °C", s.trailingSecondary)
     }
 
     @Test
@@ -118,7 +118,7 @@ class WidgetSummaryResolverTest {
         assertEquals("Заряд ≈ 0,80 кВт", s.primary)
         assertEquals("Заряджається · ≈ 0,80 кВт", s.batteryState)
         assertEquals("1 год 20 хв", s.trailingPrimary)
-        assertEquals("до 100% · 24,5 °C", s.trailingSecondary)
+        assertEquals("до 100% · 24,5 °C", s.trailingSecondary)
         assertEquals("Світло є · відкл. 20:00", s.secondary)
         assertEquals(
             listOf(SummaryLineKind.ETA, SummaryLineKind.LIGHT, SummaryLineKind.RESERVE, SummaryLineKind.TEMPERATURE),
@@ -137,7 +137,7 @@ class WidgetSummaryResolverTest {
         assertEquals(GridState.UNKNOWN, s.lightState)
         assertEquals("Розряд ≈ 0,30 кВт", s.primary)
         assertEquals("5 год 0 хв", s.trailingPrimary)
-        assertEquals("до 0% · 24,5 °C", s.trailingSecondary)
+        assertEquals("до 0% · 24,5 °C", s.trailingSecondary)
         assertNull(s.secondary)
     }
 
@@ -149,7 +149,7 @@ class WidgetSummaryResolverTest {
         assertEquals("Очікування", s.batteryState)
         assertEquals("Відключення 20:00–22:00", s.secondary)
         assertEquals("≈ 8 год 0 хв", s.trailingPrimary)
-        assertEquals("запас · 24,5 °C", s.trailingSecondary)
+        assertEquals("запас · 24,5 °C", s.trailingSecondary)
         assertFalse(s.lines.any { it.kind == SummaryLineKind.POWER })
         assertFalse(s.primary.contains("0,00"))
         assertEquals(listOf(SummaryLineKind.LIGHT, SummaryLineKind.RESERVE, SummaryLineKind.TEMPERATURE), s.lines.map { it.kind })
@@ -183,7 +183,7 @@ class WidgetSummaryResolverTest {
     fun idleWithoutOutageInfoStillUseful() {
         val s = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE), now)
         assertEquals("Очікування", s.primary)
-        assertEquals("24,5 °C", s.trailingPrimary)
+        assertEquals("24,5 °C", s.trailingPrimary)
         assertNull(s.trailingSecondary)
         assertTrue(s.lines.any { it.kind == SummaryLineKind.TEMPERATURE })
     }
@@ -202,7 +202,7 @@ class WidgetSummaryResolverTest {
             snapshot(BatteryDirection.IDLE, temp = null, insights = """{"temperature_c":19.0,"soc_history":[]}"""),
             now,
         )
-        assertEquals("19,0 °C", s.trailingPrimary)
+        assertEquals("19,0 °C", s.trailingPrimary)
     }
 
     @Test

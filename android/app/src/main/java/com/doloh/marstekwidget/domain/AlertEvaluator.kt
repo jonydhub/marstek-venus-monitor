@@ -417,7 +417,7 @@ object AlertEvaluator {
     private fun duration(seconds: Long): String = EtaTextFormatter.formatSeconds(seconds.coerceAtLeast(1))
     private fun watts(value: Double): String = String.format(uk, "%.0f W", abs(value))
     private fun kwh(wh: Double): String = String.format(uk, "%.2f kWh", wh / 1000.0)
-    private fun celsius(value: Double): String = String.format(uk, "%.1f °C", value)
+    private fun celsius(value: Double): String = String.format(uk, "%.1f\u00A0°C", value)
 }
 
 /** JSON persistence for [AlertMemory] (stored as one SharedPreferences string). */

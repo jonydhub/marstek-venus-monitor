@@ -132,7 +132,7 @@
     <string name="main_temperature">Температура</string>
     <string name="main_battery_capacity_value">Ємність · %1$s</string>
     <string name="main_temperature_value">Температура · %1$s</string>
-    <string name="main_temperature_unit">%1$s °C</string>
+    <string name="main_temperature_unit">%1$s\u00A0°C</string>
     <string name="main_soc_value">%1$d%%</string>
     <string name="main_flow_title">Потоки енергії</string>
     <string name="main_grid">Мережа · знак API</string>

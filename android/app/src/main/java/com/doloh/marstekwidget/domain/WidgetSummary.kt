@@ -187,5 +187,5 @@ object WidgetSummaryResolver {
 
     fun formatWatts(watts: Double): String = String.format(uk, "%.0f W", abs(watts))
     fun formatKw(watts: Double): String = String.format(uk, "%.2f кВт", abs(watts) / 1000.0)
-    fun formatTemperature(celsius: Double): String = String.format(uk, "%.1f °C", celsius)
+    fun formatTemperature(celsius: Double): String = String.format(uk, "%.1f\u00A0°C", celsius)
 }
