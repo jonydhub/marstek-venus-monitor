@@ -1,6 +1,6 @@
 import unittest
 
-from events import DetectorState, Observation, step
+from events import CATEGORIES, DetectorState, Observation, initial_state_event, server_started_event, step
 
 DOWN = Observation(ok=False)
 
@@ -20,6 +20,22 @@ def run(observations, start=1000.0, step_s=30.0, threshold=2000.0):
 
 def kinds(events):
     return [e["kind"] for e in events]
+
+
+class SystemEventsTests(unittest.TestCase):
+    def test_server_started_is_a_system_event(self):
+        event = server_started_event(1000.0)
+        self.assertEqual((event["kind"], event["category"]), ("server_started", "system"))
+        self.assertTrue(event["text"].startswith("Сервер запущено"))
+        self.assertIn("1.3.0", server_started_event(1000.0, "1.3.0")["text"])
+
+    def test_initial_state_names_light_direction_and_soc(self):
+        self.assertEqual(initial_state_event(up(soc=100), 5.0)["text"], "Стан на старті: світло є · очікування · заряд 100%")
+        off = initial_state_event(up(grid="off", direction="discharging", backup_w=121.4, soc=64), 5.0)
+        self.assertEqual(off["text"], "Стан на старті: світла нема (резервний вихід 121 Вт) · розряджається · заряд 64%")
+        unknown = initial_state_event(Observation(ok=True), 5.0)
+        self.assertEqual(unknown["text"], "Стан на старті: стан світла невідомий")
+        self.assertEqual(CATEGORIES["initial_state"], "system")
 
 
 class LightFromBackupOutputOnlyTests(unittest.TestCase):

@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 enum class JournalCategory(val title: String) {
-    LIGHT("Світло"), BATTERY("Батарея"), CONNECTION("Зв'язок"), ANOMALY("Аномалія");
+    LIGHT("Світло"), BATTERY("Батарея"), CONNECTION("Зв'язок"), ANOMALY("Аномалія"), SYSTEM("Система");
 
     val id: String get() = name.lowercase()
 

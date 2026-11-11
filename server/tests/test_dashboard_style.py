@@ -1,3 +1,6 @@
+import subprocess
+import shutil
+import json
 import unittest
 from pathlib import Path
 
@@ -56,7 +59,7 @@ class OfficialStyleDashboardTests(unittest.TestCase):
     def test_context_hero_sits_above_battery_summary(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         for marker in ('id="hero"', 'id="hero-title"', 'id="hero-sub"', 'id="hero-forecast"',
-                       'id="today-charge"', 'id="today-discharge"', 'id="today-outage"', 'id="schedule-bar"',
+                       'id="today-charge"', 'id="today-discharge"', 'id="today-outage"', 'id="schedule-days"',
                        'id="soc-chart"', 'id="backup-today"', 'id="journal"', 'id="journal-csv"'):
             with self.subTest(marker=marker):
                 self.assertIn(marker, html)
@@ -71,13 +74,62 @@ class OfficialStyleDashboardTests(unittest.TestCase):
         script = (ROOT / "app.js").read_text(encoding="utf-8")
         self.assertIn("function renderHero", script)
         self.assertIn("function renderSocChart", script)
-        self.assertIn("function renderScheduleBar", script)
+        self.assertIn("function renderScheduleDays", script)
+        self.assertIn("function scheduleDetail", script)
         self.assertIn("outage_periods", script)
         self.assertIn("chart_events", script)
         self.assertIn("/api/events", script)
         self.assertIn("data.insights", script)
         self.assertIn("measured_average_24h", script)
         self.assertNotIn("<script src=\"http", (ROOT / "index.html").read_text(encoding="utf-8"))
+
+def _extract(script, name):
+    """Source of one top-level `function name(...) {...}` (brace matched)."""
+    start = script.index(f"function {name}(")
+    depth, i = 0, script.index(") {", start) + 2
+    while True:
+        if script[i] == "{":
+            depth += 1
+        elif script[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return script[start:i + 1]
+        i += 1
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class WebScheduleTextTests(unittest.TestCase):
+    """Hero text never says «Повернення о …» while the backup output shows the light is on."""
+
+    def run_js(self, body):
+        script = (ROOT / "app.js").read_text(encoding="utf-8")
+        funcs = "\n".join(_extract(script, n) for n in ("formatClock", "kyivMidnight", "kyivHm", "scheduleDetail", "scheduleDays"))
+        code = funcs + "\n" + body
+        return subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+
+    def test_grid_on_during_window_and_return_only_when_off(self):
+        out = self.run_js("""
+            const now = Date.now(), iso = t => new Date(t).toISOString();
+            const cur = {start: iso(now - 3600e3), end: iso(now + 3600e3)};
+            const o = {available: true, schedule_published: true, current_outage: cur};
+            console.log(JSON.stringify([scheduleDetail(o, 'on'), scheduleDetail(o, 'off'), scheduleDetail(o, 'unknown')]));
+        """)
+        on, off, unknown = json.loads(out)
+        self.assertTrue(on.startswith("За графіком відключення до ") and on.endswith(" · світло є"), on)
+        self.assertTrue(off.startswith("Повернення о "), off)
+        self.assertTrue(unknown.startswith("За графіком відключення до ") and "світло" not in unknown, unknown)
+
+    def test_days_split_windows_and_mark_tomorrow_unpublished(self):
+        out = self.run_js("""
+            const start = kyivMidnight(new Date());
+            const w = (a, b, kind) => ({start: new Date(start + a * 3600e3).toISOString(), end: new Date(start + b * 3600e3).toISOString(), kind});
+            const o = {available: true, schedule_published: true, schedule_dates: [], windows: [w(7, 13, 'off'), w(15, 21, 'off'), w(21, 22, 'maybe')]};
+            const days = scheduleDays(o, start + 9.5 * 3600e3);
+            console.log(JSON.stringify(days.map(d => [d.title, d.published, d.text, d.maybe])));
+        """)
+        today, tomorrow = json.loads(out)
+        self.assertEqual(today, ["Сьогодні", True, "Відключення 07:00–13:00, 15:00–21:00", ["21:00–22:00"]])
+        self.assertEqual(tomorrow[:3], ["Завтра", False, "Графік ще не опубліковано"])
 
 
 if __name__ == "__main__":

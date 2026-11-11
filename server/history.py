@@ -66,7 +66,7 @@ class HistoryStore:
             self.conn.execute(f"INSERT INTO events ({','.join(EVENT_COLUMNS)}) VALUES (?,?,?,?,?)", values)
 
     def events(self, limit=200, category=None, since=None):
-        """Newest first. `category`: light / battery / connection / anomaly."""
+        """Newest first. `category`: light / battery / connection / anomaly / system."""
         query = f"SELECT {','.join(EVENT_COLUMNS)} FROM events"
         where, args = [], []
         if category:
@@ -81,6 +81,12 @@ class HistoryStore:
         args.append(max(1, min(1000, int(limit))))
         with self.lock:
             return [dict(zip(EVENT_COLUMNS, values)) for values in self.conn.execute(query, args).fetchall()]
+
+    def first_event_ts(self):
+        """Oldest kept event (journal start within the 30-day retention), or None."""
+        with self.lock:
+            row = self.conn.execute("SELECT MIN(ts) FROM events").fetchone()
+        return row[0] if row and row[0] is not None else None
 
     def since(self, start_ts):
         with self.lock:

@@ -200,7 +200,7 @@ class AlertEvaluatorTest {
         val published = eval(first.memory, snap(nextStart = at(120), nextEnd = at(360)))
         val alert = published.one(AlertId.SCHEDULE_PUBLISHED)
         assertEquals("Графік оновлено (черга 1.1)", alert.title)
-        assertTrue(alert.text, alert.text.contains("Відключення 21:00–01:00"))
+        assertTrue(alert.text, alert.text.contains("Відключення о 21:00"))
         val same = eval(published.memory, snap(nextStart = at(120), nextEnd = at(360)))
         assertFalse(AlertId.SCHEDULE_PUBLISHED in same.ids())
         val changed = eval(same.memory, snap(nextStart = at(180), nextEnd = at(360)))

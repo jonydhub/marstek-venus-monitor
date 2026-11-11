@@ -58,11 +58,27 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
     }
 
     /** Server journal (GET /api/events, newest first); null when unreachable or older server without it. */
-    suspend fun fetchEvents(limit: Int = 200): List<JournalEvent>? {
-        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return null
-        val raw = fetchJson("${base.trimEnd('/')}/api/events?limit=$limit") as? Raw.Ok ?: return null
-        val arr = raw.root.optJSONArray("events") ?: return null
-        return (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(JournalEvent::fromJson) }
+    suspend fun fetchEvents(limit: Int = 200): List<JournalEvent>? = (fetchJournal(limit) as? JournalFetch.Ok)?.events
+
+    /** Server journal; tells an old server without /api/events (HTTP 404) apart from other failures. */
+    suspend fun fetchJournal(limit: Int = 200): JournalFetch {
+        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return JournalFetch.Failed("Сервер не налаштовано")
+        return when (val raw = fetchJson("${base.trimEnd('/')}/api/events?limit=$limit")) {
+            is Raw.Ok -> {
+                val arr = raw.root.optJSONArray("events") ?: return JournalFetch.Failed("Неочікувана відповідь сервера")
+                val started = raw.root.optString("journal_started_at").takeIf(String::isNotBlank)
+                    ?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+                JournalFetch.Ok((0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(JournalEvent::fromJson) }, started)
+            }
+            is Raw.Failed -> if (raw.message == "HTTP 404") JournalFetch.NotSupported else JournalFetch.Failed(raw.message)
+            Raw.NeedsSignIn -> JournalFetch.Failed("Потрібен вхід")
+        }
+    }
+
+    sealed class JournalFetch {
+        data class Ok(val events: List<JournalEvent>, val startedAtMillis: Long?) : JournalFetch()
+        object NotSupported : JournalFetch()
+        data class Failed(val message: String) : JournalFetch()
     }
 
     private suspend fun fetchJson(statusUrl: String): Raw {

@@ -22,6 +22,7 @@ CATEGORIES = {
     "charging_started": "battery", "charging_stopped": "battery", "charged_full": "battery",
     "connection_lost": "connection", "connection_restored": "connection",
     "anomaly_high_discharge": "anomaly", "anomaly_discharge_on_grid": "anomaly", "anomaly_temperature": "anomaly",
+    "server_started": "system", "initial_state": "system",
 }
 
 
@@ -69,6 +70,24 @@ def duration_text(seconds) -> str:
 def _event(ts, kind, text, value=None):
     return {"ts": float(ts), "kind": kind, "category": CATEGORIES[kind], "text": text,
             "value": None if value is None else round(float(value), 1)}
+
+
+def server_started_event(now, version=None):
+    """One «Сервер запущено» line per process start, so the journal is never empty after a (re)start."""
+    suffix = f" (версія {version})" if version else ""
+    return _event(now, "server_started", f"Сервер запущено{suffix}; журнал фіксує зміни світла, заряду та зв'язку")
+
+
+def initial_state_event(obs: Observation, now):
+    """The state at the first answered poll after start: light (backup output only), battery direction, SOC."""
+    grid = {"on": "світло є", "off": "світла нема"}.get(obs.grid_state, "стан світла невідомий")
+    backup = _num(obs.backup_w)
+    if obs.grid_state == "off" and backup is not None:
+        grid += f" (резервний вихід {round(abs(backup))} Вт)"
+    direction = {"charging": "заряджається", "discharging": "розряджається", "idle": "очікування"}.get(obs.direction)
+    parts = [grid, direction, f"заряд {obs.soc}%" if obs.soc is not None else None]
+    return _event(now, "initial_state", "Стан на старті: " + " · ".join(p for p in parts if p),
+                  obs.soc if obs.soc is not None else None)
 
 
 def clamp_threshold(value) -> float:

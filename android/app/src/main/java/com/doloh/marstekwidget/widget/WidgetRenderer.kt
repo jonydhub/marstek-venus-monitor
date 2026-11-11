@@ -26,9 +26,11 @@ import com.doloh.marstekwidget.domain.BatteryWarningResolver
 import com.doloh.marstekwidget.domain.GridState
 import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
-import com.doloh.marstekwidget.domain.ScheduleBar
+import com.doloh.marstekwidget.domain.ScheduleDays
 import com.doloh.marstekwidget.domain.TodayFormatter
-import com.doloh.marstekwidget.ui.ScheduleBarPainter
+import com.doloh.marstekwidget.ui.DayScheduleBarPainter
+import com.doloh.marstekwidget.ui.ScheduleActivity
+import com.doloh.marstekwidget.ui.SocBarPainter
 import com.doloh.marstekwidget.ui.SocChartPainter
 import com.doloh.marstekwidget.domain.OperatingModeFormatter
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
@@ -89,29 +91,53 @@ object WidgetRenderer {
             lastFetchedAtMillis = preferences.lastFetchedAtMillis(),
             alert = AlertEvaluator.top(AlertNotifier.activeAlerts(context)),
         )
-        val views = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // The launcher picks the entry that fits the real cell size, so no layout leaves empty bands.
-            RemoteViews(WidgetShape.entries.associate { shape ->
+        val sizes = reportedSizes(manager, widgetId)
+        val views = when {
+            // Real launcher sizes (portrait + landscape, or the exact list on API 31+): one entry per size, each laid
+            // out and its bitmaps drawn for that size, so the content fills the cell instead of leaving empty bands.
+            sizes.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> RemoteViews(sizes.associate { (w, h) ->
+                SizeF(w, h) to build(context, WidgetShapeSelector.select(w, h), variant, input, widgetId, w to h)
+            })
+            sizes.isNotEmpty() -> {
+                val portrait = context.resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                val (w, h) = if (portrait) sizes.first() else sizes.last()
+                build(context, WidgetShapeSelector.select(w, h), variant, input, widgetId, w to h)
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> RemoteViews(WidgetShape.entries.associate { shape ->
                 SizeF(shape.minWidthDp, shape.minHeightDp) to build(context, shape, variant, input, widgetId)
             })
-        } else {
-            build(context, legacyShape(manager, widgetId, variant), variant, input, widgetId)
+            else -> build(context, WidgetShapeSelector.defaultFor(variant), variant, input, widgetId)
         }
         manager.updateAppWidget(widgetId, views)
     }
 
-    private fun legacyShape(manager: AppWidgetManager, widgetId: Int, variant: WidgetVariant): WidgetShape {
-        val options = manager.getAppWidgetOptions(widgetId)
-        val width = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
-        val height = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
-        if (width <= 0 || height <= 0) return WidgetShapeSelector.defaultFor(variant)
-        return WidgetShapeSelector.select(width.toFloat(), height.toFloat())
+    /**
+     * Cell sizes in dp from AppWidgetManager options: OPTION_APPWIDGET_SIZES (API 31+) when present, else
+     * portrait (minWidth × maxHeight) and landscape (maxWidth × minHeight). Empty when the launcher reports nothing.
+     */
+    private fun reportedSizes(manager: AppWidgetManager, widgetId: Int): List<Pair<Float, Float>> {
+        val options = runCatching { manager.getAppWidgetOptions(widgetId) }.getOrNull() ?: return emptyList()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            @Suppress("DEPRECATION")
+            val list = runCatching { options.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES) }.getOrNull()
+            val exact = list.orEmpty().filter { it.width > 0f && it.height > 0f }.map { it.width to it.height }.distinct()
+            if (exact.isNotEmpty()) return exact.take(8)
+        }
+        val minW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+        val maxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0)
+        val minH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+        val maxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+        return listOfNotNull(
+            WidgetShapeSelector.portraitSize(minW, maxW, minH, maxH),
+            WidgetShapeSelector.landscapeSize(minW, maxW, minH, maxH),
+        ).distinct()
     }
 
     fun layoutFor(shape: WidgetShape): Int = when (shape) {
         WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> R.layout.widget_shape_flat
         WidgetShape.SMALL -> R.layout.widget_shape_small
         WidgetShape.SQUARE -> R.layout.widget_shape_square
+        WidgetShape.SQUARE_TALL -> R.layout.widget_shape_square_tall
         WidgetShape.WIDE -> R.layout.widget_shape_wide
         WidgetShape.TALL -> R.layout.widget_shape_tall
         WidgetShape.LARGE -> R.layout.widget_shape_large
@@ -126,7 +152,16 @@ object WidgetRenderer {
     }
 
     /** Builds one size-specific RemoteViews; only touches view IDs that exist in that shape's layout. */
-    fun build(context: Context, shape: WidgetShape, variant: WidgetVariant, input: WidgetRenderInput, widgetId: Int): RemoteViews {
+    fun build(
+        context: Context,
+        shape: WidgetShape,
+        variant: WidgetVariant,
+        input: WidgetRenderInput,
+        widgetId: Int,
+        /** Real cell size in dp (bitmaps, ring and type are scaled to it); shape minimum when unknown. */
+        sizeDp: Pair<Float, Float>? = null,
+    ): RemoteViews {
+        val size = sizeDp ?: (shape.minWidthDp to shape.minHeightDp)
         val views = RemoteViews(context.packageName, layoutFor(shape))
         val snapshot = input.snapshot
         val options = input.options
@@ -151,7 +186,7 @@ object WidgetRenderer {
 
         // Freshness.
         val compactUpdated = shape == WidgetShape.FLAT || shape == WidgetShape.FLAT_NARROW || shape == WidgetShape.SMALL ||
-            shape == WidgetShape.SQUARE || shape == WidgetShape.WIDE
+            shape == WidgetShape.SQUARE || shape == WidgetShape.SQUARE_TALL || shape == WidgetShape.WIDE
         views.setTextViewText(
             R.id.widget_updated,
             if (compactUpdated) compactUpdatedText(context, snapshot, input) else fullUpdatedText(context, snapshot, input, variant),
@@ -162,21 +197,21 @@ object WidgetRenderer {
 
         when (shape) {
             WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> renderFlat(views, context, shape, summary, warning, input)
-            WidgetShape.SMALL, WidgetShape.SQUARE -> renderSmall(views, context, shape, summary, warning, input)
+            WidgetShape.SMALL, WidgetShape.SQUARE, WidgetShape.SQUARE_TALL -> renderSmall(views, context, shape, summary, warning, input, size)
             WidgetShape.WIDE, WidgetShape.TALL -> {
-                renderCapacity(views, context, snapshot, options, full = true)
+                renderCapacity(views, context, snapshot, options, full = true, widthDp = size.first)
                 renderLines(views, context, shape, summary, warning, input)
             }
             WidgetShape.LARGE, WidgetShape.XLARGE -> {
-                renderCapacity(views, context, snapshot, options, full = true)
+                renderCapacity(views, context, snapshot, options, full = true, widthDp = size.first)
                 renderLines(views, context, shape, summary, warning, input)
                 renderPowerBlock(views, context, snapshot, summary, input)
                 renderFlows(views, context, snapshot, options)
             }
         }
         if (shape.showsToday) renderToday(views, shape, snapshot)
-        if (shape.showsScheduleBar) renderSchedule(views, context, shape, snapshot, input)
-        if (shape.isBlock) renderChart(views, context, shape, snapshot, input)
+        if (shape.showsScheduleBar) renderSchedule(views, context, shape, snapshot, input, size.first)
+        if (shape.isBlock) renderChart(views, context, shape, snapshot, input, size)
         bindActions(context, views, widgetId, shape)
         return views
     }
@@ -190,7 +225,7 @@ object WidgetRenderer {
         val secondary = when {
             alert != null -> warningText(context, alert)
             narrow && summary != null -> summary.trailingPrimary
-            summary != null -> summary.secondary
+            summary != null -> summary.secondary?.let { if (summary.primary.startsWith("Світло є")) it.removeSuffix(PowerOutageFormatter.LIGHT_ON_SUFFIX) else it }
             else -> noDataHint(context, input.state)
         }
         views.setTextViewText(R.id.widget_secondary, secondary.orEmpty())
@@ -210,35 +245,63 @@ object WidgetRenderer {
 
     private fun renderToday(views: RemoteViews, shape: WidgetShape, snapshot: BatterySnapshot?) {
         val today = snapshot?.insights?.today
-        val text = TodayFormatter.compact(today)?.let { if (shape == WidgetShape.SQUARE) it else "Сьогодні: $it" }
+        val text = TodayFormatter.compact(today)?.let { if (shape == WidgetShape.SQUARE || shape == WidgetShape.SQUARE_TALL) it else "Сьогодні: $it" }
         views.setViewVisibility(R.id.widget_today, visibility(text != null))
         text?.let { views.setTextViewText(R.id.widget_today, it) }
     }
 
-    private fun renderSchedule(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput) {
+    private fun renderSchedule(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput, widthDp: Float) {
         val info = snapshot?.powerOutage
-        views.setViewVisibility(R.id.widget_schedule_group, visibility(info != null && info.scheduleEnabled))
+        views.setViewVisibility(R.id.widget_schedule_group, visibility(info != null && info.scheduleEnabled && !info.scheduleUnavailable))
         info ?: return
-        val model = ScheduleBar.model(info.windows, input.now.toInstant().toEpochMilli())
-        // The 4×4 light chip already names the queue.
-        val caption = listOfNotNull("Сьогодні", info.group?.takeIf { !shape.isBlock }?.let { "черга $it" },
-            if (info.windows.isEmpty()) (if (info.schedulePublished) "без відключень" else "графік не опубліковано") else null).joinToString(" · ")
-        views.setTextViewText(R.id.widget_schedule_caption, caption)
+        val days = ScheduleDays.days(info, input.now.toInstant().toEpochMilli())
+        val today = days[0]
+        val tomorrow = days[1]
         val density = context.resources.displayMetrics.density
-        val widthDp = if (shape == WidgetShape.XLARGE) 420f else 320f
-        val heightDp = if (shape == WidgetShape.XLARGE) 12f else 8f
-        val bitmap = Bitmap.createBitmap((widthDp * density).roundToInt(), (heightDp * density).roundToInt(), Bitmap.Config.ARGB_8888)
-        ScheduleBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), model, density)
+        val barWidthDp = (widthDp - 28f).coerceAtLeast(80f)
+        if (shape == WidgetShape.SQUARE_TALL) {
+            // Today only, full width; the caption names today's windows. Nothing to draw → the state line already
+            // says «графік не опубліковано» / «без відключень», so the row is dropped instead of repeating it.
+            if (today.segments.isEmpty()) {
+                views.setViewVisibility(R.id.widget_schedule_group, View.GONE)
+                return
+            }
+            // No caption: the state line above already carries the schedule sentence; the bar + now marker show the day.
+            views.setViewVisibility(R.id.widget_schedule_caption, View.GONE)
+            val bitmap = Bitmap.createBitmap((barWidthDp * density).roundToInt(), (9f * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            DayScheduleBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), today, density)
+            views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
+            views.setContentDescription(R.id.widget_schedule_bar, listOfNotNull(today.summary, today.maybeText).joinToString("; "))
+            return
+        }
+        // Today | tomorrow halves, each 0–24 h; the 4×4 light chip already names the queue.
+        views.setTextViewText(R.id.widget_schedule_caption, listOfNotNull("Сьогодні", info.group?.takeIf { !shape.isBlock }?.let { "черга $it" },
+            today.windowsText.takeIf { today.definite.isEmpty() }?.lowercase()).joinToString(" · "))
+        views.setTextViewText(R.id.widget_schedule_caption_tomorrow, if (tomorrow.published) "Завтра" + (if (tomorrow.definite.isEmpty()) " · без відключень" else "") else "Завтра · ще не опубліковано")
+        val heightDp = if (shape == WidgetShape.XLARGE) 12f else 9f
+        val w = (barWidthDp * density).roundToInt()
+        val h = (heightDp * density).roundToInt()
+        val gap = 6f * density
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val half = (w - gap) / 2f
+        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), today, density)
+        canvas.save()
+        canvas.translate(half + gap, 0f)
+        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), tomorrow, density)
+        canvas.restore()
         views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
+        views.setContentDescription(R.id.widget_schedule_bar, "${today.summary}; ${tomorrow.summary}")
     }
 
     /** 4×4+: 24 h SOC line with no-light periods shaded and the reserve floor — fills the card's free height. */
-    private fun renderChart(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput) {
+    private fun renderChart(views: RemoteViews, context: Context, shape: WidgetShape, snapshot: BatterySnapshot?, input: WidgetRenderInput, size: Pair<Float, Float>) {
         val history = snapshot?.insights?.socHistory.orEmpty()
         views.setViewVisibility(R.id.widget_chart, visibility(history.size >= 2))
         if (history.size < 2) return
         val density = context.resources.displayMetrics.density
-        val (w, h) = if (shape == WidgetShape.XLARGE) 420f to 150f else 330f to 110f
+        val w = (size.first - 28f).coerceAtLeast(200f)
+        val h = if (shape == WidgetShape.XLARGE) 150f else 110f
         val bitmap = Bitmap.createBitmap((w * density).roundToInt(), (h * density).roundToInt(), Bitmap.Config.ARGB_8888)
         SocChartPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), SocChartPainter.Input(
             history, snapshot?.insights?.outagePeriods.orEmpty(), snapshot?.insights?.chartEvents.orEmpty(),
@@ -246,10 +309,25 @@ object WidgetRenderer {
         views.setImageViewBitmap(R.id.widget_chart, bitmap)
     }
 
-    private fun renderSmall(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput) {
+    private fun renderSmall(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput, size: Pair<Float, Float>) {
         val snapshot = input.snapshot
         val soc = snapshot?.socPercent?.coerceIn(0, 100)
-        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, if (shape == WidgetShape.SQUARE) 76f else 60f))
+        val ringDp = ringSizeDp(shape, size.first, size.second)
+        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, ringDp))
+        if (shape == WidgetShape.SQUARE_TALL) {
+            views.setTextViewTextSize(R.id.widget_soc_text, android.util.TypedValue.COMPLEX_UNIT_SP, (ringDp * 0.27f).coerceIn(18f, 30f))
+            views.setTextViewTextSize(R.id.widget_capacity_text, android.util.TypedValue.COMPLEX_UNIT_SP, (ringDp * 0.12f).coerceIn(9f, 13f))
+            views.setImageViewBitmap(R.id.widget_soc_bar, socBarBitmap(context, soc, size.first - 24f, 6f))
+            views.setViewVisibility(R.id.widget_soc_bar, visibility(input.options.showSoc))
+            // Reserve line only in taller cells and only when the trailing column shows an ETA (else it repeats the reserve).
+            val etaDriven = summary?.mode == SummaryMode.CHARGING || summary?.mode == SummaryMode.DISCHARGING
+            val reserve = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RESERVE }?.takeIf { etaDriven && size.second >= 225f }
+            views.setViewVisibility(R.id.widget_line_1, visibility(reserve != null))
+            reserve?.let {
+                views.setTextViewText(R.id.widget_line_1, it.text)
+                views.setTextColor(R.id.widget_line_1, toneColor(it.tone, Color.rgb(201, 213, 220)))
+            }
+        }
         views.setViewVisibility(R.id.widget_soc_ring_container, visibility(input.options.showSoc))
         views.setTextViewText(R.id.widget_capacity_text, compactEnergyText(context, snapshot))
         views.setViewVisibility(R.id.widget_capacity_text, visibility(input.options.showCapacity))
@@ -263,15 +341,26 @@ object WidgetRenderer {
             views.setViewVisibility(R.id.widget_trailing_secondary, View.GONE)
         }
         val alert = warning?.takeIf { it != BatteryWarning.HIGH_POWER }
-        // 2x2 header holds only the state word; the rest of the primary line moves into the body text.
-        summary?.let { views.setTextViewText(R.id.widget_primary, it.primary.substringBefore(SEP)) }
-        val tail = summary?.primary?.substringAfter(SEP, "")?.takeIf(String::isNotBlank)
+        // 2×2 header = the light state only (tap → schedule); the battery part of the primary line moves into the body.
+        val light = LightStatusResolver.resolve(snapshot, input.state == WidgetFetchState.ERROR, input.now)
+        if (summary != null) {
+            views.setTextViewText(R.id.widget_primary, light.headline)
+            views.setTextColor(R.id.widget_primary, if (light.kind == LightKind.ON) Color.rgb(243, 247, 250) else modeColor(summary.mode))
+        }
+        val tail = when (summary?.mode) {
+            SummaryMode.CHARGING, SummaryMode.DISCHARGING -> summary.primary
+            null -> null
+            else -> summary.primary.substringAfter(SEP, "").takeIf(String::isNotBlank)
+        }
         val secondary = when {
             alert != null -> warningText(context, alert)
-            summary != null -> listOfNotNull(tail, summary.secondary).joinToString(SEP).replaceFirstChar { it.titlecase(Locale.getDefault()) }
+            // The header already says «Світло є», so the schedule sentence drops its «· світло є» tail.
+            summary != null -> listOfNotNull(tail, summary.secondary
+                ?.removePrefix(light.headline + SEP)?.removePrefix(light.headline)?.removeSuffix(PowerOutageFormatter.LIGHT_ON_SUFFIX)
+                ?.takeIf(String::isNotBlank)).joinToString(SEP).replaceFirstChar { it.titlecase(Locale.getDefault()) }
             else -> noDataHint(context, input.state)
         }
-        views.setTextViewText(R.id.widget_secondary, secondary.orEmpty())
+        views.setTextViewText(R.id.widget_secondary, secondary.orEmpty().replace("відкл. ", "відкл.\u00A0"))
         views.setTextColor(R.id.widget_secondary, alert?.let { warningColor(context, it) }
             ?: if (summary?.mode == SummaryMode.OUTAGE) toneColor(reserveTone(summary), Color.rgb(201, 213, 220)) else Color.rgb(201, 213, 220))
         views.setViewVisibility(R.id.widget_secondary, visibility(!secondary.isNullOrBlank()))
@@ -280,17 +369,18 @@ object WidgetRenderer {
     private fun setTrailing(views: RemoteViews, summary: WidgetSummary, options: WidgetDisplayOptions) {
         val etaDriven = summary.mode == SummaryMode.CHARGING || summary.mode == SummaryMode.DISCHARGING
         val showPrimary = !etaDriven || options.showEta
-        views.setTextViewText(R.id.widget_trailing_primary, summary.trailingPrimary)
+        // «≈ 3 д 15 год» wraps as «≈ 3 д» / «15 год», never «15» / «год».
+        views.setTextViewText(R.id.widget_trailing_primary, keepUnits(summary.trailingPrimary))
         views.setTextColor(R.id.widget_trailing_primary, if (summary.mode == SummaryMode.OUTAGE) Color.rgb(255, 210, 100) else Color.WHITE)
         views.setViewVisibility(R.id.widget_trailing_primary, visibility(showPrimary))
         val secondary = summary.trailingSecondary
-        views.setTextViewText(R.id.widget_trailing_secondary, secondary.orEmpty())
+        views.setTextViewText(R.id.widget_trailing_secondary, secondary?.let(::keepUnits).orEmpty())
         views.setViewVisibility(R.id.widget_trailing_secondary, visibility(secondary != null && (summary.mode != SummaryMode.OUTAGE || options.showEta)))
     }
 
-    private fun renderCapacity(views: RemoteViews, context: Context, snapshot: BatterySnapshot?, options: WidgetDisplayOptions, full: Boolean) {
-        views.setProgressBar(R.id.widget_soc_progress, 100, snapshot?.socPercent ?: 0, false)
-        views.setViewVisibility(R.id.widget_soc_progress, visibility(options.showSoc))
+    private fun renderCapacity(views: RemoteViews, context: Context, snapshot: BatterySnapshot?, options: WidgetDisplayOptions, full: Boolean, widthDp: Float) {
+        views.setImageViewBitmap(R.id.widget_soc_bar, socBarBitmap(context, snapshot?.socPercent, widthDp - 26f, 6f))
+        views.setViewVisibility(R.id.widget_soc_bar, visibility(options.showSoc))
         views.setTextViewText(R.id.widget_capacity_text, if (full) capacityText(context, snapshot) else compactEnergyText(context, snapshot))
         views.setViewVisibility(R.id.widget_capacity_text, visibility(options.showCapacity))
     }
@@ -352,7 +442,7 @@ object WidgetRenderer {
         val headline = light.headline
         views.setTextViewText(R.id.widget_power_status, context.getString(R.string.widget_power_headline_group, headline, info.group ?: "—"))
         views.setTextColor(R.id.widget_power_status, lightColor(light.gridState))
-        views.setTextViewText(R.id.widget_power_detail, listOfNotNull(light.hint?.replaceFirstChar { it.titlecase() }, PowerOutageFormatter.detail(info, input.now)).joinToString(" · "))
+        views.setTextViewText(R.id.widget_power_detail, listOfNotNull(light.hint?.replaceFirstChar { it.titlecase() }, PowerOutageFormatter.detailBesideHeadline(info, input.now, light.gridState)).joinToString(" · "))
         // Same single runtime + verdict as the summary (autonomy runtime, else battery ETA to 0%).
         val reserveLine = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RESERVE }
         val reserve = if (light.kind == LightKind.NO_LINK) null else reserveLine?.text ?: PowerOutageFormatter.reserve(info)
@@ -407,6 +497,14 @@ object WidgetRenderer {
             R.id.widget_root,
             PendingIntent.getActivity(context, widgetId * 10 + 2, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
         )
+        // Light state (dot + headline, the 4×4 light block) and the schedule bar → «Графік відключень».
+        val schedule = PendingIntent.getActivity(context, widgetId * 10 + 4,
+            Intent(context, ScheduleActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        views.setOnClickPendingIntent(R.id.widget_light_dot, schedule)
+        if (shape.isBlock) views.setOnClickPendingIntent(R.id.widget_power_group, schedule)
+        else views.setOnClickPendingIntent(R.id.widget_primary, schedule)
+        if (shape.showsScheduleBar) views.setOnClickPendingIntent(R.id.widget_schedule_group, schedule)
         if (shape == WidgetShape.WIDE || shape == WidgetShape.TALL || shape.isBlock) {
             val configIntent = Intent(context, WidgetConfigActivity::class.java).apply { putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId) }
             views.setOnClickPendingIntent(
@@ -524,6 +622,20 @@ object WidgetRenderer {
         return if (mode != null) "$base · $mode" else base
     }
 
+    /** Ring diameter that fills the cell: tall 2×2 leaves ~118 dp for the header, bar and text rows. */
+    fun ringSizeDp(shape: WidgetShape, widthDp: Float, heightDp: Float): Float = when (shape) {
+        WidgetShape.SQUARE_TALL -> minOf(widthDp * 0.5f, heightDp - 134f).coerceIn(56f, 112f)
+        WidgetShape.SQUARE -> minOf(widthDp * 0.46f, heightDp - 80f).coerceIn(64f, 96f)
+        else -> 60f
+    }
+
+    private fun socBarBitmap(context: Context, socPercent: Int?, widthDp: Float, heightDp: Float): Bitmap {
+        val density = context.resources.displayMetrics.density
+        val bitmap = Bitmap.createBitmap((widthDp.coerceAtLeast(40f) * density).roundToInt(), (heightDp * density).roundToInt(), Bitmap.Config.ARGB_8888)
+        SocBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), socPercent)
+        return bitmap
+    }
+
     private fun socRingBitmap(context: Context, socPercent: Int?, sizeDp: Float = 60f): Bitmap {
         val density = context.resources.displayMetrics.density
         val size = (sizeDp * density).roundToInt()
@@ -550,6 +662,10 @@ object WidgetRenderer {
         }
         return bitmap
     }
+
+    internal fun keepUnits(text: String): String = text
+        .replace(Regex("(\\d) (год|хв|д|с)(?!\\p{L})"), "$1\u00A0$2")
+        .replace("≈ ", "≈\u00A0")
 
     private fun visibility(show: Boolean) = if (show) View.VISIBLE else View.GONE
 }

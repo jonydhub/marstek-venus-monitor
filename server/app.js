@@ -160,16 +160,6 @@ function outageSourceText(outage) {
   const name = outage.source === 'ua-outages' && outage.source_detail ? `${outage.source_detail} · ua-outages` : outage.source_name;
   return `${name}${fallback ? ' · резерв' : ''}${outage.source_stale ? ' · застаріле' : ''}`;
 }
-function outageWindowText(outage) {
-  const next = outage?.next_outage;
-  if (outage?.emergency && !next) return 'Діють аварійні відключення — графік не застосовується';
-  const maybe = (outage?.maybe_outages || [])[0];
-  const maybeText = maybe ? ` · можливе ${formatClock(maybe.start)}–${formatClock(maybe.end)}` : '';
-  if (next) return `Наступне відключення: ${formatClock(next.start)}–${formatClock(next.end)} · ${formatDuration(next.duration_seconds)}${maybeText}`;
-  if (maybe) return `Можливе відключення: ${formatClock(maybe.start)}–${formatClock(maybe.end)}`;
-  if (!outage?.available) return 'Наступне відключення: —';
-  return outage.schedule_published ? 'Відключень для черги не заплановано' : 'Графік не опубліковано';
-}
 function autonomyBasisText(a) {
   if (a.load_basis === 'measured_backup_output') return `при поточному навантаженні ${Math.round(a.load_w)} Вт (вимір резервного виходу)`;
   if (a.load_basis === 'measured_average_24h') return `при середньому споживанні ${Math.round(a.load_w)} Вт (за 24 год)`;
@@ -205,7 +195,11 @@ function lightView(data, fetchFailed) {
   if (outage.grid_state === 'on') return {state: 'on', title: 'Світло є', hint: null};
   return {state: 'unknown', title: 'Світло: —', hint: null};
 }
-function renderToday(today = {}) {
+function renderToday(today) {
+  const tiles = $('today-tiles'), note = $('today-note');
+  if (tiles) tiles.hidden = !today;
+  if (note) note.hidden = Boolean(today);
+  today = today || {};
   set('today-charge', shortDuration(today.charge_seconds));
   set('today-discharge', shortDuration(today.discharge_seconds));
   set('today-outage', shortDuration(today.outage_seconds));
@@ -215,23 +209,76 @@ function kyivMidnight(now = new Date()) {
   const sinceMidnight = (Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second)) * 1000;
   return now.getTime() - sinceMidnight - now.getMilliseconds();
 }
-function renderScheduleBar(outage = {}) {
-  const bar = $('schedule-bar'); if (!bar) return;
-  bar.replaceChildren();
-  const start = kyivMidnight(), span = 48 * 3600 * 1000;
-  const frac = t => Math.max(0, Math.min(1, (t - start) / span));
-  for (const w of outage.windows || []) {
-    const a = frac(Date.parse(w.start)), b = frac(Date.parse(w.end));
-    if (!(b > a)) continue;
-    const seg = document.createElement('i');
-    seg.className = w.kind === 'maybe' ? 'seg maybe' : 'seg off';
-    seg.style.left = `${(a * 100).toFixed(2)}%`; seg.style.width = `${((b - a) * 100).toFixed(2)}%`;
-    bar.append(seg);
+function kyivHm(ms) { return new Date(ms).toLocaleTimeString('uk-UA', {hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv'}); }
+/** Today / tomorrow (Kyiv) with windows clipped to each day; same rules as the Android ScheduleDays. */
+function scheduleDays(outage = {}, nowMs = Date.now()) {
+  const todayStart = kyivMidnight(new Date(nowMs));
+  const tomorrowStart = kyivMidnight(new Date(todayStart + 26 * 3600 * 1000));
+  const afterStart = kyivMidnight(new Date(tomorrowStart + 26 * 3600 * 1000));
+  const dates = outage.schedule_dates || [];
+  const isoDay = ms => new Date(ms).toLocaleDateString('en-CA', {timeZone: 'Europe/Kyiv'});
+  return [[todayStart, tomorrowStart, true], [tomorrowStart, afterStart, false]].map(([start, end, isToday]) => {
+    const clipped = (outage.windows || []).map(w => ({a: Math.max(Date.parse(w.start), start), b: Math.min(Date.parse(w.end), end), maybe: w.kind === 'maybe'}))
+      .filter(w => Number.isFinite(w.a) && Number.isFinite(w.b) && w.b > w.a).sort((x, y) => x.a - y.a);
+    const label = w => `${kyivHm(w.a)}–${w.b >= end ? '24:00' : kyivHm(w.b)}`;
+    const published = Boolean(outage.available) && (dates.includes(isoDay(start)) || clipped.length > 0 || (!dates.length && outage.schedule_published && isToday));
+    const definite = clipped.filter(w => !w.maybe).map(label), maybe = clipped.filter(w => w.maybe).map(label);
+    const text = definite.length ? `Відключення ${definite.join(', ')}` : !published ? (isToday ? 'Графік не опубліковано' : 'Графік ще не опубліковано') : maybe.length ? 'Без точних відключень' : 'Без відключень';
+    return {isToday, title: isToday ? 'Сьогодні' : 'Завтра', start, end, published, definite, maybe, text,
+      segments: clipped.map(w => ({a: (w.a - start) / (end - start), b: (w.b - start) / (end - start), maybe: w.maybe})),
+      now: isToday ? Math.max(0, Math.min(1, (nowMs - start) / (end - start))) : null};
+  });
+}
+/** Schedule sentence that never contradicts the measured light (backup output). */
+function scheduleDetail(outage = {}, gridState = outage.grid_state) {
+  if (outage.schedule_unavailable) return 'Графік недоступний — світло визначається за резервним виходом';
+  if (!outage.available) return 'Графік вимкнено';
+  if (outage.emergency) return 'Діють аварійні відключення — графік не застосовується';
+  const cur = outage.current_outage, next = outage.next_outage, maybe = (outage.maybe_outages || [])[0];
+  if (cur?.end) {
+    if (gridState === 'off') return `Повернення о ${formatClock(cur.end)}`;
+    if (gridState === 'on') return `За графіком відключення до ${formatClock(cur.end)} · світло є`;
+    return `За графіком відключення до ${formatClock(cur.end)}`;
   }
-  const mid = document.createElement('i'); mid.className = 'midnight'; bar.append(mid);
-  const marker = document.createElement('i'); marker.className = 'now'; marker.style.left = `${(frac(Date.now()) * 100).toFixed(2)}%`; bar.append(marker);
-  const hasWindows = (outage.windows || []).length > 0;
-  set('schedule-caption', `Сьогодні і завтра${outage.group ? ` · черга ${outage.group}` : ''}${!outage.available ? ' · графік вимкнено' : (!hasWindows && !outage.schedule_published ? ' · графік не опубліковано' : '')}`);
+  if (next?.start) {
+    const t = Date.parse(next.start), todayStart = kyivMidnight();
+    const tomorrowStart = kyivMidnight(new Date(todayStart + 26 * 3600 * 1000)), afterStart = kyivMidnight(new Date(tomorrowStart + 26 * 3600 * 1000));
+    if (t < tomorrowStart) return `Відключення о ${kyivHm(t)}`;
+    if (t < afterStart) return `Відключення завтра о ${kyivHm(t)}`;
+    return `Відключення ${formatClock(next.start).replace(' ', ' о ')}`;
+  }
+  if (maybe) return `Можливе відключення ${formatClock(maybe.start)}–${formatClock(maybe.end)}`;
+  return outage.schedule_published ? 'За графіком без відключень' : 'Графік не опубліковано';
+}
+function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
+function renderScheduleDays(outage = {}) {
+  const host = $('schedule-days'); if (!host) return;
+  host.replaceChildren();
+  const block = host.closest('.schedule-block');
+  if (block) block.hidden = !outage.available || Boolean(outage.schedule_unavailable);
+  for (const day of scheduleDays(outage)) {
+    if (!day.isToday && !day.published) { const p = el('div', 'sched-day pending'); p.append(el('p', '', 'Завтра: графік ще не опубліковано')); host.append(p); continue; }
+    const box = el('div', 'sched-day');
+    box.append(el('h3', '', day.title));
+    const track = el('div', `sched-track${day.published ? '' : ' unpublished'}`);
+    track.setAttribute('role', 'img');
+    track.setAttribute('aria-label', `${day.title}: ${day.text}${day.maybe.length ? `; можливе ${day.maybe.join(', ')}` : ''}`);
+    for (const seg of day.segments) {
+      const i = el('i', `seg ${seg.maybe ? 'maybe' : 'off'}`);
+      i.style.left = `${(seg.a * 100).toFixed(2)}%`; i.style.width = `${((seg.b - seg.a) * 100).toFixed(2)}%`;
+      track.append(i);
+    }
+    for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
+    if (day.now !== null) { const i = el('i', 'now'); i.style.left = `${(day.now * 100).toFixed(2)}%`; track.append(i); }
+    const ticks = el('div', 'sched-ticks');
+    for (let h = 0; h <= 24; h++) { const i = el('i', h % 6 === 0 ? 'major' : ''); i.style.left = `calc(${(h / 24 * 100).toFixed(3)}% - ${h === 24 ? 1 : 0}px)`; ticks.append(i); }
+    const axis = el('div', 'sched-axis');
+    for (const h of [0, 6, 12, 18, 24]) { const sp = el('span', '', String(h)); sp.style.left = `${h / 24 * 100}%`; axis.append(sp); }
+    box.append(track, ticks, axis, el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
+    if (day.maybe.length) box.append(el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`));
+    host.append(box);
+  }
+  set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
 }
 const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світло зникло'}, light_returned: {label: '○', cls: 'ev-back', title: 'Світло повернулось'},
   charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'}};
@@ -292,8 +339,8 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   set('outage-group', outage.group);
   set('outage-source', outageSourceText(outage));
   set('backup-today', formatKwh(insights.backup_energy_today_wh));
-  renderToday(insights.today || {});
-  renderScheduleBar(outage);
+  renderToday(insights.today || null);
+  renderScheduleDays(outage);
   renderSocChart(insights, outage);
   const runtime = finiteOrNull(a.runtime_seconds);
   const floor = floorPct(outage);
@@ -304,7 +351,7 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   forecast.className = 'hero-forecast';
   if (light.state === 'nolink') {
     set('hero-forecast', 'Стан світла невідомий');
-    set('hero-sub', light.hint ? `${light.hint} · ${outageWindowText(outage)}` : outageWindowText(outage));
+    set('hero-sub', light.hint ? `${light.hint} · ${scheduleDetail(outage, 'unknown')}` : scheduleDetail(outage, 'unknown'));
     set('hero-note', `Світло визначається лише за потужністю на резервному виході батареї. Без відповіді батареї стан невідомий — це не означає, що світла немає.${err}`);
   } else if (light.state === 'off') {
     const current = outage.current_outage;
@@ -313,7 +360,7 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     else if (covers === false) { set('hero-forecast', `Вистачить лише на ${formatDuration(runtime)}`); forecast.classList.add('bad'); }
     else { set('hero-forecast', `Вистачить на ${formatDuration(runtime)}`); forecast.classList.add('good'); }
     const parts = [finiteOrNull(insights.backup_output_w) !== null ? `${Math.round(Math.abs(insights.backup_output_w))} Вт` : null,
-      current?.end ? `світло о ${formatClock(current.end)}${current.kind === 'schedule' ? ' (за графіком)' : ''}` : 'час повернення невідомий'];
+      current?.end ? `Повернення о ${formatClock(current.end)}${current.kind === 'schedule' ? ' (за графіком)' : ''}` : 'час повернення невідомий'];
     set('hero-sub', parts.filter(Boolean).join(' · '));
     set('hero-note', `Час — енергія ${floorText} ${autonomyBasisText(a)}.${err}`);
   } else {
@@ -321,12 +368,17 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     else if (soc !== null && soc >= 99 && (!flow.available || flow.direction === 'idle')) set('hero-forecast', 'Заряджено');
     else if (runtime !== null) set('hero-forecast', `Запасу на ${formatDuration(runtime)}`);
     else set('hero-forecast', flow.direction === 'discharging' ? 'Розряджається' : 'Очікування');
-    set('hero-sub', outageWindowText(outage));
+    // «не опубліковано» / «без відключень» is already in the schedule rows below — not repeated in the hero.
+    const detail = scheduleDetail(outage, light.state);
+    const shownBelow = outage.available && !outage.schedule_unavailable && ['Графік не опубліковано', 'За графіком без відключень'].includes(detail);
+    set('hero-sub', detail);
+    const subNode = $('hero-sub'); if (subNode) subNode.dataset.redundant = shownBelow ? '1' : '';
     set('hero-note', runtime === null
       ? `Прогноз запасу з’явиться після першого відключення (навантаження міряється на резервному виході).${err}`
       : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${err}`);
   }
   hero.dataset.state = light.state;
+  const sub = $('hero-sub'); if (sub) { sub.hidden = light.state !== 'off' && light.state !== 'nolink' && sub.dataset.redundant === '1'; }
 }
 function render(data) {
   const m=data.methods||{}, wifi=good(m['Wifi.GetStatus']), ble=good(m['BLE.GetStatus']), bat=good(m['Bat.GetStatus']), es=good(m['ES.GetStatus']), mode=good(m['ES.GetMode']), em=good(m['EM.GetStatus']);
@@ -339,7 +391,10 @@ function render(data) {
   const soc=bat.soc ?? es.bat_soc;
   const socNumber=Number(soc);
   set('soc-value', Number.isFinite(socNumber) ? Math.round(socNumber) : '—');
-  $('soc-ring').style.setProperty('--soc', `${Math.max(0,Math.min(100,socNumber||0))}%`);
+  const socPct = Math.max(0, Math.min(100, socNumber || 0));
+  $('soc-ring').style.setProperty('--soc', `${socPct}%`);
+  // gradient spans the full track: the fill's colour at its tip matches the charge level (like the app)
+  const fill = document.querySelector('#soc-ring .soc-fill'); if (fill) fill.style.backgroundSize = socPct > 0 ? `${(10000 / socPct).toFixed(1)}% 100%` : '100% 100%';
   $('soc-ring').setAttribute('aria-valuenow', Number.isFinite(socNumber) ? String(Math.round(socNumber)) : '0');
   const batteryWh = bat.bat_capacity ?? es.bat_cap;
   const ratedWh = bat.rated_capacity ?? es.bat_cap;
@@ -383,7 +438,9 @@ async function refresh() {
 let lastData = null;
 let journalEvents = [];
 let journalFilter = '';
-const CATEGORY_LABEL = {light: 'Світло', battery: 'Батарея', connection: 'Зв’язок', anomaly: 'Аномалія'};
+const CATEGORY_LABEL = {light: 'Світло', battery: 'Батарея', connection: 'Зв’язок', anomaly: 'Аномалія', system: 'Система'};
+let journalStartedAt = null;
+function sinceText(ms) { const m = Math.max(1, Math.round(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? `${d} дн ${h} год` : h ? `${h} год ${m % 60} хв` : `${m} хв`; }
 function journalTime(iso) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('uk-UA', {timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'});
@@ -392,7 +449,13 @@ function renderJournal() {
   const list = $('journal-list'); if (!list) return;
   list.replaceChildren();
   const rows = journalEvents.filter(e => !journalFilter || e.category === journalFilter);
-  if (!rows.length) { const li = document.createElement('li'); li.className = 'journal-empty'; li.textContent = 'Подій ще немає'; list.append(li); return; }
+  if (!rows.length) {
+    const li = document.createElement('li'); li.className = 'journal-empty';
+    const started = journalStartedAt ? Date.parse(journalStartedAt) : NaN;
+    li.textContent = journalFilter ? 'У цій категорії подій ще немає.' : 'Подій ще немає. Вони зʼявляться, коли зміниться стан (світло, заряд, звʼязок).' +
+      (Number.isFinite(started) ? ` Журнал сервера ведеться ${sinceText(Date.now() - started)}.` : '');
+    list.append(li); return;
+  }
   for (const e of rows) {
     const li = document.createElement('li'); li.className = `journal-row cat-${e.category}`;
     const time = document.createElement('time'); time.dateTime = e.ts; time.textContent = journalTime(e.ts);
@@ -404,8 +467,11 @@ function renderJournal() {
 async function loadJournal() {
   try {
     const r = await apiFetch('/api/events?limit=200');
+    if (r.status === 404) { journalEvents = []; const list = $('journal-list'); if (list) list.replaceChildren(el('li', 'journal-empty', 'Сервер старої версії — оновіть сервер, щоб бачити журнал.')); return; }
     if (!r.ok) return;
-    journalEvents = (await r.json()).events || [];
+    const body = await r.json();
+    journalEvents = body.events || [];
+    journalStartedAt = body.journal_started_at || null;
     renderJournal();
   } catch (e) { /* keep the last list */ }
 }

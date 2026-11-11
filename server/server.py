@@ -166,6 +166,7 @@ class MarstekPoller:
         self.outage = build_outage_service(SETTINGS, ua_client=UA_OUTAGES_CLIENT)
         self.history = None  # HistoryStore, attached by __main__ so imports/tests never touch the real DB
         self.detector = None  # events.DetectorState (journal); in memory, rebuilt after a restart
+        self.initial_journaled = False  # «Стан на старті» written once per process, at the first answered poll
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", 0))
@@ -284,6 +285,9 @@ class MarstekPoller:
             backup_w=_optional_float(es.get("offgrid_power")), soc=None if soc is None else int(round(soc)),
             temp_c=_optional_float(bat.get("bat_temp")))
         new_events, self.detector = journal.step(self.detector, obs, now, SETTINGS.anomaly_discharge_w)
+        if obs.ok and not self.initial_journaled:
+            new_events = [journal.initial_state_event(obs, now)] + new_events
+            self.initial_journaled = True
         if self.history is not None:
             for event in new_events:
                 try:
@@ -383,10 +387,12 @@ def events_payload(query: str) -> dict:
     except ValueError:
         limit = 200
     category = (params.get("category") or [None])[0]
-    if category not in (None, "light", "battery", "connection", "anomaly"):
+    if category not in (None, "light", "battery", "connection", "anomaly", "system"):
         category = None
     rows = poller.history.events(limit=limit, category=category) if poller.history is not None else []
-    return {"events": [{**row, "ts": event_time(row["ts"])} for row in rows]}
+    first = poller.history.first_event_ts() if poller.history is not None else None
+    return {"events": [{**row, "ts": event_time(row["ts"])} for row in rows],
+            "journal_started_at": event_time(first) if first is not None else None}
 
 
 def regions_catalog():
@@ -582,6 +588,10 @@ def main():
     HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
     poller.history = HistoryStore(str(HISTORY_DB))
     poller.history.prune(time.time())
+    try:
+        poller.history.record_event(journal.server_started_event(time.time()))
+    except Exception as exc:  # the journal must never stop the server
+        logging.warning("event write failed: %s", exc)
     threading.Thread(target=poller.run_outage_refresh, name="outage", daemon=True).start()
     threading.Thread(target=poller.run, name="marstek-poller", daemon=True).start()
     servers = []

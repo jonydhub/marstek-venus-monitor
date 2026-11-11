@@ -37,7 +37,7 @@ import com.doloh.marstekwidget.domain.EtaTextFormatter
 import com.doloh.marstekwidget.domain.JournalExport
 import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
-import com.doloh.marstekwidget.domain.ScheduleBar
+import com.doloh.marstekwidget.domain.ScheduleDays
 import com.doloh.marstekwidget.domain.TodayFormatter
 import kotlin.math.roundToInt
 import com.doloh.marstekwidget.data.TelemetryFetchResult
@@ -87,7 +87,7 @@ class MainActivity : Activity() {
     private lateinit var lightHeadline: TextView
     private lateinit var stateLine: TextView
     private lateinit var capacityLine: TextView
-    private lateinit var socProgress: ProgressBar
+    private lateinit var socProgress: SocBarView
     private lateinit var etaLine: TextView
     private lateinit var outageLine: TextView
     private lateinit var reserveLine: TextView
@@ -97,7 +97,6 @@ class MainActivity : Activity() {
     private lateinit var powerGroup: TextView
     private lateinit var powerNote: TextView
     private lateinit var modeMeta: TextView
-    private lateinit var permissionHint: TextView
     private lateinit var updatedText: TextView
     private lateinit var refreshButton: TextView
     private lateinit var alertsCard: LinearLayout
@@ -106,7 +105,8 @@ class MainActivity : Activity() {
     private lateinit var subLine: TextView
     private lateinit var todayCaption: TextView
     private lateinit var scheduleCaption: TextView
-    private lateinit var scheduleBar: ScheduleBarView
+    private lateinit var scheduleDays: ScheduleDaysView
+    private lateinit var todayTiles: LinearLayout
     private lateinit var journalPreview: LinearLayout
     private lateinit var diagnosticsText: TextView
     private var serverJournal: List<com.doloh.marstekwidget.domain.JournalEvent> = emptyList()
@@ -151,7 +151,6 @@ class MainActivity : Activity() {
         val newSpec = ScreenLayoutSelector.specFor(newConfig.screenWidthDp)
         if (newSpec == spec) return
         showDashboard()
-        updatePermissionHint()
     }
 
     private fun showDashboard() {
@@ -164,7 +163,6 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
-        updatePermissionHint()
         refreshTelemetry()
         loadServerJournal()
         handler.removeCallbacks(refreshLoop)
@@ -179,11 +177,6 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        updatePermissionHint()
     }
 
     private fun buildDashboard(): ScrollView {
@@ -283,12 +276,8 @@ class MainActivity : Activity() {
         stateColumn.addView(stateLine)
         heroRow.addView(stateColumn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         hero.addView(heroRow)
-        socProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progressTintList = ColorStateList.valueOf(MINT)
-            progressBackgroundTintList = ColorStateList.valueOf(Color.rgb(48, 68, 82))
-        }
-        hero.addView(socProgress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(6)).apply { topMargin = dp(10) })
+        socProgress = SocBarView(this).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        hero.addView(socProgress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(8)).apply { topMargin = dp(12) })
         capacityLine = label("— kWh", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
         hero.addView(capacityLine)
         etaLine = label("", 19f, TEXT, true).apply { setPadding(0, dp(10), 0, 0) }
@@ -296,6 +285,7 @@ class MainActivity : Activity() {
         subLine = label("", 13f, MUTED, false).apply { setPadding(0, dp(2), 0, 0) }
         hero.addView(subLine)
         val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        todayTiles = tiles
         listOf("todayCharge" to "Заряд", "todayDischarge" to "Розряд", "todayOutage" to "Без світла").forEachIndexed { i, (key, caption) ->
             val box = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -315,19 +305,29 @@ class MainActivity : Activity() {
         todayCaption = label("Сьогодні з 00:00", 9f, DIM, false).apply { setPadding(0, dp(4), 0, 0) }
         hero.addView(todayCaption)
 
-        // Schedule: today + tomorrow bar, next/maybe outage, source. Phones keep it in the hero.
+        // Schedule: «Сьогодні» / «Завтра» rows with an hour scale + windows as text. Tap → «Графік відключень».
         val scheduleCard = if (wide) card().apply { addView(sectionTitle(getString(R.string.main_schedule_title))) } else null
         val scheduleHost = scheduleCard ?: hero
-        scheduleCaption = label("Сьогодні і завтра", 10f, MUTED, false).apply { setPadding(0, dp(12), 0, dp(4)) }
-        scheduleHost.addView(scheduleCaption)
-        scheduleBar = ScheduleBarView(this)
-        scheduleHost.addView(scheduleBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)))
+        val scheduleBlock = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            isClickable = true
+            isFocusable = true
+            contentDescription = getString(R.string.schedule_screen_title)
+            setOnClickListener { startActivity(Intent(this@MainActivity, ScheduleActivity::class.java)) }
+        }
+        scheduleCaption = label("Графік відключень", 11f, MUTED, true).apply { setPadding(0, dp(14), 0, dp(6)) }
+        scheduleBlock.addView(scheduleCaption)
+        scheduleDays = ScheduleDaysView(this, spec.textScale)
+        scheduleBlock.addView(scheduleDays)
         outageLine = label("", 12f, TEXT, false).apply { setPadding(0, dp(6), 0, 0) }
         powerMaybe = label("", 12f, AMBER, false).apply { setPadding(0, dp(3), 0, 0); visibility = View.GONE }
         reserveLine = label("", 12f, TEXT, true).apply { setPadding(0, dp(3), 0, 0) }
         powerGroup = label("", 9f, MUTED, false).apply { setPadding(0, dp(6), 0, 0) }
         powerNote = label(getString(R.string.main_power_unavailable), 9f, DIM, false).apply { setPadding(0, dp(2), 0, 0) }
-        listOf(outageLine, powerMaybe, reserveLine, powerGroup, powerNote).forEach(scheduleHost::addView)
+        listOf(outageLine, powerMaybe, reserveLine).forEach(scheduleHost::addView)
+        scheduleHost.addView(scheduleBlock)
+        scheduleBlock.addView(powerGroup)
+        scheduleHost.addView(powerNote)
 
         // 24 h SOC chart: outage shading, event markers, axis labels, discharge floor.
         historyCard = card()
@@ -352,57 +352,6 @@ class MainActivity : Activity() {
         journalCard.addView(actionButton("Відкрити журнал · аномалії · експорт", filled = false) {
             startActivity(Intent(this@MainActivity, JournalActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
-
-        // Notifications.
-        val notifyCard = card()
-        notifyCard.addView(sectionTitle(getString(R.string.main_notify_title)))
-        val preferences = WidgetPreferences(this)
-        val settings = preferences.alertSettings()
-        listOf(
-            AlertGroup.LIGHT_SCHEDULE to (R.string.main_notify_group_light to R.string.main_notify_group_light_hint),
-            AlertGroup.RESERVE to (R.string.main_notify_group_reserve to R.string.main_notify_group_reserve_hint),
-            AlertGroup.CHARGING to (R.string.main_notify_group_charging to R.string.main_notify_group_charging_hint),
-            AlertGroup.CONSUMPTION to (R.string.main_notify_group_consumption to R.string.main_notify_group_consumption_hint),
-            AlertGroup.BATTERY_HEALTH to (R.string.main_notify_group_health to R.string.main_notify_group_health_hint),
-        ).forEach { (group, labels) ->
-            val switch = Switch(this).apply {
-                text = getString(labels.first)
-                isChecked = group in settings.enabledGroups
-                textSize = 13f * spec.textScale
-                setTextColor(TEXT)
-                thumbTintList = ColorStateList.valueOf(MINT)
-                setPadding(0, dp(4), 0, 0)
-                setOnCheckedChangeListener { _, checked -> onNotifyToggled(group, checked) }
-            }
-            notifyCard.addView(switch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            notifyCard.addView(label(getString(labels.second), 9f, DIM, false).apply { setPadding(0, 0, dp(56), dp(4)) })
-        }
-        notifyCard.addView(label(getString(R.string.main_notify_high_load_label), 10f, MUTED, true).apply { setPadding(0, dp(8), 0, 0) })
-        notifyCard.addView(EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText(settings.highLoadThresholdWatts.toString())
-            textSize = 14f * spec.textScale
-            setTextColor(TEXT)
-            setHintTextColor(DIM)
-            hint = "200"
-            maxLines = 1
-            backgroundTintList = ColorStateList.valueOf(STROKE)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: Editable?) {
-                    s?.toString()?.toIntOrNull()?.takeIf { it in 1..10_000 }?.let { WidgetPreferences(this@MainActivity).setHighLoadThreshold(it) }
-                }
-            })
-        }, LinearLayout.LayoutParams(dp(120), ViewGroup.LayoutParams.WRAP_CONTENT))
-        notifyCard.addView(label(getString(R.string.main_notify_high_load_note), 9f, DIM, false))
-        notifyCard.addView(label("Аномалії (розрядка вище порогу, розряд при мережі) — перемикач і поріг у «Журналі подій».", 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
-        permissionHint = label(getString(R.string.main_notify_permission), 10f, AMBER, true).apply {
-            setPadding(0, dp(6), 0, 0)
-            setOnClickListener { requestNotificationPermission() }
-        }
-        notifyCard.addView(permissionHint)
-        notifyCard.addView(label(getString(R.string.main_notify_note), 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
 
         // Accumulated counters.
         val energyCard = card()
@@ -430,16 +379,16 @@ class MainActivity : Activity() {
         diagCard.addView(diagBody)
 
         when (spec.mode) {
-            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, energyCard, notifyCard, diagCard)
+            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, energyCard, diagCard)
                 .forEach { page.addView(it, sectionMargin()) }
             ScreenLayoutMode.TWO_COLUMN -> page.addView(columns(
                 listOf(hero, historyCard, flowCard, energyCard),
-                listOf(scheduleCard!!, alertsCard, journalCard, notifyCard, diagCard),
+                listOf(scheduleCard!!, alertsCard, journalCard, diagCard),
             ))
             ScreenLayoutMode.THREE_COLUMN -> page.addView(columns(
                 listOf(hero, flowCard, energyCard),
                 listOf(scheduleCard!!, alertsCard, historyCard),
-                listOf(journalCard, notifyCard, diagCard),
+                listOf(journalCard, diagCard),
             ))
         }
 
@@ -454,14 +403,6 @@ class MainActivity : Activity() {
             setPadding(0, dp(4), 0, 0)
         })
         return scroll
-    }
-
-    private fun onNotifyToggled(group: AlertGroup, checked: Boolean) {
-        val preferences = WidgetPreferences(this)
-        preferences.setAlertGroupEnabled(group, checked)
-        if (preferences.anyAlertsEnabled()) WidgetRefreshScheduler.ensurePeriodic(this)
-        if (checked) requestNotificationPermission()
-        updatePermissionHint()
     }
 
     private fun renderAlerts(alerts: List<Alert>) {
@@ -484,20 +425,6 @@ class MainActivity : Activity() {
             row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             alertsList.addView(row)
         }
-    }
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-        }
-    }
-
-    private fun updatePermissionHint() {
-        if (!::permissionHint.isInitialized) return
-        val wanted = WidgetPreferences(this).anyAlertsEnabled()
-        permissionHint.visibility = if (wanted && !AlertNotifier.canPost(this)) View.VISIBLE else View.GONE
     }
 
     private fun metricRow(leftKey: String, leftLabel: Int, rightKey: String, rightLabel: Int): LinearLayout {
@@ -595,7 +522,7 @@ class MainActivity : Activity() {
         val light = LightStatusResolver.resolve(snapshot, linkLost, now)
         socValue.text = snapshot?.socPercent?.let { getString(R.string.main_soc_value, it) } ?: "—%"
         socValue.setTextColor(if ((snapshot?.socPercent ?: 100) < 20) CORAL else MINT)
-        socProgress.progress = snapshot?.socPercent ?: 0
+        socProgress.setSoc(snapshot?.socPercent)
         val temperature = (snapshot?.temperatureCelsius ?: snapshot?.insights?.temperatureCelsius)?.let(WidgetSummaryResolver::formatTemperature)
         capacityLine.text = listOfNotNull(
             if (snapshot?.batteryCapacityWh != null) getString(R.string.widget_capacity_value, BatteryDisplayFormatter.formatKwh(snapshot.batteryCapacityWh), BatteryDisplayFormatter.formatKwh(snapshot.ratedCapacityWh))
@@ -634,7 +561,7 @@ class MainActivity : Activity() {
         when {
             light.kind == LightKind.NO_LINK -> {
                 eta = "Стан світла невідомий"; etaColor = MUTED
-                sub = listOfNotNull(light.hint?.replaceFirstChar { it.titlecase() }, info?.let { PowerOutageFormatter.detail(it, now) }).joinToString(" · ")
+                sub = listOfNotNull(light.hint?.replaceFirstChar { it.titlecase() }, info?.let { PowerOutageFormatter.detail(it, now, GridState.UNKNOWN) }).joinToString(" · ")
             }
             light.kind == LightKind.OFF -> {
                 val covers = info?.coversOutage
@@ -660,6 +587,11 @@ class MainActivity : Activity() {
                 sub = info?.let { PowerOutageFormatter.detail(it, now) }
             }
         }
+        // The schedule rows below already say «не опубліковано» / «без відключень» — do not repeat it in the hero.
+        val days = ScheduleDays.days(info, System.currentTimeMillis())
+        val shownBySchedule = if (info != null && info.scheduleEnabled && !info.scheduleUnavailable)
+            setOf(days[0].windowsText, "Графік не опубліковано", "За графіком без відключень") else emptySet()
+        if (sub in shownBySchedule) sub = null
         etaLine.text = eta.orEmpty()
         etaLine.visibility = if (eta.isNullOrBlank()) View.GONE else View.VISIBLE
         etaLine.setTextColor(etaColor)
@@ -670,16 +602,19 @@ class MainActivity : Activity() {
         metricValues["todayCharge"]?.text = TodayFormatter.short(today?.chargeSeconds)
         metricValues["todayDischarge"]?.text = TodayFormatter.short(today?.dischargeSeconds)
         metricValues["todayOutage"]?.text = TodayFormatter.short(today?.outageSeconds)
-        todayCaption.text = if (today == null) "Сьогодні з 00:00 · з'явиться після оновлення сервера/історії" else "Сьогодні з 00:00 · проміжки без даних не враховано"
+        // No «— — —» tiles: without today's data the row is hidden and a short note says why.
+        todayTiles.visibility = if (today == null) View.GONE else View.VISIBLE
+        todayCaption.text = if (today == null) {
+            if (snapshot == null) "" else "Тривалості за сьогодні (заряд, розряд, без світла) з'являться, коли збереться історія"
+        } else "Сьогодні з 00:00 · проміжки без даних не враховано"
+        todayCaption.visibility = if (todayCaption.text.isNullOrEmpty()) View.GONE else View.VISIBLE
 
-        // Schedule bar (today + tomorrow) and the remaining schedule lines (nothing repeated from the hero).
-        val windows = info?.windows.orEmpty()
-        scheduleBar.setModel(ScheduleBar.model(windows, System.currentTimeMillis()))
-        scheduleCaption.text = listOfNotNull("Сьогодні і завтра", info?.group?.let { "черга $it" },
-            if (info != null && windows.isEmpty()) (if (info.schedulePublished) "без відключень" else "графік не опубліковано") else null,
-        ).joinToString(" · ")
+        // Schedule: today / tomorrow rows + windows text (nothing repeated from the hero).
+        scheduleDays.visibility = if (info != null && info.scheduleEnabled && !info.scheduleUnavailable) View.VISIBLE else View.GONE
+        scheduleDays.setDays(days)
+        scheduleCaption.text = listOfNotNull("Графік відключень", info?.group?.let { "черга $it" }).joinToString(" · ") + "  ›"
         val nextText = info?.takeIf { light.kind != LightKind.OFF && light.kind != LightKind.NO_LINK }?.let { PowerOutageFormatter.detail(it, now) }
-            ?.takeIf { it != sub }
+            ?.takeIf { it != sub && it !in shownBySchedule }
         outageLine.text = nextText.orEmpty()
         outageLine.visibility = if (nextText.isNullOrBlank()) View.GONE else View.VISIBLE
         val reserveText = reserve?.text?.takeIf { light.kind == LightKind.ON && it != eta }
@@ -785,13 +720,12 @@ class MainActivity : Activity() {
             powerNote.text = getString(R.string.main_power_unavailable)
             return
         }
-        val regionName = OutageRegions.byId(settings.outageRegionId)?.name
+        val regionName = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
         // The queue is already in the schedule caption; here only region + source.
         powerGroup.text = listOfNotNull(regionName, PowerOutageFormatter.source(info)).joinToString(" · ")
         powerGroup.visibility = if (powerGroup.text.isNullOrEmpty()) View.GONE else View.VISIBLE
-        val maybe = PowerOutageFormatter.maybe(info)
-        powerMaybe.text = maybe.orEmpty()
-        powerMaybe.visibility = if (maybe == null || maybe == outageLine.text.toString()) View.GONE else View.VISIBLE
+        // «Можливе …» is listed under each day of the schedule rows.
+        powerMaybe.visibility = View.GONE
         val watts = (info.loadWatts ?: 0.0).toInt()
         val floor = info.floorPct?.let { " Рахується енергія понад резерв розряду ${it.roundToInt()}% (налаштування)." }.orEmpty()
         val basis = when (info.loadBasis) {
@@ -855,7 +789,6 @@ class MainActivity : Activity() {
     private companion object {
         const val DIRECT_INTERVAL_MS = 5_000L
         const val SERVER_INTERVAL_MS = 30_000L
-        const val REQUEST_NOTIFICATIONS = 41
         const val MAX_ALERT_ROWS = 4
         val BG = Color.rgb(7, 21, 34)
         val SURFACE = Color.rgb(21, 31, 42)

@@ -38,6 +38,13 @@ data class PowerOutageInfo(
     val floorPct: Double? = null,
     val usableWh: Double? = null,
     val storedWh: Double? = null,
+    /** Dates (yyyy-MM-dd, Kyiv) the source has published a schedule for; tells «завтра ще не опубліковано» apart from «без відключень». */
+    val scheduleDates: List<String> = emptyList(),
+    val scheduleUpdatedAt: String? = null,
+    val fetchedAt: String? = null,
+    /** Machine id of the schedule source (loe, yasno, kharkiv, LOE, YASNO, …) for the official-site link. */
+    val sourceId: String? = null,
+    val regionId: String? = null,
 )
 
 data class ScheduleWindow(val startMillis: Long, val endMillis: Long, val maybe: Boolean)
@@ -83,7 +90,8 @@ object PowerOutageParser {
             loadBasis = autonomy.optStringOrNull("load_basis"),
             loadWatts = autonomy.optDouble("load_w", Double.NaN).takeIf(Double::isFinite),
             sourceError = block.optStringOrNull("error"),
-            source = block.optStringOrNull("provider"),
+            // server: provider = auto/loe/…, source_name = display name; direct mode: provider = display name
+            source = block.optStringOrNull("source_name") ?: block.optStringOrNull("provider")?.takeIf { it !in setOf("auto", "off", "unavailable") },
             emergency = block.optBoolean("emergency", false),
             scheduleEnabled = block.optBoolean("schedule_enabled", true),
             maybeStart = maybe?.optStringOrNull("start"),
@@ -94,6 +102,11 @@ object PowerOutageParser {
             floorPct = autonomy.optDouble("floor_pct", Double.NaN).takeIf { it.isFinite() && it > 0 },
             usableWh = autonomy.optDouble("usable_wh", Double.NaN).takeIf(Double::isFinite),
             storedWh = autonomy.optDouble("stored_wh", Double.NaN).takeIf(Double::isFinite),
+            scheduleDates = block.optJSONArray("schedule_dates")?.let { arr -> (0 until arr.length()).mapNotNull { arr.optString(it).takeIf(String::isNotBlank) } }.orEmpty(),
+            scheduleUpdatedAt = block.optStringOrNull("schedule_updated_at"),
+            fetchedAt = block.optStringOrNull("fetched_at"),
+            sourceId = block.optStringOrNull("source_id") ?: block.optStringOrNull("source"),
+            regionId = block.optStringOrNull("region"),
         )
     }
 
@@ -119,21 +132,37 @@ object PowerOutageFormatter {
         GridState.UNKNOWN -> "Світло: —"
     }
 
-    fun detail(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv)): String {
+    /**
+     * One schedule sentence that never contradicts the measured light state:
+     * grid OFF + window → «Повернення о 13:00»; grid ON + window → «За графіком відключення до 13:00 · світло є»;
+     * no active window → «Відключення о 15:00» (today) / «Відключення завтра о 07:00».
+     */
+    fun detail(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv), gridState: GridState = info.gridState): String {
         if (!info.scheduleEnabled) return "Графік відключень не налаштовано"
         if (info.scheduleUnavailable) return SCHEDULE_UNAVAILABLE
         if (info.emergency) return "Аварійні відключення, графік не діє"
         info.currentEnd?.let(::toKyiv)?.let { end ->
-            return "Повернення о ${stamp(end, now)}"
+            return when (gridState) {
+                GridState.OFF -> "Повернення о ${stamp(end, now)}"
+                GridState.ON -> "За графіком відключення до ${stamp(end, now)}$LIGHT_ON_SUFFIX"
+                GridState.UNKNOWN -> "За графіком відключення до ${stamp(end, now)}"
+            }
         }
-        val start = info.nextStart?.let(::toKyiv)
-        val end = info.nextEnd?.let(::toKyiv)
-        if (start != null && end != null) {
-            val datePrefix = if (start.toLocalDate() == now.withZoneSameInstant(kyiv).toLocalDate()) "" else "${start.format(dayMonth)} "
-            return "Відключення $datePrefix${start.format(clock)}–${end.format(clock)}"
-        }
+        info.nextStart?.let(::toKyiv)?.let { start -> return "Відключення ${dayAt(start, now)}" }
         maybe(info, now)?.let { return it }
         return if (info.schedulePublished) "За графіком без відключень" else "Графік не опубліковано"
+    }
+
+    /** «о 15:00» today, «завтра о 07:00», otherwise «19.10 о 07:00». */
+    fun dayAt(value: ZonedDateTime, now: ZonedDateTime): String {
+        val today = now.withZoneSameInstant(kyiv).toLocalDate()
+        val day = value.withZoneSameInstant(kyiv).toLocalDate()
+        val time = value.withZoneSameInstant(kyiv).format(clock)
+        return when (day) {
+            today -> "о $time"
+            today.plusDays(1) -> "завтра о $time"
+            else -> "${value.format(dayMonth)} о $time"
+        }
     }
 
     /** «Можливе відключення …» — kept apart from definite outages. */
@@ -155,10 +184,20 @@ object PowerOutageFormatter {
         ).joinToString(" · ").ifEmpty { null }
     }
 
+    /** Tail of [detail] while the grid is on during a scheduled window; dropped where «Світло є» is already shown. */
+    const val LIGHT_ON_SUFFIX = " · світло є"
+
+    /** [detail] for places that already show the light headline next to it (no «світло є» twice). */
+    fun detailBesideHeadline(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv), gridState: GridState = info.gridState): String =
+        detail(info, now, gridState).removeSuffix(LIGHT_ON_SUFFIX)
+
     const val SCHEDULE_UNAVAILABLE = "Графік недоступний — світло визначається за резервним виходом"
 
     fun shortDetail(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv)): String? {
-        info.currentEnd?.let(::toKyiv)?.let { end -> return "до ${stamp(end, now)}" }
+        info.currentEnd?.let(::toKyiv)?.let { end ->
+            // «до 13:00» means «light returns at 13:00» only while the light is really off.
+            return if (info.gridState == GridState.OFF) "до ${stamp(end, now)}" else "графік: відкл. до ${stamp(end, now)}"
+        }
         val start = info.nextStart?.let(::toKyiv) ?: return null
         if (start.toLocalDate() != now.withZoneSameInstant(kyiv).toLocalDate()) return null
         return "відкл. ${start.format(clock)}"

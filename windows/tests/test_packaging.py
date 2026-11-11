@@ -10,9 +10,9 @@ PACK = _path.WINDOWS / "packaging"
 
 class VersionTests(unittest.TestCase):
     def test_version_is_1_2_0_everywhere(self):
-        self.assertEqual("1.2.0", VERSION)
+        self.assertEqual("1.3.0", VERSION)
         info = (PACK / "version_info.txt").read_text("utf-8")
-        self.assertIn("filevers=(1, 2, 0, 0)", info)
+        self.assertIn("filevers=(1, 3, 0, 0)", info)
         self.assertEqual({VERSION}, set(re.findall(r"Version', '([0-9.]+)'", info)))
         self.assertIn(f'#define AppVersion "{VERSION}"', (PACK / "installer.iss").read_text("utf-8"))
 

@@ -21,8 +21,10 @@ class WidgetShapeSelectorTest {
     fun gridSizesPickTheLayoutThatFillsThem() {
         assertEquals(WidgetShape.SMALL, WidgetShapeSelector.select(120f, 120f))
         assertEquals(WidgetShape.SMALL, WidgetShapeSelector.select(160f, 160f))
-        // Samsung One UI 2×2 cells (≈ 170–190 dp) get the roomier square layout, not the compact one.
-        assertEquals(WidgetShape.SQUARE, WidgetShapeSelector.select(178f, 186f))
+        // Samsung One UI 2×2 cells (≈ 170–190 dp): roomier square layout; taller than wide → the tall 2×2 layout.
+        assertEquals(WidgetShape.SQUARE, WidgetShapeSelector.select(178f, 170f))
+        assertEquals(WidgetShape.SQUARE_TALL, WidgetShapeSelector.select(178f, 186f))
+        assertEquals(WidgetShape.SQUARE_TALL, WidgetShapeSelector.select(170f, 200f))
         // …but a 4×2 never falls back to the square layout.
         assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(340f, 186f))
         assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(340f, 160f))
@@ -49,6 +51,28 @@ class WidgetShapeSelectorTest {
     fun bigPhoneCellsDoNotJumpToTabletShape() {
         assertEquals(WidgetShape.LARGE, WidgetShapeSelector.select(340f, 430f))
         assertEquals(WidgetShape.LARGE, WidgetShapeSelector.select(390f, 400f))
+    }
+
+    @Test
+    fun samsungOneUiCellsFillTheirShape() {
+        // One UI portrait sizes (minWidth × maxHeight): 4×1, 2×2, 4×2, 4×4.
+        assertEquals(WidgetShape.FLAT, WidgetShapeSelector.select(350f, 84f))
+        assertEquals(WidgetShape.SQUARE_TALL, WidgetShapeSelector.select(170f, 200f))
+        assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(350f, 200f))
+        assertEquals(WidgetShape.LARGE, WidgetShapeSelector.select(350f, 420f))
+    }
+
+    @Test
+    fun portraitUsesMinWidthAndMaxHeightLandscapeTheOpposite() {
+        assertEquals(170f to 200f, WidgetShapeSelector.portraitSize(170, 190, 160, 200))
+        assertEquals(190f to 160f, WidgetShapeSelector.landscapeSize(170, 190, 160, 200))
+        assertEquals(null, WidgetShapeSelector.portraitSize(0, 0, 0, 0))
+    }
+
+    @Test
+    fun trailingDurationsWrapBetweenNumberGroupsOnly() {
+        assertEquals("≈\u00A03\u00A0д 15\u00A0год", WidgetRenderer.keepUnits("≈ 3 д 15 год"))
+        assertEquals("до 22:00", WidgetRenderer.keepUnits("до 22:00"))
     }
 
     @Test

@@ -127,7 +127,7 @@ class WidgetSummaryResolverTest {
         // Power is the headline; it must not be repeated as the first detail line.
         assertFalse(s.lines.any { it.text.startsWith("Заряд ≈") })
         assertEquals("До 100% ≈ 1 год 20 хв · оцінка", s.lines[0].text)
-        assertEquals("Світло є · Відключення 20:00–22:00", s.lines[1].text)
+        assertEquals("Світло є · Відключення о 20:00", s.lines[1].text)
     }
 
     @Test
@@ -147,7 +147,7 @@ class WidgetSummaryResolverTest {
         assertEquals(SummaryMode.IDLE, s.mode)
         assertEquals("Світло є · очікування", s.primary)
         assertEquals("Очікування", s.batteryState)
-        assertEquals("Відключення 20:00–22:00", s.secondary)
+        assertEquals("Відключення о 20:00", s.secondary)
         assertEquals("≈ 8 год 0 хв", s.trailingPrimary)
         assertEquals("запас · 24,5 °C", s.trailingSecondary)
         assertFalse(s.lines.any { it.kind == SummaryLineKind.POWER })
@@ -159,7 +159,7 @@ class WidgetSummaryResolverTest {
     fun idleDetailLinesNeverRepeatTheLightHeadline() {
         val s = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE, power = 0.0, outage = outageOn), now)
         // The headline already says «Світло є · очікування»; the first detail line carries only the schedule.
-        assertEquals("Відключення 20:00–22:00", s.lines.first { it.kind == SummaryLineKind.LIGHT }.text)
+        assertEquals("Відключення о 20:00", s.lines.first { it.kind == SummaryLineKind.LIGHT }.text)
         assertFalse(s.lines.any { it.text.contains("Світло є") })
         val unpublished = """{"available":true,"group":"1.1","grid_state":"on","schedule_published":false,"autonomy":{}}"""
         val u = WidgetSummaryResolver.resolve(snapshot(BatteryDirection.IDLE, power = 0.0, outage = unpublished), now)

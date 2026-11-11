@@ -38,7 +38,7 @@ class OutageStatusBuilderTest {
         assertTrue(info.schedulePublished)
         assertEquals("YASNO", info.source)
         assertEquals("1.1", info.group)
-        assertEquals("Відключення 15:00–22:30", PowerOutageFormatter.detail(info, at(10)))
+        assertEquals("Відключення о 15:00", PowerOutageFormatter.detail(info, at(10)))
     }
 
     @Test

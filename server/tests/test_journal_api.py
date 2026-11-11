@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from urllib.request import urlopen
 
+import events as journal_events
 import server
 from history import HistoryStore
 from server import Handler, RateLimiter, ThreadingHTTPServer, poller
@@ -31,6 +32,7 @@ class PollerJournalTests(unittest.TestCase):
         for p in self.patches:
             p.start()
         poller.detector = None
+        poller.initial_journaled = False
 
     def tearDown(self):
         for p in self.patches:
@@ -49,7 +51,7 @@ class PollerJournalTests(unittest.TestCase):
         snap = poller.snapshot()
         self.assertEqual(snap["power_outage"]["grid_state"], "unknown")
         self.assertTrue(snap["connection"]["lost"])
-        self.assertEqual([e["kind"] for e in self.store.events()], ["connection_lost"])
+        self.assertEqual([e["kind"] for e in self.store.events()], ["connection_lost", "initial_state"])
 
     def test_backup_output_draw_is_journaled_as_light_lost(self):
         self.poll()
@@ -58,11 +60,41 @@ class PollerJournalTests(unittest.TestCase):
         self.assertEqual(snap["power_outage"]["grid_state"], "off")
         self.assertEqual(snap["power_outage"]["autonomy"]["load_basis"], "measured_backup_output")
         self.assertEqual(snap["power_outage"]["autonomy"]["floor_pct"], 11)
-        self.assertEqual([e["kind"] for e in self.store.events()], ["light_lost"])
+        self.assertEqual([e["kind"] for e in self.store.events()], ["light_lost", "initial_state"])
         self.assertEqual([e["kind"] for e in snap["insights"]["chart_events"]], ["light_lost"])
+
+    def test_first_answered_poll_journals_the_initial_state_once(self):
+        self.poll(ok=False)
+        self.assertEqual(self.store.events(), [])
+        self.poll(offgrid=0, soc=100)
+        self.poll(offgrid=0, soc=100)
+        events = self.store.events()
+        self.assertEqual([e["kind"] for e in events], ["initial_state"])
+        self.assertEqual(events[0]["category"], "system")
+        self.assertIn("Стан на старті: світло є", events[0]["text"])
+        self.assertIn("заряд 100%", events[0]["text"])
 
 
 class EventsEndpointTests(unittest.TestCase):
+    def test_events_payload_has_journal_start_and_system_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = HistoryStore(os.path.join(tmp, "h.db"))
+            self.assertIsNone(store.first_event_ts())
+            store.record_event(journal_events.server_started_event(1_800_000_000.0))
+            store.record_event({"ts": 1_800_000_100.0, "kind": "light_lost", "category": "light", "text": "Світло зникло",
+                                "value": None})
+            with patch.object(poller, "history", store):
+                body = server.events_payload("category=system")
+                empty_store = HistoryStore(os.path.join(tmp, "e.db"))
+                with patch.object(poller, "history", empty_store):
+                    empty = server.events_payload("")
+                empty_store.close()
+            store.close()
+        self.assertEqual([e["kind"] for e in body["events"]], ["server_started"])
+        self.assertTrue(body["events"][0]["text"].startswith("Сервер запущено"))
+        self.assertTrue(body["journal_started_at"].startswith("2027-01-15T"))
+        self.assertEqual(empty, {"events": [], "journal_started_at": None})
+
     def test_events_endpoint_returns_newest_first_with_category_filter(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = HistoryStore(os.path.join(tmp, "h.db"))

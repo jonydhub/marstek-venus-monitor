@@ -1,8 +1,12 @@
 package com.doloh.marstekwidget.ui
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -15,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import com.doloh.marstekwidget.data.BatteryScanner
 import com.doloh.marstekwidget.data.DirectEngine
@@ -26,7 +31,12 @@ import com.doloh.marstekwidget.direct.DeviceInfo
 import com.doloh.marstekwidget.direct.MarstekRpc
 import com.doloh.marstekwidget.direct.RpcResult
 import com.doloh.marstekwidget.direct.SubnetScanPlanner
+import com.doloh.marstekwidget.R
+import com.doloh.marstekwidget.domain.AlertGroup
 import com.doloh.marstekwidget.domain.BatteryDisplayFormatter
+import com.doloh.marstekwidget.domain.JournalDetector
+import com.doloh.marstekwidget.notify.AlertNotifier
+import com.doloh.marstekwidget.widget.WidgetPreferences
 import com.doloh.marstekwidget.outage.OfficialSources
 import com.doloh.marstekwidget.outage.OutageRegions
 import com.doloh.marstekwidget.settings.AppSettings
@@ -72,6 +82,7 @@ class SettingsActivity : Activity() {
     private lateinit var ratedNote: TextView
     private lateinit var floorEdit: EditText
     private lateinit var errorText: TextView
+    private lateinit var permissionHint: TextView
     private var scanning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -208,6 +219,7 @@ class SettingsActivity : Activity() {
         reserveCard.addView(ui.hint("Нижче цього заряду Venus не віддає енергію (типово ≈ 11–12 %; Open API його не повідомляє). " +
             "«Вистачить на…» рахує лише енергію понад цей поріг; на графіку — червона пунктирна лінія. 0 = до 0 %."))
         page.addView(reserveCard, ui.matchWrap(10))
+        if (!onboarding) page.addView(notificationsCard(), ui.matchWrap(10))
         if (!onboarding && draft.mode == ConnectionMode.SERVER && draft.serverUrl != null) {
             val web = ui.card()
             web.addView(ui.title("Веб-дашборд сервера"))
@@ -226,6 +238,114 @@ class SettingsActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(0, ui.dp(10), 0, 0)
         })
+    }
+
+    /** «Сповіщення»: collapsed by default (like diagnostics); every change is saved immediately. */
+    private fun notificationsCard(): LinearLayout {
+        val card = ui.card()
+        val preferences = WidgetPreferences(this)
+        val alertSettings = preferences.alertSettings()
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val enabledCount = AlertGroup.entries.count { it in alertSettings.enabledGroups }
+        val header = ui.label("Сповіщення  ▸", 14f, Ui.TEXT, true)
+        val summary = ui.hint("Увімкнено груп: $enabledCount з ${AlertGroup.entries.size}" +
+            if (preferences.anomalyNotificationsEnabled()) " · аномалії" else "")
+        header.setOnClickListener {
+            val open = body.visibility != View.VISIBLE
+            body.visibility = if (open) View.VISIBLE else View.GONE
+            header.text = if (open) "Сповіщення  ▾" else "Сповіщення  ▸"
+        }
+        card.addView(header)
+        card.addView(summary)
+        listOf(
+            AlertGroup.LIGHT_SCHEDULE to (R.string.main_notify_group_light to R.string.main_notify_group_light_hint),
+            AlertGroup.RESERVE to (R.string.main_notify_group_reserve to R.string.main_notify_group_reserve_hint),
+            AlertGroup.CHARGING to (R.string.main_notify_group_charging to R.string.main_notify_group_charging_hint),
+            AlertGroup.CONSUMPTION to (R.string.main_notify_group_consumption to R.string.main_notify_group_consumption_hint),
+            AlertGroup.BATTERY_HEALTH to (R.string.main_notify_group_health to R.string.main_notify_group_health_hint),
+        ).forEach { (group, labels) ->
+            body.addView(switch(getString(labels.first), group in alertSettings.enabledGroups) { checked ->
+                preferences.setAlertGroupEnabled(group, checked)
+                if (preferences.anyAlertsEnabled()) WidgetRefreshScheduler.ensurePeriodic(this)
+                if (checked) requestNotificationPermission()
+                updatePermissionHint()
+            }, ui.matchWrap(4))
+            body.addView(ui.hint(getString(labels.second)))
+        }
+        body.addView(ui.label(getString(R.string.main_notify_high_load_label), 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(8), 0, 0) })
+        body.addView(numberField(alertSettings.highLoadThresholdWatts.toString()) { v ->
+            v.takeIf { it in 1..10_000 }?.let(preferences::setHighLoadThreshold)
+        }, LinearLayout.LayoutParams(ui.dp(140), ViewGroup.LayoutParams.WRAP_CONTENT))
+        body.addView(ui.hint(getString(R.string.main_notify_high_load_note)))
+
+        body.addView(ui.label("Аномалії", 12f, Ui.TEXT, true).apply { setPadding(0, ui.dp(10), 0, 0) })
+        body.addView(switch("Сповіщати про аномалії", preferences.anomalyNotificationsEnabled()) { checked ->
+            preferences.setAnomalyNotificationsEnabled(checked)
+            if (checked) requestNotificationPermission()
+        }, ui.matchWrap(4))
+        body.addView(ui.label("Поріг розрядки, Вт (${JournalDetector.MIN_ANOMALY_DISCHARGE_W}–${JournalDetector.MAX_ANOMALY_DISCHARGE_W})", 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
+        body.addView(numberField(preferences.anomalyThresholdWatts().toString(), enabled = draft.mode == ConnectionMode.DIRECT) { v ->
+            v.takeIf { it in JournalDetector.MIN_ANOMALY_DISCHARGE_W..JournalDetector.MAX_ANOMALY_DISCHARGE_W }?.let(preferences::setAnomalyThresholdWatts)
+        }, LinearLayout.LayoutParams(ui.dp(140), ViewGroup.LayoutParams.WRAP_CONTENT))
+        body.addView(ui.hint(
+            if (draft.mode == ConnectionMode.SERVER) "Режим сервера: поріг аномалій задає сервер (MARSTEK_ANOMALY_DISCHARGE_W)."
+            else "Розрядка вище порогу, розряд при наявності мережі (можливий конфлікт з ДБЖ/інвертором), перегрів."
+        ))
+        permissionHint = ui.label(getString(R.string.main_notify_permission), 11f, Ui.AMBER, true).apply {
+            setPadding(0, ui.dp(6), 0, 0)
+            setOnClickListener { requestNotificationPermission() }
+        }
+        body.addView(permissionHint)
+        body.addView(ui.hint(getString(R.string.main_notify_note)))
+        card.addView(body)
+        updatePermissionHint()
+        if (intent.getBooleanExtra(EXTRA_OPEN_NOTIFICATIONS, false)) {
+            header.performClick()
+            card.post { (card.parent?.parent?.parent as? ScrollView ?: findScroll(card))?.smoothScrollTo(0, card.top) }
+        }
+        return card
+    }
+
+    private fun findScroll(view: View): ScrollView? {
+        var p = view.parent
+        while (p != null) { if (p is ScrollView) return p; p = p.parent }
+        return null
+    }
+
+    private fun switch(text: String, checked: Boolean, onChange: (Boolean) -> Unit) = Switch(this).apply {
+        this.text = text
+        isChecked = checked
+        textSize = 14f
+        setTextColor(Ui.TEXT)
+        thumbTintList = ColorStateList.valueOf(Ui.MINT)
+        setOnCheckedChangeListener { _, value -> onChange(value) }
+    }
+
+    private fun numberField(value: String, enabled: Boolean = true, onValue: (Int) -> Unit) = ui.field(value, numeric = true).apply {
+        setText(value)
+        isEnabled = enabled
+        addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
+            override fun afterTextChanged(s: Editable?) { s?.toString()?.trim()?.toIntOrNull()?.let(onValue) }
+        })
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+    }
+
+    private fun updatePermissionHint() {
+        if (!::permissionHint.isInitialized) return
+        val wanted = WidgetPreferences(this).anyAlertsEnabled()
+        permissionHint.visibility = if (wanted && !AlertNotifier.canPost(this)) View.VISIBLE else View.GONE
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        updatePermissionHint()
     }
 
     private fun pickerRow(caption: String, value: TextView, onClick: () -> Unit) = LinearLayout(this).apply {
@@ -480,6 +600,8 @@ class SettingsActivity : Activity() {
 
     companion object {
         const val EXTRA_ONBOARDING = "onboarding"
+        const val EXTRA_OPEN_NOTIFICATIONS = "open_notifications"
         private const val TOKEN_PLACEHOLDER = "••••••••"
+        private const val REQUEST_NOTIFICATIONS = 42
     }
 }

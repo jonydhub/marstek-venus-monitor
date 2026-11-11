@@ -55,7 +55,7 @@ object WidgetSummaryResolver {
         if (linkLost || snapshot.batteryLinkLost) {
             // Light comes only from the backup output: without an answer from the battery it is unknown, not «нема».
             val status = LightStatusResolver.resolve(snapshot, fetchFailed = true, now = now)
-            val schedule = info?.let { PowerOutageFormatter.detail(it, now) }
+            val schedule = info?.let { PowerOutageFormatter.detail(it, now, GridState.UNKNOWN) }
             return WidgetSummary(
                 mode = SummaryMode.UNKNOWN,
                 lightState = GridState.UNKNOWN,
@@ -125,7 +125,7 @@ object WidgetSummaryResolver {
 
         val lightShort = info?.let { listOfNotNull(PowerOutageFormatter.headline(it), PowerOutageFormatter.shortDetail(it, now)).joinToString(SEP) }
         val lightLine = info?.let {
-            SummaryLine(SummaryLineKind.LIGHT, PowerOutageFormatter.headline(it) + SEP + PowerOutageFormatter.detail(it, now),
+            SummaryLine(SummaryLineKind.LIGHT, PowerOutageFormatter.headline(it) + SEP + PowerOutageFormatter.detailBesideHeadline(it, now),
                 if (it.gridState == GridState.ON) SummaryTone.GOOD else SummaryTone.NEUTRAL)
         }
         val reserveLine = reserve?.let { SummaryLine(SummaryLineKind.RESERVE, it, reserveTone) }
@@ -161,7 +161,7 @@ object WidgetSummaryResolver {
                 val stateWord = if (idle) "очікування" else "стан невідомий"
                 val runtime = info?.runtimeSeconds?.let { "≈ ${EtaTextFormatter.formatSeconds(it)}" }
                 // The headline already names the light state, so the light detail line carries only the schedule.
-                val lightDetail = info?.let { SummaryLine(SummaryLineKind.LIGHT, PowerOutageFormatter.detail(it, now)) }
+                val lightDetail = info?.let { SummaryLine(SummaryLineKind.LIGHT, PowerOutageFormatter.detailBesideHeadline(it, now)) }
                 return WidgetSummary(
                     mode = if (idle) SummaryMode.IDLE else SummaryMode.UNKNOWN,
                     lightState = light,

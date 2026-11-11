@@ -11,7 +11,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.view.View
 import com.doloh.marstekwidget.domain.ChartEvent
-import com.doloh.marstekwidget.domain.ScheduleBarModel
+import com.doloh.marstekwidget.domain.DaySchedule
 import com.doloh.marstekwidget.domain.SocPoint
 import com.doloh.marstekwidget.domain.TimeSpan
 
@@ -27,52 +27,118 @@ object ChartColors {
     val BLUE = Color.rgb(120, 184, 255)
 }
 
-object ScheduleBarPainter {
-    /** Bar only (widgets: no text, fitXY-safe); [labelsPx] > 0 adds «0 12 0 12 24» under it (app view). */
-    fun draw(canvas: Canvas, width: Float, height: Float, model: ScheduleBarModel, density: Float, labelsPx: Float = 0f) {
-        val barH = if (labelsPx > 0f) height - labelsPx - 3 * density else height
-        val top = if (labelsPx > 0f) 2 * density else 0f
-        val r = barH / 2f
+/** SOC bar like the web dashboard: dim track, filled part = red → amber → green → teal gradient spanning the full track. */
+object SocBarPainter {
+    private val COLORS = intArrayOf(Color.rgb(239, 99, 77), Color.rgb(245, 190, 40), Color.rgb(143, 209, 138), Color.rgb(53, 201, 218))
+    private val STOPS = floatArrayOf(0f, 0.42f, 0.72f, 1f)
+
+    fun draw(canvas: Canvas, width: Float, height: Float, socPercent: Int?) {
+        val r = height / 2f
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color = ChartColors.TRACK
-        val bar = RectF(0f, top, width, top + barH - (if (labelsPx > 0f) 2 * density else 0f))
+        paint.color = Color.argb(31, 255, 255, 255)
+        val track = RectF(0f, 0f, width, height)
+        canvas.drawRoundRect(track, r, r, paint)
+        val soc = (socPercent ?: 0).coerceIn(0, 100)
+        if (soc <= 0) return
+        paint.color = Color.WHITE
+        paint.shader = LinearGradient(0f, 0f, width, 0f, COLORS, STOPS, Shader.TileMode.CLAMP)
+        val fillW = maxOf(height, width * soc / 100f)
+        canvas.drawRoundRect(RectF(0f, 0f, fillW, height), r, r, paint)
+    }
+}
+
+class SocBarView(context: Context) : View(context) {
+    private var soc: Int? = null
+    fun setSoc(value: Int?) { soc = value; invalidate() }
+    override fun onDraw(canvas: Canvas) = SocBarPainter.draw(canvas, width.toFloat(), height.toFloat(), soc)
+}
+
+/**
+ * One day 0–24 h: amber = definite outage, hatched lighter amber = «можливе», white marker = now (today only).
+ * [labelsPx] > 0 adds hour ticks (every hour, longer every 6 h) and «0 6 12 18 24» labels under the bar.
+ */
+object DayScheduleBarPainter {
+    fun draw(canvas: Canvas, width: Float, height: Float, day: DaySchedule, density: Float, labelsPx: Float = 0f) {
+        val marker = if (day.nowFraction != null) 2.5f * density else 0f
+        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = labelsPx }
+        val tickZone = if (labelsPx > 0f) 6f * density + labelsPx + 2f * density else 0f
+        val inset = if (labelsPx > 0f) labelPaint.measureText("24") / 2f else 0f
+        val left = maxOf(inset, marker)
+        val right = width - maxOf(inset, marker)
+        val bar = RectF(left, marker, right, height - tickZone - marker)
+        val r = minOf(bar.height() / 2f, 4f * density)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = if (day.published) ChartColors.TRACK else Color.argb(90, 52, 66, 80)
         canvas.drawRoundRect(bar, r, r, paint)
+        if (!day.published) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = density
+            paint.color = Color.rgb(70, 88, 104)
+            paint.pathEffect = DashPathEffect(floatArrayOf(4 * density, 3 * density), 0f)
+            canvas.drawRoundRect(bar, r, r, paint)
+            paint.pathEffect = null
+            paint.style = Paint.Style.FILL
+        }
         canvas.save()
         canvas.clipPath(Path().apply { addRoundRect(bar, r, r, Path.Direction.CW) })
-        model.segments.forEach { s ->
-            val rect = RectF(s.start * width, bar.top, s.end * width, bar.bottom)
+        fun x(f: Float) = bar.left + f * bar.width()
+        day.segments.forEach { s ->
+            val rect = RectF(x(s.start), bar.top, x(s.end), bar.bottom)
             if (s.maybe) {
-                paint.color = Color.argb(110, 245, 183, 46)
+                paint.color = Color.argb(90, 245, 183, 46)
                 canvas.drawRect(rect, paint)
-                paint.color = ChartColors.AMBER
+                paint.color = Color.argb(220, 245, 183, 46)
                 paint.strokeWidth = 1.5f * density
-                var x = rect.left - bar.height()
-                while (x < rect.right) {
-                    canvas.drawLine(x, bar.bottom, x + bar.height(), bar.top, paint)
-                    x += 4 * density
+                canvas.save()
+                canvas.clipRect(rect)
+                var hx = rect.left - bar.height()
+                while (hx < rect.right) {
+                    canvas.drawLine(hx, bar.bottom, hx + bar.height(), bar.top, paint)
+                    hx += 4 * density
                 }
+                canvas.restore()
             } else {
                 paint.color = ChartColors.AMBER
                 canvas.drawRect(rect, paint)
             }
         }
-        paint.color = Color.rgb(7, 21, 34)
-        canvas.drawRect(width / 2f - density, bar.top, width / 2f + density, bar.bottom, paint)
+        // thin separators every 6 h inside the bar keep it readable without labels (widgets)
+        paint.color = Color.argb(150, 7, 21, 34)
+        for (h in listOf(6, 12, 18)) canvas.drawRect(x(h / 24f) - 0.5f * density, bar.top, x(h / 24f) + 0.5f * density, bar.bottom, paint)
         canvas.restore()
-        val nx = (model.nowFraction * width).coerceIn(1.5f * density, width - 1.5f * density)
-        paint.color = Color.BLACK
-        canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + top), density, density, paint)
-        paint.color = Color.WHITE
-        canvas.drawRoundRect(RectF(nx - 1.5f * density, 0f, nx + 1.5f * density, bar.bottom + top), density, density, paint)
         if (labelsPx > 0f) {
-            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = labelsPx }
+            val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(84, 102, 118); strokeWidth = density }
+            val top = bar.bottom + 2f * density
+            for (h in 0..24) {
+                val major = h % 6 == 0
+                tick.color = if (major) ChartColors.LABEL else Color.rgb(70, 88, 104)
+                val len = (if (major) 5f else 2.5f) * density
+                canvas.drawLine(x(h / 24f), top, x(h / 24f), top + len, tick)
+            }
             val y = height - 1f
-            listOf("0", "12", "0", "12", "24").forEachIndexed { i, label ->
-                val w = text.measureText(label)
-                val x = (width * i / 4f - if (i == 0) 0f else if (i == 4) w else w / 2f)
-                canvas.drawText(label, x, y, text)
+            for (h in listOf(0, 6, 12, 18, 24)) {
+                val label = h.toString()
+                val w = labelPaint.measureText(label)
+                canvas.drawText(label, (x(h / 24f) - w / 2f).coerceIn(0f, width - w), y, labelPaint)
             }
         }
+        day.nowFraction?.let { f ->
+            val nx = x(f)
+            paint.color = Color.BLACK
+            canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
+            paint.color = Color.WHITE
+            canvas.drawRoundRect(RectF(nx - 1.5f * density, 0f, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
+        }
+    }
+}
+
+class DayScheduleView(context: Context) : View(context) {
+    private var day: DaySchedule? = null
+    fun setDay(value: DaySchedule) { day = value; invalidate() }
+    override fun onDraw(canvas: Canvas) {
+        val d = day ?: return
+        val density = resources.displayMetrics.density
+        DayScheduleBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = 10f * density)
     }
 }
 
@@ -166,16 +232,6 @@ object SocChartPainter {
             canvas.drawText(eventGlyph(e.kind), ex, cy + 3 * density, glyph)
         }
         grid.color = ChartColors.GRID
-    }
-}
-
-class ScheduleBarView(context: Context) : View(context) {
-    private var model: ScheduleBarModel? = null
-    fun setModel(value: ScheduleBarModel) { model = value; invalidate() }
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val d = resources.displayMetrics.density
-        model?.let { ScheduleBarPainter.draw(canvas, width.toFloat(), height.toFloat(), it, d, labelsPx = 10f * d) }
     }
 }
 

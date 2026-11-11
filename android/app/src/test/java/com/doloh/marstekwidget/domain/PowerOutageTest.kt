@@ -52,7 +52,7 @@ class PowerOutageTest {
 
     @Test
     fun detailShowsNextWindowInKyivTime() {
-        assertEquals("Відключення 20:00–22:00", PowerOutageFormatter.detail(outage(scheduled), now))
+        assertEquals("Відключення о 20:00", PowerOutageFormatter.detail(outage(scheduled), now))
     }
 
     @Test
@@ -68,7 +68,9 @@ class PowerOutageTest {
     @Test
     fun detailForOtherDayIncludesDate() {
         val tomorrow = outage(scheduled.replace("2026-10-17T2", "2026-10-18T2"))
-        assertEquals("Відключення 18.10 20:00–22:00", PowerOutageFormatter.detail(tomorrow, now))
+        assertEquals("Відключення завтра о 20:00", PowerOutageFormatter.detail(tomorrow, now))
+        val later = outage(scheduled.replace("2026-10-17T2", "2026-10-19T2"))
+        assertEquals("Відключення 19.10 о 20:00", PowerOutageFormatter.detail(later, now))
     }
 
     @Test

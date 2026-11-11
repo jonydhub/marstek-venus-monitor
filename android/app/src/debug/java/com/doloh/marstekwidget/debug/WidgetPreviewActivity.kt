@@ -49,6 +49,23 @@ class WidgetPreviewActivity : Activity() {
             finish()
             return
         }
+        if (intent.getBooleanExtra("schedule", false)) {
+            startActivity(Intent(this, com.doloh.marstekwidget.ui.ScheduleActivity::class.java).putExtra("showcase", true))
+            finish()
+            return
+        }
+        if (intent.getBooleanExtra("settings_notifications", false)) {
+            startActivity(Intent(this, com.doloh.marstekwidget.ui.SettingsActivity::class.java)
+                .putExtra(com.doloh.marstekwidget.ui.SettingsActivity.EXTRA_OPEN_NOTIFICATIONS, true))
+            finish()
+            return
+        }
+        if (intent.getBooleanExtra("journal_live", false)) {
+            // Real journal of the configured connection (server /api/events or the phone's own), not the demo list.
+            startActivity(Intent(this, com.doloh.marstekwidget.ui.JournalActivity::class.java))
+            finish()
+            return
+        }
         if (intent.getBooleanExtra("journal", false)) {
             startActivity(Intent(this, com.doloh.marstekwidget.ui.JournalActivity::class.java).putExtra("showcase", true))
             finish()
@@ -87,7 +104,7 @@ class WidgetPreviewActivity : Activity() {
         val page = intent.getStringExtra("page") ?: "1"
         val sizes = if (page == "samsung") {
             // Samsung One UI (4×5 grid, ~412 dp wide screen) cell sizes: 4×1, 2×2, 4×2, 4×4.
-            listOf("4x1" to (370 to 84), "2x2" to (180 to 186), "4x2" to (370 to 186), "4x4" to (370 to 400))
+            listOf("4x1" to (350 to 84), "2x2" to (170 to 200), "4x2" to (350 to 200), "4x4" to (350 to 420))
         } else if (page == "1") {
             listOf("4x1 min" to (340 to 44), "4x1" to (340 to 72), "2x1" to (160 to 72), "2x2" to (160 to 160), "4x2" to (340 to 160))
         } else if (page == "tablet") {
@@ -117,7 +134,7 @@ class WidgetPreviewActivity : Activity() {
                 setPadding(0, (8 * density).toInt(), 0, (3 * density).toInt())
             })
             val frame = FrameLayout(this)
-            val views = WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0)
+            val views = WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0, w.toFloat() to h.toFloat())
             frame.addView(views.apply(this, frame), ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             column.addView(frame, LinearLayout.LayoutParams((w * density).toInt(), (h * density).toInt()))
         }
@@ -199,7 +216,10 @@ class WidgetPreviewActivity : Activity() {
             if (outage) put(JSONObject().put("t", now.minusHours(5).format(iso)).put("kind", "light_lost"))
         })
         val po = root.getJSONObject("power_outage")
-        po.put("windows", JSONArray().apply {
+        po.put("schedule_dates", JSONArray().put(now.toLocalDate().toString()).apply { if (kind != "scheduled_on") put(now.toLocalDate().plusDays(1).toString()) })
+        po.put("source_name", "Львівобленерго").put("source", "loe").put("region", "lviv")
+            .put("schedule_updated_at", now.minusHours(9).withMinute(12).format(iso)).put("fetched_at", now.minusMinutes(4).format(iso))
+        if (!po.has("windows")) po.put("windows", JSONArray().apply {
             put(JSONObject().put("start", midnight.plusHours(4).format(iso)).put("end", midnight.plusHours(8).format(iso)).put("kind", "off"))
             listOfNotNull(po.optJSONObject("current_outage"), po.optJSONObject("next_outage")).forEach { w ->
                 put(JSONObject().put("start", w.getString("start")).put("end", w.getString("end")).put("kind", "off"))
@@ -255,15 +275,16 @@ class WidgetPreviewActivity : Activity() {
             setPadding(px(24), px(72), px(24), px(40))
         }
         val showcaseSizes = when (intent.getStringExtra("sizes")) {
-            "2x2" -> listOf(180 to 186)
-            "4x2" -> listOf(360 to 186)
-            "4x4" -> listOf(360 to 390)
+            "2x2" -> listOf(170 to 200)
+            "4x2" -> listOf(350 to 200)
+            "4x4" -> listOf(350 to 420)
+            "4x1" -> listOf(350 to 84)
             else -> listOf(340 to 72, 180 to 186, 340 to 186)
         }
         showcaseSizes.forEachIndexed { index, (w, h) ->
             val shape = WidgetShapeSelector.select(w.toFloat(), h.toFloat())
             val frame = FrameLayout(this)
-            val views = WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0)
+            val views = WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0, w.toFloat() to h.toFloat())
             frame.addView(views.apply(this, frame), ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             column.addView(frame, LinearLayout.LayoutParams(px(w), px(h)).apply { if (index > 0) topMargin = px(36) })
         }
@@ -279,7 +300,7 @@ class WidgetPreviewActivity : Activity() {
         val outageStart = hourStart.minusHours(5).format(iso)
         val outageEnd = hourStart.plusHours(3).format(iso)
         val outage = kind == "outage"
-        val full = kind == "idle"
+        val full = kind == "idle" || kind == "scheduled_on"
         val soc = if (outage) 63 else if (full) 100 else 72
         val stored = soc * 51.2
         val temp = if (outage) 24.0 else 27.0
@@ -295,7 +316,17 @@ class WidgetPreviewActivity : Activity() {
         }
         val load = 121.0
         val runtime = (stored / load * 3600).toLong()
-        val powerOutage = if (outage) JSONObject("""{"available":true,"group":"1.1","grid_state":"off",
+        val scheduledOn = kind == "scheduled_on"
+        val powerOutage = if (scheduledOn) JSONObject("""{"available":true,"group":"1.1","grid_state":"on",
+            "current_outage":{"kind":"schedule","start":"${hourStart.minusHours(1).format(iso)}","end":"${hourStart.plusHours(5).format(iso)}","duration_seconds":21600},
+            "next_outage":{"kind":"schedule","start":"${hourStart.plusHours(7).format(iso)}","end":"${hourStart.plusHours(13).format(iso)}","duration_seconds":21600},
+            "maybe_outages":[{"kind":"maybe","start":"${hourStart.plusHours(13).format(iso)}","end":"${hourStart.plusHours(14).format(iso)}"}],
+            "schedule_published":true,
+            "windows":[{"start":"${hourStart.minusHours(1).format(iso)}","end":"${hourStart.plusHours(5).format(iso)}","kind":"off"},
+                       {"start":"${hourStart.plusHours(7).format(iso)}","end":"${hourStart.plusHours(13).format(iso)}","kind":"off"},
+                       {"start":"${hourStart.plusHours(13).format(iso)}","end":"${hourStart.plusHours(14).format(iso)}","kind":"maybe"}],
+            "autonomy":{"load_w":52.0,"load_basis":"measured_average_24h","stored_wh":$stored,"runtime_seconds":${(stored / 52.0 * 3600).toLong()},"outage_seconds":21600,"covers_next_outage":true}}""")
+        else if (outage) JSONObject("""{"available":true,"group":"1.1","grid_state":"off",
             "current_outage":{"kind":"schedule","start":"$outageStart","end":"$outageEnd","duration_seconds":28800},
             "next_outage":null,"schedule_published":true,
             "autonomy":{"load_w":$load,"load_basis":"measured_backup_output","stored_wh":$stored,"runtime_seconds":$runtime,"outage_seconds":9000,"covers_next_outage":true}}""")

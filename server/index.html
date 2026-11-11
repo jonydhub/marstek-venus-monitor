@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=9">
+  <link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -38,15 +38,15 @@
       <h2 id="hero-title" class="hero-title">Перевіряю…</h2>
       <p id="hero-forecast" class="hero-forecast">—</p>
       <p id="hero-sub" class="hero-sub">—</p>
-      <div class="today-tiles" aria-label="Сьогодні з 00:00">
+      <div class="today-tiles" id="today-tiles" aria-label="Сьогодні з 00:00">
         <div><b id="today-charge">—</b><span>Заряд</span></div>
         <div><b id="today-discharge">—</b><span>Розряд</span></div>
         <div class="outage"><b id="today-outage">—</b><span>Без світла</span></div>
       </div>
+      <p class="today-note" id="today-note" hidden>Тривалості за сьогодні з'являться, коли збереться історія.</p>
       <div class="schedule-block">
-        <div class="spark-head"><span id="schedule-caption">Сьогодні і завтра</span><span id="schedule-legend"><i class="lg-off"></i>відключення <i class="lg-maybe"></i>можливе</span></div>
-        <div id="schedule-bar" class="schedule-bar" role="img" aria-label="Графік відключень на сьогодні і завтра"></div>
-        <div class="schedule-axis"><span>0</span><span>12</span><span>0</span><span>12</span><span>24</span></div>
+        <div class="spark-head"><span id="schedule-caption">Графік відключень</span><span id="schedule-legend"><i class="lg-off"></i>відключення <i class="lg-maybe"></i>можливе</span></div>
+        <div id="schedule-days" class="schedule-days" aria-label="Графік відключень на сьогодні і завтра"></div>
       </div>
       <div class="hero-spark">
         <div class="spark-head"><span>Заряд за 24 год</span><span id="spark-range">—</span></div>
@@ -117,9 +117,9 @@
     <section class="journal" id="journal" aria-label="Журнал подій">
       <div class="flow-heading"><div><p class="eyebrow">ЖУРНАЛ ПОДІЙ · 30 ДНІВ</p><h2>Світло, зв'язок, аномалії</h2></div><button id="journal-csv" class="install-button" type="button">CSV</button></div>
       <div class="journal-filter" role="group" aria-label="Фільтр журналу">
-        <button type="button" data-filter="" class="active">Все</button><button type="button" data-filter="anomaly">Аномалії</button><button type="button" data-filter="connection">Зв'язок</button><button type="button" data-filter="light">Світло</button>
+        <button type="button" data-filter="" class="active">Все</button><button type="button" data-filter="anomaly">Аномалії</button><button type="button" data-filter="connection">Зв'язок</button><button type="button" data-filter="light">Світло</button><button type="button" data-filter="system">Система</button>
       </div>
-      <ol id="journal-list" class="journal-list"><li class="journal-empty">Подій ще немає</li></ol>
+      <ol id="journal-list" class="journal-list"><li class="journal-empty">Завантажую журнал…</li></ol>
       <p class="flow-footnote">Аномалії: розрядка вище порогу (MARSTEK_ANOMALY_DISCHARGE_W), розряд при наявності мережі, висока температура. Зв'язок втрачено = 3 опитування поспіль без відповіді; це не «світла нема».</p>
     </section>
 
