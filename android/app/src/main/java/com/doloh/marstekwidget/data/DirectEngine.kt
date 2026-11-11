@@ -114,18 +114,19 @@ object DirectEngine {
         val nowS = nowMs / 1000.0
         val samples = loadSamples(context).toMutableList()
         if (capacity != null) samples += CapacitySample(nowS, capacity)
-        val trimmed = samples.filter { nowS - it.t <= 2 * BatteryFlowCalculator.WINDOW_SECONDS }.takeLast(120)
+        val trimmed = samples.filter { nowS - it.t <= BatteryFlowCalculator.TREND_WINDOW_SECONDS }.takeLast(120)
         saveSamples(context, trimmed)
-        val flow = BatteryFlowCalculator.calculate(trimmed, capacity, ratedForEta)
+        val offgrid = es?.optDouble("offgrid_power", Double.NaN)?.takeIf(Double::isFinite)
+        val ongrid = es?.optDouble("ongrid_power", Double.NaN)?.takeIf(Double::isFinite)
+        val flow = BatteryFlowCalculator.calculate(trimmed, capacity, ratedForEta, ongridW = ongrid, offgridW = offgrid)
 
         val history = HistoryStore(context)
-        val offgrid = es?.optDouble("offgrid_power", Double.NaN)?.takeIf(Double::isFinite)
         val socValue = bat.optDouble("soc", Double.NaN).takeIf(Double::isFinite)
         if (nowS - lastHistoryTs >= HISTORY_EVERY_S) {
             lastHistoryTs = nowS
             runCatching {
                 history.append(HistorySample(nowS, socValue?.toInt(), capacity, flow.powerW.takeIf { flow.available }, flow.direction,
-                    offgrid, es?.optDouble("ongrid_power", Double.NaN)?.takeIf(Double::isFinite), bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite)))
+                    offgrid, ongrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite)))
             }
         }
         val rows = runCatching { history.rows(nowS) }.getOrDefault(emptyList())
@@ -154,6 +155,7 @@ object DirectEngine {
             gridState = when (grid) { "on" -> GridState.ON; "off" -> GridState.OFF; else -> GridState.UNKNOWN },
             direction = BatteryDirection.fromApi(flow.direction),
             batteryWatts = flow.powerW.takeIf { flow.available },
+            batteryMeasured = !flow.estimated,
             backupWatts = offgrid,
             soc = socValue?.toInt(),
             temperatureC = bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),

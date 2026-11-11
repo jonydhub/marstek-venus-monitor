@@ -45,6 +45,8 @@ data class JournalObservation(
     val gridState: GridState = GridState.UNKNOWN,
     val direction: BatteryDirection = BatteryDirection.UNKNOWN,
     val batteryWatts: Double? = null,
+    /** True = [batteryWatts] measured from ES ongrid/offgrid power; false = capacity-trend estimate. */
+    val batteryMeasured: Boolean = false,
     val backupWatts: Double? = null,
     val soc: Int? = null,
     val temperatureC: Double? = null,
@@ -62,12 +64,18 @@ data class DetectorMemory(
     val highDischargeSent: Boolean = false,
     val onGridSent: Boolean = false,
     val tempSent: Boolean = false,
+    val lowSoc: Int? = null,
+    val topupAtMillis: Long? = null,
+    val onGridCount: Int = 0,
+    val onGridSinceMillis: Long? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("grid", grid?.name ?: JSONObject.NULL).put("direction", direction?.name ?: JSONObject.NULL)
         .put("soc", soc ?: JSONObject.NULL).put("failures", failures).put("connectionLost", connectionLost)
         .put("lostAt", lostAtMillis ?: JSONObject.NULL).put("outageStartedAt", outageStartedAtMillis ?: JSONObject.NULL)
         .put("fullSent", fullSent).put("highDischargeSent", highDischargeSent).put("onGridSent", onGridSent).put("tempSent", tempSent)
+        .put("lowSoc", lowSoc ?: JSONObject.NULL).put("topupAt", topupAtMillis ?: JSONObject.NULL)
+        .put("onGridCount", onGridCount).put("onGridSince", onGridSinceMillis ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(raw: String?): DetectorMemory? = runCatching {
@@ -81,6 +89,10 @@ data class DetectorMemory(
                 lostAtMillis = long("lostAt"), outageStartedAtMillis = long("outageStartedAt"),
                 fullSent = j.optBoolean("fullSent"), highDischargeSent = j.optBoolean("highDischargeSent"),
                 onGridSent = j.optBoolean("onGridSent"), tempSent = j.optBoolean("tempSent"),
+                lowSoc = if (!j.has("lowSoc") || j.isNull("lowSoc")) null else j.optInt("lowSoc"),
+                topupAtMillis = if (j.has("topupAt")) long("topupAt") else null,
+                onGridCount = j.optInt("onGridCount"),
+                onGridSinceMillis = if (j.has("onGridSince")) long("onGridSince") else null,
             )
         }.getOrNull()
     }
@@ -100,6 +112,10 @@ object JournalDetector {
     private const val TEMP_REARM = 42.0
     private const val FULL_SOC = 99
     private const val REARM_FACTOR = 0.8
+    private const val REAL_CHARGE_FROM_SOC = 97
+    private const val TOPUP_REPEAT_MILLIS = 6 * 3600_000L
+    private const val ON_GRID_MIN_SAMPLES = 3
+    private const val ON_GRID_MIN_MILLIS = 120_000L
 
     fun clampThreshold(watts: Int): Int = watts.coerceIn(MIN_ANOMALY_DISCHARGE_W, MAX_ANOMALY_DISCHARGE_W)
 
@@ -144,30 +160,48 @@ object JournalDetector {
         }
         if (grid != null) m = m.copy(grid = grid)
 
+        // Standby top-ups at 100 % (self-drain to 99 %, ~1 min from the grid every ~40 min) are maintenance:
+        // no «Почалось заряджання» / «Батарею заряджено», at most one «Підзаряд до 100% (утримання)» per 6 h.
         val direction = obs.direction.takeIf { it != BatteryDirection.UNKNOWN }
         val prevDirection = m.direction
+        var low = m.lowSoc ?: m.soc
+        if (soc != null) low = low?.let { minOf(it, soc) } ?: soc
+        val holding = soc != null && soc >= FULL_SOC && (low == null || low > REAL_CHARGE_FROM_SOC) && m.grid != GridState.OFF
         if (direction != null && prevDirection != null && direction != prevDirection) {
-            if (direction == BatteryDirection.CHARGING) {
-                add("charging_started", JournalCategory.BATTERY,
-                    "Почалось заряджання${battery?.let { " ≈ ${abs(it).roundToInt()} Вт (оцінка)" }.orEmpty()}$socText", battery)
+            if (direction == BatteryDirection.CHARGING && !holding) {
+                val power = battery?.let { " ≈ ${abs(it).roundToInt()} Вт" + if (obs.batteryMeasured) "" else " (оцінка)" }.orEmpty()
+                add("charging_started", JournalCategory.BATTERY, "Почалось заряджання$power$socText", battery)
             } else if (prevDirection == BatteryDirection.CHARGING && !(soc != null && soc >= FULL_SOC)) {
                 add("charging_stopped", JournalCategory.BATTERY, "Заряджання зупинилось$socText")
             }
         }
         if (soc != null) {
             if (soc < 95) m = m.copy(fullSent = false)
-            val rising = prevDirection == BatteryDirection.CHARGING || (m.soc != null && m.soc!! < FULL_SOC)
-            if (soc >= FULL_SOC && !m.fullSent && rising) {
-                add("charged_full", JournalCategory.BATTERY, "Батарею заряджено: $soc%", soc.toDouble())
-                m = m.copy(fullSent = true)
+            val rose = m.soc != null && soc > m.soc!!
+            if (soc >= FULL_SOC && (rose || prevDirection == BatteryDirection.CHARGING)) {
+                if (low != null && low <= REAL_CHARGE_FROM_SOC) {
+                    if (!m.fullSent) {
+                        add("charged_full", JournalCategory.BATTERY, "Батарею заряджено: $soc%", soc.toDouble())
+                        m = m.copy(fullSent = true)
+                    }
+                } else if (rose && m.grid != GridState.OFF &&
+                    (m.topupAtMillis == null || nowMillis - m.topupAtMillis!! >= TOPUP_REPEAT_MILLIS)
+                ) {
+                    add("maintenance_topup", JournalCategory.BATTERY, "Підзаряд до $soc% (утримання)", soc.toDouble())
+                    m = m.copy(topupAtMillis = nowMillis)
+                }
             }
+            if (soc >= FULL_SOC) low = soc
         }
+        m = m.copy(lowSoc = low)
         if (direction != null) m = m.copy(direction = direction)
 
+        // Anomalies only from measured power (backup output during an outage, ongrid/offgrid otherwise).
         val threshold = clampThreshold(dischargeThresholdW).toDouble()
+        val measuredDischarge = battery != null && obs.batteryMeasured && direction == BatteryDirection.DISCHARGING
         val discharge = maxOf(
             if (backup != null && m.grid == GridState.OFF) abs(backup) else 0.0,
-            if (battery != null && direction == BatteryDirection.DISCHARGING) abs(battery) else 0.0,
+            if (measuredDischarge) abs(battery!!) else 0.0,
         )
         if (discharge > threshold) {
             if (!m.highDischargeSent) {
@@ -178,15 +212,21 @@ object JournalDetector {
         } else if (discharge < threshold * REARM_FACTOR) {
             m = m.copy(highDischargeSent = false)
         }
-        val onGrid = grid == GridState.ON && direction == BatteryDirection.DISCHARGING && battery != null &&
-            abs(battery) > DISCHARGE_ON_GRID_W && (backup == null || abs(backup) < 5.0)
-        if (onGrid && !m.onGridSent) {
-            add("anomaly_discharge_on_grid", JournalCategory.ANOMALY,
-                "Розряд ≈ ${abs(battery!!).roundToInt()} Вт при наявності мережі, резервний вихід не живить навантаження — " +
-                    "можливий конфлікт з ДБЖ/інвертором", abs(battery))
-            m = m.copy(onGridSent = true)
-        } else if (!onGrid && direction != BatteryDirection.DISCHARGING) {
-            m = m.copy(onGridSent = false)
+        val onGrid = grid == GridState.ON && measuredDischarge && abs(battery!!) > DISCHARGE_ON_GRID_W &&
+            (backup == null || abs(backup) < 5.0)
+        if (onGrid) {
+            val since = m.onGridSinceMillis ?: nowMillis
+            m = m.copy(onGridCount = m.onGridCount + 1, onGridSinceMillis = since)
+            if (!m.onGridSent && m.onGridCount >= ON_GRID_MIN_SAMPLES && nowMillis - since >= ON_GRID_MIN_MILLIS) {
+                add("anomaly_discharge_on_grid", JournalCategory.ANOMALY,
+                    "Розряд ≈ ${abs(battery!!).roundToInt()} Вт (виміряно) при наявності мережі вже " +
+                        "${durationText((nowMillis - since) / 1000)}, резервний вихід не живить навантаження — " +
+                        "перевірте режим/розклад розряду або ДБЖ/інвертор", abs(battery))
+                m = m.copy(onGridSent = true)
+            }
+        } else {
+            m = m.copy(onGridCount = 0, onGridSinceMillis = null)
+            if (direction != BatteryDirection.DISCHARGING) m = m.copy(onGridSent = false)
         }
         obs.temperatureC?.takeIf(Double::isFinite)?.let { t ->
             if (t > TEMP_HIGH && !m.tempSent) {

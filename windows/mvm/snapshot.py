@@ -41,6 +41,7 @@ class View:
     rated_wh: float | None
     temperature_c: float | None
     power_w: float | None
+    power_estimated: bool
     charge_eta_s: float | None
     discharge_eta_s: float | None
     next_start: datetime | None
@@ -92,6 +93,7 @@ def view(status) -> View:
         rated_wh=_num(bat.get("rated_capacity")),
         temperature_c=_num(bat.get("bat_temp")),
         power_w=_num(flow.get("power_w")),
+        power_estimated=flow.get("estimated") is not False,
         charge_eta_s=_num(flow.get("charge_eta_seconds")),
         discharge_eta_s=_num(flow.get("discharge_eta_seconds")),
         next_start=next_start, next_end=next_end, next_start_raw=nxt.get("start"),

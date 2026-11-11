@@ -205,6 +205,41 @@ def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
     return [{"start": iso(a), "end": iso(b)} for a, b in periods if b - a >= 60]
 
 
+STANDBY_MAX_INTERVAL_SECONDS = 6 * 3600
+
+
+def standby_consumption(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """Standby self-consumption (W) from the top-up cadence while held at 100 % with the grid present.
+
+    The battery drops one SOC step (Δ bat_wh ≈ rated/100) between the end of one top-up (back at 100 %) and the
+    next drop to 99 %; Wh / hours of that interval ≈ the standby draw. Median of the last 24 h, None if < 1 cycle.
+    """
+    points = sorted((r for r in rows if r.get("ts") is not None and now - WINDOW_SECONDS <= r["ts"] <= now),
+                    key=lambda r: r["ts"])
+    estimates, back_at, back_wh = [], None, None
+    for prev, row in zip(points, points[1:]):
+        soc, prev_soc = _finite(row.get("soc")), _finite(prev.get("soc"))
+        if soc is None or prev_soc is None or _is_outage(row, threshold_w):
+            back_at = None
+        elif prev_soc >= 100 and soc == 99:  # drop: one step lost since the previous top-up ended
+            wh_now = _finite(row.get("bat_wh"))
+            if back_at is not None and wh_now is not None and back_wh is not None and back_wh > wh_now:
+                span = row["ts"] - back_at
+                if 0 < span <= STANDBY_MAX_INTERVAL_SECONDS:
+                    estimates.append((back_wh - wh_now) / (span / 3600.0))
+            back_at = None
+        elif prev_soc == 99 and soc >= 100:  # top-up finished
+            back_at, back_wh = row["ts"], _finite(row.get("bat_wh"))
+        elif soc < 99:
+            back_at = None
+    if not estimates:
+        return None
+    estimates.sort()
+    mid = len(estimates) // 2
+    median = estimates[mid] if len(estimates) % 2 else (estimates[mid - 1] + estimates[mid]) / 2.0
+    return round(median)
+
+
 def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w=BACKUP_DRAW_THRESHOLD_W,
                      chart_events=None):
     energy_ws, covered = _integral(_intervals(rows, now - WINDOW_SECONDS))
@@ -223,4 +258,5 @@ def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w
         "today": today_durations(rows, now=now, threshold_w=threshold_w),
         "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w),
         "chart_events": list(chart_events or []),
+        "standby_w": standby_consumption(rows, now=now, threshold_w=threshold_w),
     }

@@ -339,6 +339,7 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   set('outage-group', outage.group);
   set('outage-source', outageSourceText(outage));
   set('backup-today', formatKwh(insights.backup_energy_today_wh));
+  set('standby-w', finiteOrNull(insights.standby_w) !== null ? `≈ ${Math.round(insights.standby_w)} Вт` : '—');
   renderToday(insights.today || null);
   renderScheduleDays(outage);
   renderSocChart(insights, outage);

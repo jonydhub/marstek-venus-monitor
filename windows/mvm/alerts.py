@@ -38,6 +38,7 @@ TEMP_HIGH, TEMP_COLD, TEMP_HYSTERESIS = 45.0, 5.0, 3.0
 NOT_CHARGING_SOC, NOT_CHARGING_CHECKS = 90, 2
 CHARGING_RENOTIFY_SECONDS = 3600
 FULL_REARM_SOC = 95
+REAL_CHARGE_FROM_SOC = 97  # «Батарею заряджено» only after a charge that started at ≤ this SOC
 DEFAULT_HIGH_LOAD_W = 200
 HIGH_LOAD_REARM_FACTOR = 0.8
 SEP = " · "
@@ -73,6 +74,7 @@ class Memory:
     last_next_start: float | None = None
     charging_started_at: float | None = None
     full_sent: bool = False
+    low_soc: int | None = None  # lowest SOC since the battery was last at 100 % (standby top-up ≠ a charge)
     high_load_sent: bool = False
     soc_low_sent: bool = False
     soc_critical_sent: bool = False
@@ -294,9 +296,16 @@ def evaluate(previous: Memory | None, status, now: datetime, enabled: dict, high
                 m = dataclasses.replace(m, soc_low_sent=True)
 
     # --- charging ---
-    if (direction == "charging" and prev_direction is not None and prev_direction != "charging"
+    # Held at 100 % the battery self-drains to 99 % and tops up from the grid every ~40 min: not a charge.
+    low = m0.low_soc if m0.low_soc is not None else m0.soc
+    if soc is not None:
+        low = soc if low is None else min(low, soc)
+    real_charge = low is not None and low <= REAL_CHARGE_FROM_SOC
+    holding = soc is not None and soc >= 99 and not real_charge
+    if (direction == "charging" and prev_direction is not None and prev_direction != "charging" and not holding
             and (m0.charging_started_at is None or ts - m0.charging_started_at > CHARGING_RENOTIFY_SECONDS)):
-        parts = [f"≈ {watts(v.power_w)} (оцінка)" if v.power_w else None,
+        estimate = " (оцінка)" if v.power_estimated else ""
+        parts = [f"≈ {watts(v.power_w)}{estimate}" if v.power_w else None,
                  f"заряд {soc}%" if soc is not None else None,
                  f"до 100% ≈ {duration(v.charge_eta_s)}" if v.charge_eta_s else None]
         events.append(Alert("charging_started", "info", "Почалось заряджання", SEP.join(p for p in parts if p)))
@@ -306,11 +315,14 @@ def evaluate(previous: Memory | None, status, now: datetime, enabled: dict, high
             m = dataclasses.replace(m, full_sent=False)
         reached = soc >= 100 and (m0.soc if m0.soc is not None else 100) < 100
         stopped = prev_direction == "charging" and direction == "idle" and soc >= 98
-        if (reached or stopped) and not m.full_sent:
+        if (reached or stopped) and real_charge and not m.full_sent:
             events.append(Alert("charged_full", "info", "Батарею заряджено",
                                 SEP.join(p for p in [f"Заряд {soc}%",
                                                      kwh(v.capacity_wh) if v.capacity_wh else None] if p)))
             m = dataclasses.replace(m, full_sent=True)
+        if soc >= 100:
+            low = soc
+    m = dataclasses.replace(m, low_soc=low)
 
     # --- temperature (LiFePO4) ---
     t = v.temperature_c

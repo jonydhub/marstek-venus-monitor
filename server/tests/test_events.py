@@ -5,9 +5,9 @@ from events import CATEGORIES, DetectorState, Observation, initial_state_event, 
 DOWN = Observation(ok=False)
 
 
-def up(grid="on", direction="idle", battery_w=0.0, backup_w=0.0, soc=80, temp_c=25.0):
+def up(grid="on", direction="idle", battery_w=0.0, backup_w=0.0, soc=80, temp_c=25.0, measured=False):
     return Observation(ok=True, grid_state=grid, direction=direction, battery_w=battery_w, backup_w=backup_w,
-                       soc=soc, temp_c=temp_c)
+                       soc=soc, temp_c=temp_c, battery_measured=measured)
 
 
 def run(observations, start=1000.0, step_s=30.0, threshold=2000.0):
@@ -78,6 +78,19 @@ class ChargingEventsTests(unittest.TestCase):
         self.assertEqual(kinds(events), ["charging_started", "charging_stopped", "charging_started", "charged_full"])
 
 
+class MaintenanceTopUpTests(unittest.TestCase):
+    def test_top_up_at_full_is_one_low_key_record_not_a_charge(self):
+        obs = [up(soc=100), up(soc=99, direction="charging", battery_w=1195, measured=True), up(soc=100),
+               up(soc=99, direction="charging", battery_w=1195, measured=True), up(soc=100)]
+        events, _ = run(obs, step_s=600)
+        self.assertEqual(kinds(events), ["maintenance_topup"])
+        self.assertEqual(events[0]["text"], "Підзаряд до 100% (утримання)")
+
+    def test_measured_charge_has_no_estimate_mark(self):
+        events, _ = run([up(soc=50), up(soc=50, direction="charging", battery_w=900, measured=True)])
+        self.assertEqual(events[0]["text"], "Почалось заряджання ≈ 900 Вт, заряд 50%")
+
+
 class AnomalyTests(unittest.TestCase):
     def test_discharge_above_threshold_fires_once_and_rearms(self):
         obs = up(grid="off", backup_w=2128.0, direction="discharging", battery_w=-2200.0)
@@ -93,11 +106,19 @@ class AnomalyTests(unittest.TestCase):
         events, _ = run([up(), obs], threshold=50)
         self.assertIn("anomaly_high_discharge", kinds(events))
 
-    def test_discharge_while_grid_present_and_backup_idle(self):
-        obs = up(grid="on", backup_w=0.0, direction="discharging", battery_w=-177.0)
-        events, _ = run([up(), obs, obs])
+    def test_measured_discharge_while_grid_present_must_be_sustained(self):
+        obs = up(grid="on", backup_w=0.0, direction="discharging", battery_w=-177.0, measured=True)
+        events, _ = run([up(), obs, obs])  # 2 samples / 30 s — not yet
+        self.assertEqual(kinds(events), [])
+        events, _ = run([up(), obs, obs, obs, obs, obs])  # 5 samples ≥ 2 min
         self.assertEqual(kinds(events), ["anomaly_discharge_on_grid"])
-        self.assertIn("177 Вт", events[0]["text"])
+        self.assertIn("177 Вт (виміряно)", events[0]["text"])
+        self.assertNotIn("конфлікт", events[0]["text"])
+
+    def test_estimated_discharge_never_raises_an_anomaly(self):
+        obs = up(grid="on", backup_w=0.0, direction="discharging", battery_w=-2500.0, measured=False)
+        events, _ = run([up()] + [obs] * 10)
+        self.assertEqual(kinds(events), [])
 
     def test_high_temperature_with_hysteresis(self):
         events, _ = run([up(temp_c=40), up(temp_c=46), up(temp_c=44), up(temp_c=41), up(temp_c=46)])

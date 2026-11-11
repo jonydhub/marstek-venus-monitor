@@ -656,6 +656,7 @@ class MainActivity : Activity() {
             "Підключення: " + if (settings.mode == ConnectionMode.SERVER) "сервер" else "напряму (UDP, лише читання)",
             settings.deviceModel?.let { "Модель: $it" },
             WidgetPreferences(this).errorMessage()?.takeIf { state == WidgetFetchState.ERROR }?.let { "Остання помилка: $it" },
+            snapshot?.insights?.standbyWatts?.let { "Власне споживання в очікуванні ≈ ${Math.round(it)} Вт (за ритмом підзаряду до 100%)" },
             snapshot?.insights?.backupAverageCoverageHours?.let { "Історія резервного виходу: ${String.format(Locale.getDefault(), "%.1f", it)} год за 24 год" },
         ).joinToString("\n")
 

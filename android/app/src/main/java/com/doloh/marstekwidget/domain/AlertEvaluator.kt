@@ -69,6 +69,8 @@ data class AlertMemory(
     val lastNextStart: String? = null,
     val chargingStartedAtMillis: Long? = null,
     val fullSent: Boolean = false,
+    /** Lowest SOC since the battery was last at 100 % — a standby top-up (100→99→100) is not a charge. */
+    val lowSoc: Int? = null,
     val highLoadSent: Boolean = false,
     val socLowSent: Boolean = false,
     val socCriticalSent: Boolean = false,
@@ -99,6 +101,7 @@ object AlertEvaluator {
     const val NOT_CHARGING_CHECKS = 2
     private const val CHARGING_RENOTIFY_MILLIS = 60 * 60_000L
     private const val FULL_REARM_SOC = 95
+    private const val REAL_CHARGE_FROM_SOC = 97
     private const val HIGH_LOAD_REARM_FACTOR = 0.8
 
     private val kyiv: ZoneId = ZoneId.of("Europe/Kyiv")
@@ -335,11 +338,17 @@ object AlertEvaluator {
         }
 
         // --- charging ---
-        if (direction == BatteryDirection.CHARGING && prevDirection != null && prevDirection != BatteryDirection.CHARGING &&
+        // Held at 100 % a Venus E self-drains to 99 % and tops up from the grid every ~40 min: not a charge.
+        var low = m0.lowSoc ?: m0.soc
+        if (soc != null) low = low?.let { minOf(it, soc) } ?: soc
+        val realCharge = low != null && low <= REAL_CHARGE_FROM_SOC
+        val holding = soc != null && soc >= 99 && !realCharge
+        if (direction == BatteryDirection.CHARGING && prevDirection != null && prevDirection != BatteryDirection.CHARGING && !holding &&
             (m0.chargingStartedAtMillis == null || nowMillis - m0.chargingStartedAtMillis > CHARGING_RENOTIFY_MILLIS)
         ) {
+            val estimate = if (snapshot.batteryPowerEstimated) " (оцінка)" else ""
             events += Alert(AlertId.CHARGING_STARTED, AlertSeverity.INFO, "Почалось заряджання", listOfNotNull(
-                snapshot.batteryPowerWatts?.let { "≈ ${watts(it)} (оцінка)" },
+                snapshot.batteryPowerWatts?.let { "≈ ${watts(it)}$estimate" },
                 soc?.let { "заряд $it%" },
                 snapshot.etaSeconds?.let { "до 100% ≈ ${duration(it)}" },
             ).joinToString(SEP))
@@ -349,12 +358,14 @@ object AlertEvaluator {
             if (soc < FULL_REARM_SOC) m = m.copy(fullSent = false)
             val reachedHundred = soc >= 100 && (m0.soc ?: 100) < 100
             val stoppedNearFull = prevDirection == BatteryDirection.CHARGING && direction == BatteryDirection.IDLE && soc >= 98
-            if ((reachedHundred || stoppedNearFull) && !m.fullSent) {
+            if ((reachedHundred || stoppedNearFull) && realCharge && !m.fullSent) {
                 events += Alert(AlertId.CHARGED_FULL, AlertSeverity.INFO, "Батарею заряджено",
                     listOfNotNull("Заряд $soc%", snapshot.batteryCapacityWh?.let(::kwh)).joinToString(SEP))
                 m = m.copy(fullSent = true)
             }
+            if (soc >= 100) low = soc
         }
+        m = m.copy(lowSoc = low)
 
         // --- temperature (LiFePO4) ---
         if (temperature != null) {
@@ -441,6 +452,7 @@ object AlertMemoryCodec {
         .put("lastNextStart", m.lastNextStart ?: JSONObject.NULL)
         .put("chargingStartedAtMillis", m.chargingStartedAtMillis ?: JSONObject.NULL)
         .put("fullSent", m.fullSent)
+        .put("lowSoc", m.lowSoc ?: JSONObject.NULL)
         .put("highLoadSent", m.highLoadSent)
         .put("socLowSent", m.socLowSent)
         .put("socCriticalSent", m.socCriticalSent)
@@ -474,6 +486,7 @@ object AlertMemoryCodec {
             lastNextStart = str("lastNextStart"),
             chargingStartedAtMillis = long("chargingStartedAtMillis"),
             fullSent = bool("fullSent"),
+            lowSoc = int("lowSoc"),
             highLoadSent = bool("highLoadSent"),
             socLowSent = bool("socLowSent"),
             socCriticalSent = bool("socCriticalSent"),

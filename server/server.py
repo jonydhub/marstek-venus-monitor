@@ -46,6 +46,8 @@ MIN_POLL_SECONDS = 15  # VenusE drops requests <1 s apart; a poll is 6 paced req
 BATTERY_RATE_WINDOW_SECONDS = 300
 BATTERY_RATE_MIN_SECONDS = 120
 BATTERY_RATE_DEADBAND_W = 10.0
+BATTERY_TREND_WINDOW_SECONDS = 1800  # SOC-step trend: a 1 % step (≈ 51 Wh) takes ~10 min at 300 W
+MEASURED_MIN_W = 10.0                # |ongrid|/|offgrid| below this counts as 0 (no measured flow)
 METHODS = ("Wifi.GetStatus", "BLE.GetStatus", "Bat.GetStatus", "ES.GetStatus", "ES.GetMode", "EM.GetStatus")
 # Read-only by construction: only `Component.GetSomething` queries may ever leave this process.
 _READ_ONLY_METHOD = re.compile(r"[A-Za-z]+\.Get[A-Za-z]+")
@@ -72,8 +74,49 @@ def _optional_float(value):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
-def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_wh, rated_capacity_wh) -> dict:
-    """Estimate battery power and ETA from the measured Wh slope, never from grid-power sign."""
+def _signed_ac_battery_power(ongrid_w, offgrid_w):
+    """Battery power from the measured AC ports (+ = charging, − = discharging), or None if both idle.
+
+    Sign convention of ES.GetStatus on a Venus E (verified on fw 148, Manual mode): ``ongrid_power`` < 0 means
+    power flows grid → battery (charging; a 99→100 % top-up reads ≈ −1195 W), > 0 means the battery outputs
+    to the grid-side port (load/export). ``offgrid_power`` is the backup-output draw, always battery output.
+    """
+    ongrid, offgrid = _optional_float(ongrid_w), _optional_float(offgrid_w)
+    ongrid = ongrid if ongrid is not None and abs(ongrid) >= MEASURED_MIN_W else 0.0
+    offgrid = abs(offgrid) if offgrid is not None and abs(offgrid) >= MEASURED_MIN_W else 0.0
+    if not ongrid and not offgrid:
+        return None
+    return -ongrid - offgrid
+
+
+def _quantized_steps(clean, rated):
+    """Capacity changes [(t, ΔWh)] when bat_capacity moves only in whole SOC steps (rated/100), else None."""
+    try:
+        quantum = float(rated) / 100.0
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(quantum) or quantum <= 0:
+        return None
+    changes = [(b[0], b[1] - a[1]) for a, b in zip(clean, clean[1:]) if abs(b[1] - a[1]) > 0.5]
+    if not changes:
+        return None
+    for _, delta in changes:
+        steps = abs(delta) / quantum
+        if round(steps) < 1 or abs(steps - round(steps)) > 0.15:
+            return None
+    return changes
+
+
+def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_wh, rated_capacity_wh,
+                           ongrid_w=None, offgrid_w=None) -> dict:
+    """Battery power and ETA: measured AC power first, the stored-Wh trend only as a marked estimate.
+
+    1. ``ongrid_power`` / ``offgrid_power`` ≠ 0 → measured (``estimated`` = False), see _signed_ac_battery_power.
+    2. Both 0 → estimate from bat_capacity. A Venus E reports bat_capacity in whole SOC steps (rated/100 ≈ 51 Wh),
+       so one step (e.g. the 100→99→100 % standby top-up) is not a trend: a quantized series needs ≥ 2 steps in
+       the same direction within BATTERY_TREND_WINDOW_SECONDS, otherwise it is idle (reason «soc_step_guard»).
+       A smooth (non-quantized) series uses the 5-min linear regression.
+    """
     result = {
         "available": False,
         "power_w": None,
@@ -81,6 +124,7 @@ def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_
         "window_seconds": 0,
         "sample_count": 0,
         "method": "battery_capacity_delta_regression",
+        "estimated": True,
         "reason": "collecting_samples",
         "charge_eta_seconds": None,
         "discharge_eta_seconds": None,
@@ -93,31 +137,51 @@ def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_
             continue
         if math.isfinite(timestamp) and math.isfinite(energy_wh):
             clean.append((timestamp, energy_wh))
-    if not clean:
-        return result
 
-    newest = clean[-1][0]
-    recent = [(t, energy) for t, energy in clean if 0 <= newest - t <= BATTERY_RATE_WINDOW_SECONDS]
-    result["sample_count"] = len(recent)
-    if len(recent) < 2:
-        return result
-
-    duration = recent[-1][0] - recent[0][0]
-    result["window_seconds"] = round(duration)
-    if duration < BATTERY_RATE_MIN_SECONDS:
-        return result
-
-    origin = recent[0][0]
-    xs = [t - origin for t, _ in recent]
-    ys = [energy for _, energy in recent]
-    mean_x = sum(xs) / len(xs)
-    mean_y = sum(ys) / len(ys)
-    variance = sum((x - mean_x) ** 2 for x in xs)
-    if variance <= 0:
-        result["reason"] = "insufficient_time_span"
-        return result
-    slope_wh_per_second = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / variance
-    power_w = slope_wh_per_second * 3600.0
+    measured = _signed_ac_battery_power(ongrid_w, offgrid_w)
+    power_w = None
+    if measured is not None:
+        power_w = measured
+        result.update({"method": "measured_ac_power", "estimated": False, "sample_count": len(clean)})
+    else:
+        if not clean:
+            return result
+        newest = clean[-1][0]
+        trend = [(t, energy) for t, energy in clean if 0 <= newest - t <= BATTERY_TREND_WINDOW_SECONDS]
+        recent = [(t, energy) for t, energy in trend if newest - t <= BATTERY_RATE_WINDOW_SECONDS]
+        result["sample_count"] = len(recent)
+        steps = _quantized_steps(trend, rated_capacity_wh)
+        if steps is not None:
+            result.update({"method": "battery_capacity_soc_steps", "sample_count": len(trend),
+                           "window_seconds": round(newest - trend[0][0])})
+            same_sign = all(d > 0 for _, d in steps) or all(d < 0 for _, d in steps)
+            power_w = 0.0
+            if len(steps) >= 2 and same_sign:
+                span = steps[-1][0] - steps[0][0]
+                interval = span / (len(steps) - 1)
+                fresh = newest - steps[-1][0] <= max(2.0 * interval, BATTERY_RATE_WINDOW_SECONDS)
+                if span > 0 and fresh:
+                    power_w = sum(d for _, d in steps[1:]) / span * 3600.0
+            if power_w == 0.0:
+                result["reason"] = "soc_step_guard"
+        else:
+            if len(recent) < 2:
+                return result
+            duration = recent[-1][0] - recent[0][0]
+            result["window_seconds"] = round(duration)
+            if duration < BATTERY_RATE_MIN_SECONDS:
+                return result
+            origin = recent[0][0]
+            xs = [t - origin for t, _ in recent]
+            ys = [energy for _, energy in recent]
+            mean_x = sum(xs) / len(xs)
+            mean_y = sum(ys) / len(ys)
+            variance = sum((x - mean_x) ** 2 for x in xs)
+            if variance <= 0:
+                result["reason"] = "insufficient_time_span"
+                return result
+            slope_wh_per_second = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / variance
+            power_w = slope_wh_per_second * 3600.0
     if not math.isfinite(power_w):
         result["reason"] = "invalid_rate"
         return result
@@ -134,7 +198,7 @@ def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_
         "available": True,
         "power_w": round(power_w, 1),
         "direction": direction,
-        "reason": None,
+        "reason": result["reason"] if result["reason"] == "soc_step_guard" else None,
     })
     try:
         capacity = float(battery_capacity_wh)
@@ -162,7 +226,7 @@ class MarstekPoller:
             "battery_flow": calculate_battery_flow([], None, None),
         }
         self.seq = 100
-        self.battery_samples = deque(maxlen=32)
+        self.battery_samples = deque(maxlen=128)
         self.outage = build_outage_service(SETTINGS, ua_client=UA_OUTAGES_CLIENT)
         self.history = None  # HistoryStore, attached by __main__ so imports/tests never touch the real DB
         self.detector = None  # events.DetectorState (journal); in memory, rebuilt after a restart
@@ -203,7 +267,8 @@ class MarstekPoller:
                     time.sleep(0.25)
         return {"ok": False, "error": "No response after retry"}
 
-    def battery_flow(self, battery_status: dict) -> dict:
+    def battery_flow(self, battery_status: dict, energy_status: dict | None = None) -> dict:
+        es = ((energy_status or {}).get("data") or {}) if (energy_status or {}).get("ok") else {}
         if not battery_status.get("ok"):
             return {**calculate_battery_flow([], None, None), "reason": "battery_status_unavailable"}
         battery = battery_status.get("data") or {}
@@ -217,9 +282,10 @@ class MarstekPoller:
 
         now = time.monotonic()
         self.battery_samples.append((now, capacity))
-        while len(self.battery_samples) > 1 and now - self.battery_samples[1][0] > BATTERY_RATE_WINDOW_SECONDS:
+        while len(self.battery_samples) > 1 and now - self.battery_samples[1][0] > BATTERY_TREND_WINDOW_SECONDS:
             self.battery_samples.popleft()
-        return calculate_battery_flow(list(self.battery_samples), capacity, rated)
+        return calculate_battery_flow(list(self.battery_samples), capacity, rated,
+                                      ongrid_w=es.get("ongrid_power"), offgrid_w=es.get("offgrid_power"))
 
     def record_history(self, results: dict, battery_flow: dict, now: float) -> list:
         """Store this poll's sample and return the last 24 h of samples (empty without a store)."""
@@ -282,6 +348,7 @@ class MarstekPoller:
             ok=bool(bat_r.get("ok") or es_r.get("ok")), grid_state=grid_state,
             direction=battery_flow.get("direction") or "unknown",
             battery_w=_optional_float(battery_flow.get("power_w")) if battery_flow.get("available") else None,
+            battery_measured=battery_flow.get("estimated") is False,
             backup_w=_optional_float(es.get("offgrid_power")), soc=None if soc is None else int(round(soc)),
             temp_c=_optional_float(bat.get("bat_temp")))
         new_events, self.detector = journal.step(self.detector, obs, now, SETTINGS.anomaly_discharge_w)
@@ -316,7 +383,7 @@ class MarstekPoller:
                 results[method] = {"ok": False, "error": "No response" if isinstance(exc, TimeoutError) else str(exc)}
             # Keep one source socket and pace requests; VenusE drops UDP bursts.
             time.sleep(1.0)
-        battery_flow = self.battery_flow(results.get("Bat.GetStatus", {}))
+        battery_flow = self.battery_flow(results.get("Bat.GetStatus", {}), results.get("ES.GetStatus", {}))
         now = time.time()
         rows = self.record_history(results, battery_flow, now)
         power_outage = self.power_outage(results, battery_flow, measured_backup_load(rows, now=now))

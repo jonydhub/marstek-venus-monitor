@@ -8,14 +8,14 @@ class JournalDetectorTest {
     private val down = JournalObservation(ok = false)
     private fun up(
         grid: GridState = GridState.ON, direction: BatteryDirection = BatteryDirection.IDLE, battery: Double? = 0.0,
-        backup: Double? = 0.0, soc: Int? = 80, temp: Double? = 25.0,
-    ) = JournalObservation(true, grid, direction, battery, backup, soc, temp)
+        backup: Double? = 0.0, soc: Int? = 80, temp: Double? = 25.0, measured: Boolean = false,
+    ) = JournalObservation(true, grid, direction, battery, measured, backup, soc, temp)
 
-    private fun run(vararg obs: JournalObservation, threshold: Int = 2000): Pair<List<JournalEvent>, DetectorMemory> {
+    private fun run(vararg obs: JournalObservation, threshold: Int = 2000, stepMs: Long = 30_000L): Pair<List<JournalEvent>, DetectorMemory> {
         var memory: DetectorMemory? = null
         val out = mutableListOf<JournalEvent>()
         obs.forEachIndexed { i, o ->
-            val (events, m) = JournalDetector.step(memory, o, 1_000_000L + i * 30_000L, threshold)
+            val (events, m) = JournalDetector.step(memory, o, 1_000_000L + i * stepMs, threshold)
             out += events
             memory = m
         }
@@ -70,16 +70,41 @@ class JournalDetectorTest {
     }
 
     @Test
-    fun dischargeWhileGridPresentIsAnAnomaly() {
-        val obs = up(GridState.ON, BatteryDirection.DISCHARGING, -177.0, 0.0)
-        val (events, _) = run(up(), obs, obs)
+    fun measuredDischargeWhileGridPresentMustBeSustained() {
+        val obs = up(GridState.ON, BatteryDirection.DISCHARGING, -177.0, 0.0, measured = true)
+        assertEquals(emptyList<String>(), run(up(), obs, obs).first.map { it.kind })
+        val (events, _) = run(up(), obs, obs, obs, obs, obs)
         assertEquals(listOf("anomaly_discharge_on_grid"), events.map { it.kind })
-        assertTrue(events[0].text.contains("177 Вт"))
+        assertTrue(events[0].text.contains("177 Вт (виміряно)"))
+        assertTrue(!events[0].text.contains("конфлікт"))
+    }
+
+    @Test
+    fun estimatedDischargeNeverRaisesAnAnomaly() {
+        val obs = up(GridState.ON, BatteryDirection.DISCHARGING, -2500.0, 0.0, measured = false)
+        assertEquals(emptyList<String>(), run(up(), *Array(10) { obs }).first.map { it.kind })
+    }
+
+    @Test
+    fun topUpAtFullIsOneLowKeyRecord() {
+        val charge = up(direction = BatteryDirection.CHARGING, battery = 1195.0, soc = 99, measured = true)
+        val (events, _) = run(up(soc = 100), charge, up(soc = 100), charge, up(soc = 100), stepMs = 600_000L)
+        assertEquals(listOf("maintenance_topup"), events.map { it.kind })
+        assertEquals("Підзаряд до 100% (утримання)", events[0].text)
+    }
+
+    @Test
+    fun measuredChargeHasNoEstimateMark() {
+        val (events, _) = run(up(soc = 50), up(direction = BatteryDirection.CHARGING, battery = 900.0, soc = 50, measured = true))
+        assertEquals("Почалось заряджання ≈ 900 Вт, заряд 50%", events[0].text)
     }
 
     @Test
     fun memoryRoundTripsThroughJson() {
         val (_, memory) = run(up(), down, down, down)
         assertEquals(memory, DetectorMemory.fromJson(memory.toJson().toString()))
+        val charge = up(direction = BatteryDirection.CHARGING, battery = 1195.0, soc = 99, measured = true)
+        val (_, held) = run(up(soc = 100), charge, up(soc = 100))
+        assertEquals(held, DetectorMemory.fromJson(held.toJson().toString()))
     }
 }

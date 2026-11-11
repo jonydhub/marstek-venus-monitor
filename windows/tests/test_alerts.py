@@ -170,9 +170,22 @@ class ChargingAndHealthTests(unittest.TestCase):
 
     def test_charged_full_once(self):
         h = Harness()
+        h.step(status(soc=90, direction="charging"))
         h.step(status(soc=99, direction="charging"))
         self.assertIn("charged_full", h.step(status(soc=100, direction="charging")))
         self.assertNotIn("charged_full", h.step(status(soc=100, direction="idle")))
+
+    def test_standby_top_up_at_full_is_not_a_charge(self):
+        # Venus E held at 100 %: self-drain to 99 % and a ~1 min grid top-up every ~40 min.
+        h = Harness()
+        got = []
+        for i in range(3):
+            base = T0 + timedelta(minutes=40 * i)
+            got += h.step(status(soc=100, direction="idle"), now=base)
+            got += h.step(status(soc=99, direction="charging", power=1195.0), now=base + timedelta(minutes=23))
+            got += h.step(status(soc=100, direction="idle"), now=base + timedelta(minutes=24))
+        self.assertNotIn("charging_started", got)
+        self.assertNotIn("charged_full", got)
 
     def test_temperature_high_with_hysteresis(self):
         h = Harness()

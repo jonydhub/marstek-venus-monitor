@@ -79,6 +79,7 @@ class WidgetPreferences(context: Context) {
             .putNullable("ratedCapacityWh", snapshot.ratedCapacityWh)
             .putNullable("temperatureC", snapshot.temperatureCelsius)
             .putNullable("powerW", snapshot.batteryPowerWatts)
+            .put("powerEstimated", snapshot.batteryPowerEstimated)
             .putNullable("solarPowerW", snapshot.solarPowerWatts)
             .putNullable("gridPowerW", snapshot.gridPowerWatts)
             .putNullable("offgridPowerW", snapshot.offgridPowerWatts)
@@ -118,6 +119,7 @@ class WidgetPreferences(context: Context) {
                 ratedCapacityWh = json.optNullableDouble("ratedCapacityWh"),
                 temperatureCelsius = json.optNullableDouble("temperatureC"),
                 batteryPowerWatts = json.optNullableDouble("powerW"),
+                batteryPowerEstimated = json.optBoolean("powerEstimated", true),
                 direction = runCatching {
                     BatteryDirection.valueOf(json.optString("direction", "UNKNOWN"))
                 }.getOrDefault(BatteryDirection.UNKNOWN),

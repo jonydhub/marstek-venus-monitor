@@ -48,6 +48,7 @@ object HistoryMath {
     const val BACKUP_DRAW_THRESHOLD_W = 5.0
     const val SOC_BUCKET_SECONDS = 1800.0
     const val SOC_MAX_POINTS = 48
+    const val STANDBY_MAX_INTERVAL_SECONDS = 6 * 3600.0
     private val kyiv: ZoneId = ZoneId.of("Europe/Kyiv")
     private val iso = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
 
@@ -134,6 +135,41 @@ object HistoryMath {
         return periods.filter { it[1] - it[0] >= 60 }.map { Math.round(it[0]) to Math.round(it[1]) }
     }
 
+    /**
+     * Standby self-consumption (W) from the top-up cadence while held at 100 % with the grid present: one SOC step
+     * (Δ bat_wh) is lost between the end of a top-up (back at 100 %) and the next drop to 99 %. Median over 24 h.
+     */
+    fun standbyConsumption(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W): Int? {
+        val points = rows.filter { it.ts >= now - WINDOW_SECONDS && it.ts <= now }.sortedBy { it.ts }
+        val estimates = mutableListOf<Double>()
+        var backAt: Double? = null
+        var backWh: Double? = null
+        points.zipWithNext().forEach { (prev, row) ->
+            val soc = row.soc
+            val prevSoc = prev.soc
+            when {
+                soc == null || prevSoc == null || outage(row, thresholdW) -> backAt = null
+                prevSoc >= 100 && soc == 99 -> {
+                    val whNow = row.batWh
+                    val start = backAt
+                    val full = backWh
+                    if (start != null && whNow != null && full != null && full > whNow) {
+                        val span = row.ts - start
+                        if (span > 0 && span <= STANDBY_MAX_INTERVAL_SECONDS) estimates += (full - whNow) / (span / 3600.0)
+                    }
+                    backAt = null
+                }
+                prevSoc == 99 && soc >= 100 -> { backAt = row.ts; backWh = row.batWh }
+                soc < 99 -> backAt = null
+            }
+        }
+        if (estimates.isEmpty()) return null
+        val sorted = estimates.sorted()
+        val mid = sorted.size / 2
+        val median = if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+        return median.roundToInt()
+    }
+
     private fun isoAt(epochS: Long): String = ZonedDateTime.ofInstant(Instant.ofEpochSecond(epochS), kyiv).format(iso)
 
     fun insights(
@@ -170,6 +206,7 @@ object HistoryMath {
             .put("chart_events", JSONArray().apply {
                 chartEvents.forEach { (millis, kind) -> put(JSONObject().put("t", isoAt(millis / 1000)).put("kind", kind)) }
             })
+            .put("standby_w", standbyConsumption(rows, now, thresholdW) ?: JSONObject.NULL)
     }
 
     fun prune(rows: List<HistorySample>, now: Double): List<HistorySample> = rows.filter { it.ts >= now - RETENTION_SECONDS }

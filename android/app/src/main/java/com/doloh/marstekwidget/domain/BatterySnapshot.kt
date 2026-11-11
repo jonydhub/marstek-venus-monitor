@@ -14,6 +14,8 @@ data class BatterySnapshot(
     val etaSeconds: Long?,
     val collectedAt: String?,
     val solarPowerWatts: Double? = null,
+    /** False when [batteryPowerWatts] is measured (ES ongrid/offgrid power); true = capacity-trend estimate. */
+    val batteryPowerEstimated: Boolean = true,
     val gridPowerWatts: Double? = null,
     val offgridPowerWatts: Double? = null,
     val totalPvEnergyWh: Double? = null,
@@ -91,6 +93,7 @@ object BatterySnapshotParser {
             direction = direction,
             etaSeconds = eta,
             collectedAt = root.optString("collected_at").takeIf(String::isNotBlank),
+            batteryPowerEstimated = flow.optBoolean("estimated", true),
             solarPowerWatts = energy.optFiniteDouble("pv_power"),
             gridPowerWatts = energy.optFiniteDouble("ongrid_power"),
             offgridPowerWatts = energy.optFiniteDouble("offgrid_power"),

@@ -1,0 +1,186 @@
+{
+ "_note": "Venus E 3.0 fw148, Manual mode, grid present, held at 100 %: standby self-drain 100→99 % and a ~1 min grid top-up (ongrid_power < 0 = charging) every ~39 min. old_flow_* = what the 1.3.1 capacity-trend estimator logged.",
+ "rated_wh": 5120,
+ "samples": [
+  {
+   "clock": "07:30:37",
+   "t": 27037,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 0.0,
+   "old_flow_dir": "idle",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:53:37",
+   "t": 28417,
+   "soc": 99,
+   "bat_wh": 5068.0,
+   "old_flow_w": -335.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": -1195.0
+  },
+  {
+   "clock": "07:54:16",
+   "t": 28456,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": -249.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:54:53",
+   "t": 28493,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": -164.6,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:55:32",
+   "t": 28532,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": -55.3,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:56:09",
+   "t": 28569,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 62.7,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:57:23",
+   "t": 28643,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 298.8,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "07:58:03",
+   "t": 28683,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 416.5,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "08:00:35",
+   "t": 28835,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 0.0,
+   "old_flow_dir": "idle",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "08:32:33",
+   "t": 30753,
+   "soc": 99,
+   "bat_wh": 5068.0,
+   "old_flow_w": -413.9,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": -1195.0
+  },
+  {
+   "clock": "08:33:10",
+   "t": 30790,
+   "soc": 99,
+   "bat_wh": 5068.0,
+   "old_flow_w": -706.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": -1195.0
+  },
+  {
+   "clock": "08:33:47",
+   "t": 30827,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": -476.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "08:35:41",
+   "t": 30941,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 229.7,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "08:36:55",
+   "t": 31015,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 711.5,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "09:11:13",
+   "t": 33073,
+   "soc": 99,
+   "bat_wh": 5068.0,
+   "old_flow_w": -420.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": -637.0
+  },
+  {
+   "clock": "09:11:50",
+   "t": 33110,
+   "soc": 99,
+   "bat_wh": 5068.0,
+   "old_flow_w": -711.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": -1195.0
+  },
+  {
+   "clock": "09:12:27",
+   "t": 33147,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": -476.0,
+   "old_flow_dir": "discharging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  },
+  {
+   "clock": "09:14:20",
+   "t": 33260,
+   "soc": 100,
+   "bat_wh": 5120.0,
+   "old_flow_w": 225.6,
+   "old_flow_dir": "charging",
+   "offgrid_w": 0.0,
+   "ongrid_w": 0.0
+  }
+ ]
+}

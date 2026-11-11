@@ -45,6 +45,8 @@ data class BatteryInsights(
     val today: TodayDurations? = null,
     val outagePeriods: List<TimeSpan> = emptyList(),
     val chartEvents: List<ChartEvent> = emptyList(),
+    /** Standby self-consumption at 100 % from the top-up cadence (W), null until one full cycle was seen. */
+    val standbyWatts: Double? = null,
 )
 
 object BatteryInsightsParser {
@@ -65,6 +67,7 @@ object BatteryInsightsParser {
             backupAverageCoverageHours = block.finite("backup_avg_coverage_hours"),
             backupEnergyTodayWh = block.finite("backup_energy_today_wh"),
             temperatureCelsius = block.finite("temperature_c"),
+            standbyWatts = block.finite("standby_w"),
             socHistory = points,
             today = block.optJSONObject("today")?.let { t ->
                 TodayDurations(t.optLong("charge_seconds"), t.optLong("discharge_seconds"), t.optLong("outage_seconds"))

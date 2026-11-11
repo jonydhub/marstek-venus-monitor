@@ -179,13 +179,12 @@ class JournalActivity : Activity() {
         fun ago(minutes: Long) = now - minutes * 60_000L
         return listOf(
             JournalEvent(ago(35), "light_lost", JournalCategory.LIGHT, "Світло зникло: резервний вихід 121 Вт, заряд 82%", 121.0),
-            JournalEvent(ago(190), "anomaly_discharge_on_grid", JournalCategory.ANOMALY,
-                "Розряд ≈ 177 Вт при наявності мережі, резервний вихід не живить навантаження — можливий конфлікт з ДБЖ/інвертором", 177.0),
+            JournalEvent(ago(190), "maintenance_topup", JournalCategory.BATTERY, "Підзаряд до 100% (утримання)", 100.0),
             JournalEvent(ago(260), "connection_restored", JournalCategory.CONNECTION, "Зв'язок з батареєю відновлено після 6 хв"),
             JournalEvent(ago(266), "connection_lost", JournalCategory.CONNECTION,
                 "Немає зв'язку з батареєю: 3 опитування поспіль без відповіді (стан світла невідомий)"),
             JournalEvent(ago(420), "charged_full", JournalCategory.BATTERY, "Батарею заряджено: 100%", 100.0),
-            JournalEvent(ago(530), "charging_started", JournalCategory.BATTERY, "Почалось заряджання ≈ 820 Вт (оцінка), заряд 64%", 820.0),
+            JournalEvent(ago(530), "charging_started", JournalCategory.BATTERY, "Почалось заряджання ≈ 820 Вт, заряд 64%", 820.0),
             JournalEvent(ago(531), "light_returned", JournalCategory.LIGHT, "Світло повернулось після 4 год 0 хв, заряд 64%"),
             JournalEvent(ago(700), "anomaly_high_discharge", JournalCategory.ANOMALY, "Розрядка 2128 Вт перевищує поріг 2000 Вт, заряд 78%", 2128.0),
             JournalEvent(ago(771), "light_lost", JournalCategory.LIGHT, "Світло зникло: резервний вихід 96 Вт, заряд 100%", 96.0),
