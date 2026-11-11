@@ -1,0 +1,36 @@
+<!-- 2×2 (all compact cells, incl. the tall Samsung One UI 170×200 dp): one-line header «● Світло є  27 °C  08:30 ↻»,
+     the SOC ring (the only SOC indicator, gradient-coloured, sized to the cell), then full-width one-line rows:
+     state + runtime, today's durations, today's schedule bar. Sizes come from CompactPlanner; spacers share leftovers. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:paddingStart="12dp"
+    android:paddingEnd="10dp"
+    android:paddingVertical="10dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="24dp" android:gravity="center_vertical" android:orientation="horizontal">
+        <TextView android:id="@+id/widget_light_dot" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="4dp" android:includeFontPadding="false" android:text="@string/widget_dot" android:textColor="#6F8290" android:textSize="13sp" />
+        <TextView android:id="@+id/widget_primary" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:textColor="#F3F7FA" android:textSize="13sp" android:textStyle="bold" android:maxLines="1" android:singleLine="true" android:ellipsize="end" android:text="@string/widget_state_waiting_data" />
+        <TextView android:id="@+id/widget_temperature" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:textColor="#A8B8C2" android:textSize="11sp" android:maxLines="1" android:singleLine="true" android:visibility="gone" />
+        <TextView android:id="@+id/widget_updated" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:textColor="#8B9BA7" android:textSize="10sp" android:maxLines="1" android:singleLine="true" android:text="@string/widget_mini_dash" />
+        <TextView android:id="@+id/widget_refresh" android:layout_width="22dp" android:layout_height="24dp" android:clickable="true" android:focusable="true" android:gravity="center" android:contentDescription="@string/widget_refresh_description" android:text="@string/widget_refresh" android:textColor="#36C6D5" android:textSize="15sp" />
+    </LinearLayout>
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="4dp" />
+    <FrameLayout android:id="@+id/widget_soc_ring_container" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal">
+        <ImageView android:id="@+id/widget_soc_ring_image" android:layout_width="wrap_content" android:layout_height="wrap_content" android:contentDescription="@null" android:scaleType="fitCenter" />
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:gravity="center_horizontal" android:orientation="vertical">
+            <TextView android:id="@+id/widget_soc_text" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:textColor="#F3F7FA" android:textSize="24sp" android:textStyle="bold" android:maxLines="1" android:text="@string/widget_soc_compact_unknown" />
+            <TextView android:id="@+id/widget_capacity_text" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:includeFontPadding="false" android:textColor="#B8C8D2" android:textSize="11sp" android:maxLines="1" android:text="@string/widget_kwh_unknown" />
+        </LinearLayout>
+    </FrameLayout>
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="4dp" />
+    <TextView android:id="@+id/widget_secondary" android:layout_width="match_parent" android:layout_height="wrap_content" android:includeFontPadding="false" android:textColor="#C9D5DC" android:textSize="12sp" android:maxLines="1" android:singleLine="true" android:ellipsize="end" />
+    <TextView android:id="@+id/widget_today" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:includeFontPadding="false" android:textColor="#A8B8C2" android:textSize="11sp" android:maxLines="1" android:singleLine="true" android:ellipsize="end" android:visibility="gone" />
+    <LinearLayout android:id="@+id/widget_schedule_group" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:gravity="center_vertical" android:orientation="horizontal" android:visibility="gone">
+        <ImageView android:id="@+id/widget_schedule_bar" android:layout_width="0dp" android:layout_height="9dp" android:layout_weight="1" android:scaleType="fitXY" android:contentDescription="@string/widget_schedule_description" />
+        <TextView android:id="@+id/widget_schedule_caption" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:textColor="#A8B8C2" android:textSize="10sp" android:maxLines="1" android:singleLine="true" android:ellipsize="end" />
+    </LinearLayout>
+    <TextView android:id="@+id/widget_schedule_note" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:includeFontPadding="false" android:textColor="#A8B8C2" android:textSize="10sp" android:maxLines="1" android:singleLine="true" android:ellipsize="end" android:visibility="gone" />
+</LinearLayout>

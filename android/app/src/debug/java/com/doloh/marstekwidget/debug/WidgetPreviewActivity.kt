@@ -35,7 +35,8 @@ import java.time.format.DateTimeFormatter
  * `notify`: saves the fixture and runs the real alert engine + notifier once (for outage it first seeds «grid was on»).
  * `--es showcase outage|charging [--ez main true]`: clean marketing render (no debug labels), fixed clock 18:30 Kyiv.
  * `--es showcase live`: the same clean 4×1 / 2×2 / 4×2 stack fed by the last real stored snapshot.
- * `--es showcase outage|charging|idle --es sizes 2x2|4x2|4x4`: one Samsung-sized widget; `--es page samsung` for the labelled set.
+ * `--es showcase outage|charging|idle --es sizes 2x2|2x2pair|2x2small|4x2|4x4|4x1`: Samsung-sized widgets; `--es page samsung` for the labelled set.
+ * `--ez unpublished true`: today's schedule not published (idle-full case «Графік: немає»).
  * `--ez journal true`: the journal screen with a demo journal.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
@@ -246,7 +247,11 @@ class WidgetPreviewActivity : Activity() {
         val snapshot = if (live) WidgetPreferences(this).snapshot() ?: run { finish(); return }
             else if (kind == "nolink") BatterySnapshotParser.parse(showcaseFixture("outage", now))
                 .copy(collectedAt = now.minusMinutes(12).toInstant().toString())
-            else BatterySnapshotParser.parse(showcaseFixture(kind, now))
+            else BatterySnapshotParser.parse(showcaseFixture(kind, now).also { root ->
+                if (intent.getBooleanExtra("unpublished", false)) root.getJSONObject("power_outage").apply {
+                    put("schedule_published", false); put("next_outage", JSONObject.NULL); put("windows", JSONArray()); put("schedule_dates", JSONArray())
+                }
+            })
         if (live && main) {
             startActivity(Intent(this, MainActivity::class.java))
             finish()
@@ -276,10 +281,16 @@ class WidgetPreviewActivity : Activity() {
         }
         val showcaseSizes = when (intent.getStringExtra("sizes")) {
             "2x2" -> listOf(170 to 200)
+            // Both real One UI portrait 2×2 cells (default grid and a taller one) for the fit check.
+            "2x2pair" -> listOf(170 to 200, 180 to 230)
+            "2x2small" -> listOf(160 to 160, 120 to 120)
             "4x2" -> listOf(350 to 200)
             "4x4" -> listOf(350 to 420)
             "4x1" -> listOf(350 to 84)
-            else -> listOf(340 to 72, 180 to 186, 340 to 186)
+            // 4×1 strip at Samsung height and the narrow 2×1 strip.
+            "flat" -> listOf(350 to 84, 350 to 56, 170 to 84)
+            // Samsung One UI portrait cells: 4×1, 2×2, 4×2.
+            else -> listOf(350 to 84, 170 to 200, 350 to 200)
         }
         showcaseSizes.forEachIndexed { index, (w, h) ->
             val shape = WidgetShapeSelector.select(w.toFloat(), h.toFloat())

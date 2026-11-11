@@ -28,6 +28,10 @@ import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
 import com.doloh.marstekwidget.domain.ScheduleDays
 import com.doloh.marstekwidget.domain.TodayFormatter
+import com.doloh.marstekwidget.domain.CompactPlanner
+import com.doloh.marstekwidget.domain.CompactWidgetTexts
+import com.doloh.marstekwidget.domain.SocGradient
+import com.doloh.marstekwidget.domain.TextFit
 import com.doloh.marstekwidget.ui.DayScheduleBarPainter
 import com.doloh.marstekwidget.ui.ScheduleActivity
 import com.doloh.marstekwidget.ui.SocBarPainter
@@ -135,9 +139,7 @@ object WidgetRenderer {
 
     fun layoutFor(shape: WidgetShape): Int = when (shape) {
         WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> R.layout.widget_shape_flat
-        WidgetShape.SMALL -> R.layout.widget_shape_small
-        WidgetShape.SQUARE -> R.layout.widget_shape_square
-        WidgetShape.SQUARE_TALL -> R.layout.widget_shape_square_tall
+        WidgetShape.SMALL, WidgetShape.SQUARE, WidgetShape.SQUARE_TALL -> R.layout.widget_shape_compact
         WidgetShape.WIDE -> R.layout.widget_shape_wide
         WidgetShape.TALL -> R.layout.widget_shape_tall
         WidgetShape.LARGE -> R.layout.widget_shape_large
@@ -197,7 +199,7 @@ object WidgetRenderer {
 
         when (shape) {
             WidgetShape.FLAT_NARROW, WidgetShape.FLAT -> renderFlat(views, context, shape, summary, warning, input)
-            WidgetShape.SMALL, WidgetShape.SQUARE, WidgetShape.SQUARE_TALL -> renderSmall(views, context, shape, summary, warning, input, size)
+            WidgetShape.SMALL, WidgetShape.SQUARE, WidgetShape.SQUARE_TALL -> renderCompact(views, context, summary, warning, input, size)
             WidgetShape.WIDE, WidgetShape.TALL -> {
                 renderCapacity(views, context, snapshot, options, full = true, widthDp = size.first)
                 renderLines(views, context, shape, summary, warning, input)
@@ -245,7 +247,7 @@ object WidgetRenderer {
 
     private fun renderToday(views: RemoteViews, shape: WidgetShape, snapshot: BatterySnapshot?) {
         val today = snapshot?.insights?.today
-        val text = TodayFormatter.compact(today)?.let { if (shape == WidgetShape.SQUARE || shape == WidgetShape.SQUARE_TALL) it else "Сьогодні: $it" }
+        val text = TodayFormatter.compact(today)?.let { "Сьогодні: $it" }
         views.setViewVisibility(R.id.widget_today, visibility(text != null))
         text?.let { views.setTextViewText(R.id.widget_today, it) }
     }
@@ -259,21 +261,6 @@ object WidgetRenderer {
         val tomorrow = days[1]
         val density = context.resources.displayMetrics.density
         val barWidthDp = (widthDp - 28f).coerceAtLeast(80f)
-        if (shape == WidgetShape.SQUARE_TALL) {
-            // Today only, full width; the caption names today's windows. Nothing to draw → the state line already
-            // says «графік не опубліковано» / «без відключень», so the row is dropped instead of repeating it.
-            if (today.segments.isEmpty()) {
-                views.setViewVisibility(R.id.widget_schedule_group, View.GONE)
-                return
-            }
-            // No caption: the state line above already carries the schedule sentence; the bar + now marker show the day.
-            views.setViewVisibility(R.id.widget_schedule_caption, View.GONE)
-            val bitmap = Bitmap.createBitmap((barWidthDp * density).roundToInt(), (9f * density).roundToInt(), Bitmap.Config.ARGB_8888)
-            DayScheduleBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), today, density)
-            views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
-            views.setContentDescription(R.id.widget_schedule_bar, listOfNotNull(today.summary, today.maybeText).joinToString("; "))
-            return
-        }
         // Today | tomorrow halves, each 0–24 h; the 4×4 light chip already names the queue.
         views.setTextViewText(R.id.widget_schedule_caption, listOfNotNull("Сьогодні", info.group?.takeIf { !shape.isBlock }?.let { "черга $it" },
             today.windowsText.takeIf { today.definite.isEmpty() }?.lowercase()).joinToString(" · "))
@@ -309,25 +296,29 @@ object WidgetRenderer {
         views.setImageViewBitmap(R.id.widget_chart, bitmap)
     }
 
-    private fun renderSmall(views: RemoteViews, context: Context, shape: WidgetShape, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput, size: Pair<Float, Float>) {
+    /**
+     * 2×2 cells: header «● Світло є  27 °C  08:30 ↻», the gradient SOC ring (the only SOC indicator), then one-line rows —
+     * state + runtime, today's durations, today's schedule. Type and ring follow [CompactPlanner] for the real cell size;
+     * each row picks the longest candidate that fits the measured width so numbers are never hidden behind «…».
+     */
+    private fun renderCompact(views: RemoteViews, context: Context, summary: WidgetSummary?, warning: BatteryWarning?, input: WidgetRenderInput, size: Pair<Float, Float>) {
         val snapshot = input.snapshot
+        val (w, h) = size
+        val fontScale = context.resources.configuration.fontScale.takeIf { it > 0f } ?: 1f
+        val days = snapshot?.powerOutage?.let { ScheduleDays.days(it, input.now.toInstant().toEpochMilli()) }
+        val scheduleRow = CompactWidgetTexts.scheduleRow(snapshot?.powerOutage, days?.get(0), input.now)
+        val todayCandidates = CompactWidgetTexts.todayCandidates(snapshot?.insights?.today)
+        val plan = CompactPlanner.plan(w, h, todayCandidates.isNotEmpty(), scheduleRow != null, scheduleRow?.showBar ?: true, fontScale)
+        val k = plan.headerSp / 13f
+        val sp = android.util.TypedValue.COMPLEX_UNIT_SP
+        val textWidthDp = w - CompactPlanner.PAD_H
+        val measure = measurer(context)
+
+        // Ring + SOC inside it.
         val soc = snapshot?.socPercent?.coerceIn(0, 100)
-        val ringDp = ringSizeDp(shape, size.first, size.second)
-        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, ringDp))
-        if (shape == WidgetShape.SQUARE_TALL) {
-            views.setTextViewTextSize(R.id.widget_soc_text, android.util.TypedValue.COMPLEX_UNIT_SP, (ringDp * 0.27f).coerceIn(18f, 30f))
-            views.setTextViewTextSize(R.id.widget_capacity_text, android.util.TypedValue.COMPLEX_UNIT_SP, (ringDp * 0.12f).coerceIn(9f, 13f))
-            views.setImageViewBitmap(R.id.widget_soc_bar, socBarBitmap(context, soc, size.first - 24f, 6f))
-            views.setViewVisibility(R.id.widget_soc_bar, visibility(input.options.showSoc))
-            // Reserve line only in taller cells and only when the trailing column shows an ETA (else it repeats the reserve).
-            val etaDriven = summary?.mode == SummaryMode.CHARGING || summary?.mode == SummaryMode.DISCHARGING
-            val reserve = summary?.lines?.firstOrNull { it.kind == SummaryLineKind.RESERVE }?.takeIf { etaDriven && size.second >= 225f }
-            views.setViewVisibility(R.id.widget_line_1, visibility(reserve != null))
-            reserve?.let {
-                views.setTextViewText(R.id.widget_line_1, it.text)
-                views.setTextColor(R.id.widget_line_1, toneColor(it.tone, Color.rgb(201, 213, 220)))
-            }
-        }
+        views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, plan.ringDp))
+        views.setTextViewTextSize(R.id.widget_soc_text, sp, (plan.ringDp * 0.25f / fontScale).coerceIn(14f, 40f))
+        views.setTextViewTextSize(R.id.widget_capacity_text, sp, (plan.ringDp * 0.105f / fontScale).coerceIn(8.5f, 15f))
         views.setViewVisibility(R.id.widget_soc_ring_container, visibility(input.options.showSoc))
         views.setTextViewText(R.id.widget_capacity_text, compactEnergyText(context, snapshot))
         views.setViewVisibility(R.id.widget_capacity_text, visibility(input.options.showCapacity))
@@ -335,35 +326,119 @@ object WidgetRenderer {
             R.id.widget_soc_ring_container,
             context.getString(R.string.widget_soc_energy_description, socText(context, snapshot), compactEnergyText(context, snapshot)),
         )
-        if (summary != null) setTrailing(views, summary, input.options)
-        else {
-            views.setTextViewText(R.id.widget_trailing_primary, "—")
-            views.setViewVisibility(R.id.widget_trailing_secondary, View.GONE)
-        }
-        val alert = warning?.takeIf { it != BatteryWarning.HIGH_POWER }
-        // 2×2 header = the light state only (tap → schedule); the battery part of the primary line moves into the body.
+
+        // Header: light state, temperature, freshness, refresh — one line, never wrapped.
+        val tempSp = (11f * k).coerceIn(9.5f, 14f)
+        val updatedSp = (10f * k).coerceIn(9f, 13f)
+        views.setTextViewTextSize(R.id.widget_primary, sp, plan.headerSp)
+        views.setTextViewTextSize(R.id.widget_light_dot, sp, plan.headerSp)
+        views.setTextViewTextSize(R.id.widget_temperature, sp, tempSp)
+        views.setTextViewTextSize(R.id.widget_updated, sp, updatedSp)
         val light = LightStatusResolver.resolve(snapshot, input.state == WidgetFetchState.ERROR, input.now)
-        if (summary != null) {
-            views.setTextViewText(R.id.widget_primary, light.headline)
-            views.setTextColor(R.id.widget_primary, if (light.kind == LightKind.ON) Color.rgb(243, 247, 250) else modeColor(summary.mode))
+        val headline = if (summary != null) light.headline else noDataText(context, input.state)
+        val updatedText = compactUpdatedText(context, snapshot, input)
+        val wantTime = input.options.showLastUpdated || input.state != WidgetFetchState.OK
+        val temperature = (snapshot?.temperatureCelsius ?: snapshot?.insights?.temperatureCelsius)
+            ?.takeIf { input.options.showTemperature }?.let { CompactWidgetTexts.temperature(it, compact = true) }
+        val header = CompactWidgetTexts.header(
+            headlines = CompactWidgetTexts.headlineCandidates(headline),
+            hasTemperature = temperature != null,
+            hasTime = wantTime,
+            timeImportant = input.state != WidgetFetchState.OK,
+            roomDp = textWidthDp - measure("●", plan.headerSp, false) - 4f,
+            headlineDp = { measure(it, plan.headerSp, true) },
+            temperatureDp = temperature?.let { measure(it, tempSp, false) + 6f } ?: 0f,
+            timeDp = measure(updatedText, updatedSp, false) + 6f,
+            glyphDp = measure(" ↻", updatedSp, false),
+            refreshButtonDp = 22f,
+        )
+        val tempInHeader = header.showTemperature
+        views.setTextViewText(R.id.widget_primary, header.headline)
+        if (summary != null) views.setTextColor(R.id.widget_primary, if (light.kind == LightKind.ON) Color.rgb(243, 247, 250) else modeColor(summary.mode))
+        views.setContentDescription(R.id.widget_primary, headline)
+        views.setViewVisibility(R.id.widget_temperature, visibility(tempInHeader))
+        if (tempInHeader) views.setTextViewText(R.id.widget_temperature, temperature)
+        // No room for the 22 dp refresh button: the time itself carries a cyan «↻» and refreshes on tap.
+        views.setViewVisibility(R.id.widget_refresh, visibility(header.refreshButton))
+        val timeText = if (header.showTime) updatedText else ""
+        val updated: CharSequence = if (header.refreshButton) timeText else android.text.SpannableString("$timeText ↻".trimStart()).apply {
+            setSpan(android.text.style.ForegroundColorSpan(Color.rgb(54, 198, 213)), length - 1, length, 0)
         }
-        val tail = when (summary?.mode) {
-            SummaryMode.CHARGING, SummaryMode.DISCHARGING -> summary.primary
-            null -> null
-            else -> summary.primary.substringAfter(SEP, "").takeIf(String::isNotBlank)
+        views.setTextViewText(R.id.widget_updated, updated)
+        views.setViewVisibility(R.id.widget_updated, visibility(updated.isNotEmpty()))
+        if (!header.refreshButton) views.setContentDescription(R.id.widget_updated, context.getString(R.string.widget_refresh_description))
+
+        // Row 1: battery alert, else state + runtime/ETA (temperature joins it only when the header had no room).
+        val alert = warning?.takeIf { it != BatteryWarning.HIGH_POWER }
+        var stateCandidates = when {
+            alert != null -> listOf(warningText(context, alert))
+            summary != null && snapshot != null && (input.state == WidgetFetchState.ERROR || snapshot.batteryLinkLost) ->
+                listOfNotNull(summary.secondary, "Показано останні дані")
+            summary != null && snapshot != null -> CompactWidgetTexts.stateCandidates(summary, snapshot, input.now)
+            else -> listOfNotNull(noDataHint(context, input.state))
         }
-        val secondary = when {
-            alert != null -> warningText(context, alert)
-            // The header already says «Світло є», so the schedule sentence drops its «· світло є» tail.
-            summary != null -> listOfNotNull(tail, summary.secondary
-                ?.removePrefix(light.headline + SEP)?.removePrefix(light.headline)?.removeSuffix(PowerOutageFormatter.LIGHT_ON_SUFFIX)
-                ?.takeIf(String::isNotBlank)).joinToString(SEP).replaceFirstChar { it.titlecase(Locale.getDefault()) }
-            else -> noDataHint(context, input.state)
+        if (!tempInHeader && temperature != null && alert == null) stateCandidates = stateCandidates.flatMap { listOf(it + SEP + temperature, it) }
+        val stateText = TextFit.pick(stateCandidates, textWidthDp) { measure(it, plan.stateSp, false) }
+        views.setTextViewTextSize(R.id.widget_secondary, sp, plan.stateSp)
+        views.setTextViewText(R.id.widget_secondary, stateText.orEmpty())
+        views.setViewVisibility(R.id.widget_secondary, visibility(!stateText.isNullOrBlank()))
+        val stateTone = summary?.let { compactStateTone(it, snapshot) }
+        views.setTextColor(R.id.widget_secondary, alert?.let { warningColor(context, it) } ?: toneColor(stateTone ?: SummaryTone.NEUTRAL, Color.rgb(201, 213, 220)))
+
+        // Row 2: today «З 31 хв · Р 36 хв · Без світла 0».
+        val todayText = if (plan.showToday) TextFit.pick(todayCandidates, textWidthDp) { measure(it, plan.todaySp, false) } else null
+        views.setTextViewTextSize(R.id.widget_today, sp, plan.todaySp)
+        views.setViewVisibility(R.id.widget_today, visibility(todayText != null))
+        todayText?.let {
+            views.setTextViewText(R.id.widget_today, it)
+            views.setContentDescription(R.id.widget_today, "Сьогодні: $it")
         }
-        views.setTextViewText(R.id.widget_secondary, secondary.orEmpty().replace("відкл. ", "відкл.\u00A0"))
-        views.setTextColor(R.id.widget_secondary, alert?.let { warningColor(context, it) }
-            ?: if (summary?.mode == SummaryMode.OUTAGE) toneColor(reserveTone(summary), Color.rgb(201, 213, 220)) else Color.rgb(201, 213, 220))
-        views.setViewVisibility(R.id.widget_secondary, visibility(!secondary.isNullOrBlank()))
+
+        // Row 3: today's schedule bar + short caption, or one short full-width line («Графік: немає»).
+        val row = scheduleRow?.takeIf { plan.showSchedule }
+        val today = days?.get(0)
+        val barRow = row?.takeIf { it.showBar && today != null }
+        views.setViewVisibility(R.id.widget_schedule_group, visibility(barRow != null))
+        views.setViewVisibility(R.id.widget_schedule_note, visibility(row != null && barRow == null && row.caption != null))
+        if (row != null && barRow == null) row.caption?.let {
+            views.setTextViewTextSize(R.id.widget_schedule_note, sp, plan.captionSp)
+            views.setTextViewText(R.id.widget_schedule_note, it)
+        }
+        if (barRow != null && today != null) {
+            views.setTextViewTextSize(R.id.widget_schedule_caption, sp, plan.captionSp)
+            views.setViewVisibility(R.id.widget_schedule_caption, visibility(barRow.caption != null))
+            barRow.caption?.let { views.setTextViewText(R.id.widget_schedule_caption, it) }
+            val density = context.resources.displayMetrics.density
+            val captionDp = barRow.caption?.let { measure(it, plan.captionSp, false) + 6f } ?: 0f
+            val barWidthDp = (textWidthDp - captionDp).coerceAtLeast(40f)
+            val bitmap = Bitmap.createBitmap((barWidthDp * density).roundToInt(), (9f * density).roundToInt(), Bitmap.Config.ARGB_8888)
+            DayScheduleBarPainter.draw(Canvas(bitmap), bitmap.width.toFloat(), bitmap.height.toFloat(), today, density)
+            views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
+            views.setContentDescription(R.id.widget_schedule_bar, listOfNotNull(today.summary, today.maybeText).joinToString("; "))
+        }
+    }
+
+    /** Tone of the compact state row: the outage verdict («вистачить» green / «не вистачить» red), else neutral. */
+    private fun compactStateTone(summary: WidgetSummary, snapshot: BatterySnapshot?): SummaryTone = when (summary.mode) {
+        SummaryMode.OUTAGE -> reserveTone(summary)
+        SummaryMode.CHARGING -> SummaryTone.GOOD
+        else -> if (summary.mode == SummaryMode.IDLE && (snapshot?.socPercent ?: 0) >= 99) SummaryTone.GOOD else SummaryTone.NEUTRAL
+    }
+
+    /**
+     * Width of [text] in dp at [sp] (user font scale included), padded 5 % because launchers such as One UI draw
+     * RemoteViews text in their own, slightly wider system font.
+     */
+    private fun measurer(context: Context): (String, Float, Boolean) -> Float {
+        val metrics = context.resources.displayMetrics
+        val fontScale = context.resources.configuration.fontScale.takeIf { it > 0f } ?: 1f
+        val regular = Paint(Paint.ANTI_ALIAS_FLAG)
+        val bold = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = android.graphics.Typeface.DEFAULT_BOLD }
+        return { text, sp, isBold ->
+            val paint = if (isBold) bold else regular
+            paint.textSize = sp * fontScale * metrics.density
+            paint.measureText(text) / metrics.density * 1.05f
+        }
     }
 
     private fun setTrailing(views: RemoteViews, summary: WidgetSummary, options: WidgetDisplayOptions) {
@@ -489,10 +564,10 @@ object WidgetRenderer {
             action = BaseMarstekWidgetProvider.ACTION_REFRESH
             putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
         }
-        views.setOnClickPendingIntent(
-            R.id.widget_refresh,
-            PendingIntent.getBroadcast(context, widgetId * 10 + 1, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
-        )
+        val refresh = PendingIntent.getBroadcast(context, widgetId * 10 + 1, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
+        // 2×2: the freshness time doubles as the refresh control when the header has no room for the button.
+        if (shape.isCompact) views.setOnClickPendingIntent(R.id.widget_updated, refresh)
         views.setOnClickPendingIntent(
             R.id.widget_root,
             PendingIntent.getActivity(context, widgetId * 10 + 2, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
@@ -622,13 +697,6 @@ object WidgetRenderer {
         return if (mode != null) "$base · $mode" else base
     }
 
-    /** Ring diameter that fills the cell: tall 2×2 leaves ~118 dp for the header, bar and text rows. */
-    fun ringSizeDp(shape: WidgetShape, widthDp: Float, heightDp: Float): Float = when (shape) {
-        WidgetShape.SQUARE_TALL -> minOf(widthDp * 0.5f, heightDp - 134f).coerceIn(56f, 112f)
-        WidgetShape.SQUARE -> minOf(widthDp * 0.46f, heightDp - 80f).coerceIn(64f, 96f)
-        else -> 60f
-    }
-
     private fun socBarBitmap(context: Context, socPercent: Int?, widthDp: Float, heightDp: Float): Bitmap {
         val density = context.resources.displayMetrics.density
         val bitmap = Bitmap.createBitmap((widthDp.coerceAtLeast(40f) * density).roundToInt(), (heightDp * density).roundToInt(), Bitmap.Config.ARGB_8888)
@@ -639,7 +707,7 @@ object WidgetRenderer {
     private fun socRingBitmap(context: Context, socPercent: Int?, sizeDp: Float = 60f): Bitmap {
         val density = context.resources.displayMetrics.density
         val size = (sizeDp * density).roundToInt()
-        val stroke = (sizeDp / 11f) * density
+        val stroke = (sizeDp / 12f).coerceIn(5f, 11f) * density
         val inset = stroke / 2f + density
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -653,11 +721,8 @@ object WidgetRenderer {
         canvas.drawArc(arc, -90f, 360f, false, paint)
         val progress = socPercent?.coerceIn(0, 100) ?: 0
         if (progress > 0) {
-            paint.color = when {
-                progress <= 15 -> context.getColor(R.color.widget_ring_critical)
-                progress <= 30 -> context.getColor(R.color.widget_ring_warning)
-                else -> context.getColor(R.color.widget_ring_accent)
-            }
+            // Same red → yellow → green → teal scale as the web/app bar, sampled at the SOC.
+            paint.color = SocGradient.colorAt(progress)
             canvas.drawArc(arc, -90f, progress * 3.6f, false, paint)
         }
         return bitmap

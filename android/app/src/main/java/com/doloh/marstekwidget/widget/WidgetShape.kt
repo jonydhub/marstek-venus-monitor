@@ -13,7 +13,7 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
     /** Roomier 2×2 (Samsung One UI ≈ 170–190 dp cells): bigger ring/type plus today's durations. */
     SQUARE(165f, 150f),
 
-    /** Tall 2×2 (Samsung portrait ≈ 170×200 dp): ring + gradient bar + today line + mini schedule + next outage. */
+    /** Tall 2×2 (Samsung portrait ≈ 170×200 dp): bigger ring + state, today and today's schedule rows. */
     SQUARE_TALL(140f, 185f),
     WIDE(250f, 100f),
     TALL(180f, 190f),
@@ -27,12 +27,24 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
     /** The 4×4-style block (light chip + flows), at phone or tablet scale. */
     val isBlock: Boolean get() = this == LARGE || this == XLARGE
 
-    /** Shapes that show today's charge / discharge / no-light durations. */
-    val showsToday: Boolean get() = this == SQUARE || this == SQUARE_TALL || this == WIDE || this == TALL || isBlock
+    /** 2×2-class cells sharing the ring layout (header, ring, one-line rows sized by [com.doloh.marstekwidget.domain.CompactPlanner]). */
+    val isCompact: Boolean get() = this == SMALL || this == SQUARE || this == SQUARE_TALL
 
-    /** Shapes with the today + tomorrow schedule bar. */
-    val showsScheduleBar: Boolean get() = this == WIDE || this == SQUARE_TALL || this == TALL || isBlock
+    /** How the SOC is drawn: exactly one indicator per shape — the ring in 2×2 cells, the gradient bar in wide ones, text only in 4×1. */
+    val socIndicator: SocIndicator get() = when {
+        isCompact -> SocIndicator.RING
+        this == FLAT || this == FLAT_NARROW -> SocIndicator.TEXT
+        else -> SocIndicator.BAR
+    }
+
+    /** Wide/tall/block shapes that show today's durations (compact cells render their own one-line row). */
+    val showsToday: Boolean get() = this == WIDE || this == TALL || isBlock
+
+    /** Shapes with the today + tomorrow schedule bar (compact cells draw a today-only bar themselves). */
+    val showsScheduleBar: Boolean get() = this == WIDE || this == TALL || isBlock
 }
+
+enum class SocIndicator { RING, BAR, TEXT }
 
 object WidgetShapeSelector {
     /**

@@ -1,6 +1,8 @@
 package com.doloh.marstekwidget.widget
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WidgetShapeSelectorTest {
@@ -60,6 +62,28 @@ class WidgetShapeSelectorTest {
         assertEquals(WidgetShape.SQUARE_TALL, WidgetShapeSelector.select(170f, 200f))
         assertEquals(WidgetShape.WIDE, WidgetShapeSelector.select(350f, 200f))
         assertEquals(WidgetShape.LARGE, WidgetShapeSelector.select(350f, 420f))
+    }
+
+    @Test
+    fun everyShapeShowsSocExactlyOnce() {
+        // Ring in 2×2 cells, gradient bar in wide/tall/block shapes, text in the 4×1 strip — never ring and bar together.
+        assertEquals(SocIndicator.RING, WidgetShape.SQUARE_TALL.socIndicator)
+        assertEquals(SocIndicator.RING, WidgetShape.SQUARE.socIndicator)
+        assertEquals(SocIndicator.RING, WidgetShape.SMALL.socIndicator)
+        listOf(WidgetShape.WIDE, WidgetShape.TALL, WidgetShape.LARGE, WidgetShape.XLARGE).forEach { assertEquals(it.name, SocIndicator.BAR, it.socIndicator) }
+        assertEquals(SocIndicator.TEXT, WidgetShape.FLAT.socIndicator)
+        assertEquals(SocIndicator.TEXT, WidgetShape.FLAT_NARROW.socIndicator)
+        // Compact cells render their own one-line today/schedule rows, not the 4×2 two-day bar.
+        WidgetShape.entries.filter { it.isCompact }.forEach { assertFalse(it.showsScheduleBar); assertFalse(it.showsToday) }
+    }
+
+    @Test
+    fun samsungTwoByTwoSizesUseTheCompactRingLayout() {
+        for ((w, h) in listOf(170f to 200f, 180f to 230f, 178f to 186f, 178f to 170f, 160f to 160f, 120f to 120f)) {
+            assertTrue("$w×$h", WidgetShapeSelector.select(w, h).isCompact)
+        }
+        assertFalse(WidgetShapeSelector.select(350f, 200f).isCompact)
+        assertFalse(WidgetShapeSelector.select(350f, 84f).isCompact)
     }
 
     @Test
