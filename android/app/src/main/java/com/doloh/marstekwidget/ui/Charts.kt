@@ -135,7 +135,7 @@ object DayScheduleBarPainter {
             paint.color = Color.WHITE
             canvas.drawRoundRect(RectF(nx - 1.5f * density, topZone, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
         }
-        if (timeLabelsPx > 0f && day.published) {
+        if (timeLabelsPx > 0f && (day.published || day.nowText != null)) {
             val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = timeLabelsPx; typeface = Typeface.DEFAULT_BOLD }
             val labels = ScheduleTimeLabels.layout(day.segments, day.nowFraction, day.nowText, bar.left, bar.width(), width,
                 gap = 3f * density) { text.measureText(it) }

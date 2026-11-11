@@ -324,7 +324,7 @@ function renderScheduleDays(outage = {}) {
     box.append(times, track, ticks, axis, el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
     if (day.maybe.length) box.append(el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`));
     host.append(box);
-    if (day.published) renderScheduleTimes(times, day, track.getBoundingClientRect().width);
+    if (day.published || day.nowText) renderScheduleTimes(times, day, track.getBoundingClientRect().width);
   }
   lastScheduleOutage = outage;
   set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
