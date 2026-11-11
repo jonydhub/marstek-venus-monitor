@@ -215,6 +215,23 @@ def calculate_battery_flow(samples: list[tuple[float, float]], battery_capacity_
     return result
 
 
+POWER_FIELDS = ("ongrid_power", "offgrid_power", "pv_power", "bat_power")
+
+
+def normalize_power_fields(data):
+    """Venus E fw148 sometimes reports small negative powers as unsigned int16 (e.g. -14 W -> 65522).
+
+    Values in 32768..65535 are folded back to signed; a real 32 kW reading is impossible on this device."""
+    if not isinstance(data, dict):
+        return data
+    fixed = dict(data)
+    for key in POWER_FIELDS:
+        value = fixed.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and 32768 <= value <= 65535:
+            fixed[key] = value - 65536
+    return fixed
+
+
 class MarstekPoller:
     def __init__(self):
         self.lock = threading.Lock()
@@ -261,7 +278,7 @@ class MarstekPoller:
                     if response.get("error"):
                         err = response["error"]
                         return {"ok": False, "error": err.get("message", "Device error"), "code": err.get("code"), "data": err.get("data"), "src": response.get("src")}
-                    return {"ok": True, "data": response.get("result", {}), "src": response.get("src")}
+                    return {"ok": True, "data": normalize_power_fields(response.get("result", {})), "src": response.get("src")}
             except TimeoutError:
                 if attempt == 0:
                     time.sleep(0.25)
