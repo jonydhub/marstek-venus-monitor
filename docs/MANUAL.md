@@ -194,7 +194,7 @@ loginctl enable-linger "$USER"
 |---|---|---|
 | `MARSTEK_HOST` | — (**обов'язково**) | IP батареї в LAN |
 | `MARSTEK_PORT` | `30000` | UDP-порт Open API |
-| `MARSTEK_BIND` | `127.0.0.1` | на якій адресі слухати HTTP; `0.0.0.0` — усі інтерфейси (у Docker-образі вже `0.0.0.0`) |
+| `MARSTEK_BIND` | `127.0.0.1` | на якій адресі слухати HTTP; кілька через кому, можна з портом (`127.0.0.1,100.64.0.10:8768`); `0.0.0.0` — усі інтерфейси (у Docker-образі вже `0.0.0.0`) |
 | `MARSTEK_DASHBOARD_PORT` | `8767` | HTTP-порт |
 | `MARSTEK_API_TOKEN` | порожньо | якщо задано, `/api/*` вимагає `Authorization: Bearer <токен>` |
 | `MARSTEK_RATE_LIMIT_PER_MIN` | `120` | запитів до `/api/*` за хвилину з однієї IP |

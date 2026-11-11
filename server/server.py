@@ -544,26 +544,57 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self.send_bytes(405, b"Read-only dashboard", "text/plain; charset=utf-8")
 
+def parse_binds(bind: str, default_port: int) -> list[tuple[str, int]]:
+    """MARSTEK_BIND: one or more comma-separated `host` or `host:port` entries (IPv6 as `[::1]:8767`)."""
+    result: list[tuple[str, int]] = []
+    for raw in (bind or "127.0.0.1").split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        host, port = item, default_port
+        if item.startswith("["):
+            end = item.find("]")
+            host = item[1:end]
+            rest = item[end + 1:]
+            if rest.startswith(":"):
+                port = int(rest[1:])
+        elif item.count(":") == 1:
+            host, port_text = item.split(":")
+            port = int(port_text)
+        if not 0 < port < 65536:
+            raise ValueError(f"bad port in MARSTEK_BIND entry {item!r}")
+        if (host, port) not in result:
+            result.append((host, port))
+    return result or [("127.0.0.1", default_port)]
+
+
 def main():
     errors = validate(SETTINGS)
     if errors:
         for error in errors:
             logging.error("config: %s", error)
         sys.exit("Configuration error, see messages above. Example: server/config.example.env")
-    if HTTP_HOST not in ("127.0.0.1", "::1", "localhost") and not API_TOKEN:
-        logging.warning("Listening on %s without MARSTEK_API_TOKEN: anyone who can reach this port sees your data",
-                        HTTP_HOST)
+    binds = parse_binds(HTTP_HOST, HTTP_PORT)
+    for host, _ in binds:
+        if host not in ("127.0.0.1", "::1", "localhost") and not API_TOKEN:
+            logging.warning("Listening on %s without MARSTEK_API_TOKEN: anyone who can reach this port sees your data",
+                            host)
     HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
     poller.history = HistoryStore(str(HISTORY_DB))
     poller.history.prune(time.time())
     threading.Thread(target=poller.run_outage_refresh, name="outage", daemon=True).start()
     threading.Thread(target=poller.run, name="marstek-poller", daemon=True).start()
-    server = ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), Handler)
-    server.daemon_threads = True
-    logging.info("Marstek read-only monitor: http://%s:%s device=%s:%s outage=%s auth=%s",
-                 HTTP_HOST, HTTP_PORT, HOST, PORT, SETTINGS.outage_provider, "token" if API_TOKEN else "none")
-    server.serve_forever()
-
+    servers = []
+    for host, port in binds:
+        srv = ThreadingHTTPServer((host, port), Handler)
+        srv.daemon_threads = True
+        servers.append(srv)
+    logging.info("Marstek read-only monitor: %s device=%s:%s outage=%s auth=%s",
+                 ", ".join(f"http://{h}:{p}" for h, p in binds), HOST, PORT, SETTINGS.outage_provider,
+                 "token" if API_TOKEN else "none")
+    for srv in servers[1:]:
+        threading.Thread(target=srv.serve_forever, name=f"http-{srv.server_address[1]}", daemon=True).start()
+    servers[0].serve_forever()
 
 if __name__ == "__main__":
     main()
