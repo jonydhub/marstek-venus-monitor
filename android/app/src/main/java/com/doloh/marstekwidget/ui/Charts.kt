@@ -8,10 +8,12 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.Shader
 import android.view.View
 import com.doloh.marstekwidget.domain.ChartEvent
 import com.doloh.marstekwidget.domain.DaySchedule
+import com.doloh.marstekwidget.domain.ScheduleTimeLabels
 import com.doloh.marstekwidget.domain.SocPoint
 import com.doloh.marstekwidget.domain.TimeSpan
 
@@ -58,14 +60,18 @@ class SocBarView(context: Context) : View(context) {
  * [labelsPx] > 0 adds hour ticks (every hour, longer every 6 h) and «0 6 12 18 24» labels under the bar.
  */
 object DayScheduleBarPainter {
-    fun draw(canvas: Canvas, width: Float, height: Float, day: DaySchedule, density: Float, labelsPx: Float = 0f) {
+    /** Height of the time-label row above the bar for [timeLabelsPx]-sized text (0 = no row). */
+    fun timeLabelZone(timeLabelsPx: Float, density: Float): Float = if (timeLabelsPx > 0f) timeLabelsPx + 3f * density else 0f
+
+    fun draw(canvas: Canvas, width: Float, height: Float, day: DaySchedule, density: Float, labelsPx: Float = 0f, timeLabelsPx: Float = 0f) {
         val marker = if (day.nowFraction != null) 2.5f * density else 0f
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = labelsPx }
         val tickZone = if (labelsPx > 0f) 6f * density + labelsPx + 2f * density else 0f
+        val topZone = timeLabelZone(timeLabelsPx, density)
         val inset = if (labelsPx > 0f) labelPaint.measureText("24") / 2f else 0f
         val left = maxOf(inset, marker)
         val right = width - maxOf(inset, marker)
-        val bar = RectF(left, marker, right, height - tickZone - marker)
+        val bar = RectF(left, topZone + marker, right, height - tickZone - marker)
         val r = minOf(bar.height() / 2f, 4f * density)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.color = if (day.published) ChartColors.TRACK else Color.argb(90, 52, 66, 80)
@@ -125,20 +131,36 @@ object DayScheduleBarPainter {
         day.nowFraction?.let { f ->
             val nx = x(f)
             paint.color = Color.BLACK
-            canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
+            canvas.drawRoundRect(RectF(nx - 2.5f * density, topZone, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
             paint.color = Color.WHITE
-            canvas.drawRoundRect(RectF(nx - 1.5f * density, 0f, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
+            canvas.drawRoundRect(RectF(nx - 1.5f * density, topZone, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
+        }
+        if (timeLabelsPx > 0f && day.published) {
+            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = timeLabelsPx; typeface = Typeface.DEFAULT_BOLD }
+            val labels = ScheduleTimeLabels.layout(day.segments, day.nowFraction, day.nowText, bar.left, bar.width(), width,
+                gap = 3f * density) { text.measureText(it) }
+            val baseline = topZone - 2.5f * density
+            labels.forEach { l ->
+                text.color = when (l.kind) {
+                    ScheduleTimeLabels.Kind.WINDOW -> ChartColors.AMBER
+                    ScheduleTimeLabels.Kind.MAYBE -> Color.rgb(230, 196, 120)
+                    ScheduleTimeLabels.Kind.NOW -> Color.WHITE
+                }
+                canvas.drawText(l.text, l.left, baseline, text)
+            }
         }
     }
 }
 
 class DayScheduleView(context: Context) : View(context) {
+    companion object { const val TIME_LABEL_SP = 10f }
     private var day: DaySchedule? = null
     fun setDay(value: DaySchedule) { day = value; invalidate() }
     override fun onDraw(canvas: Canvas) {
         val d = day ?: return
         val density = resources.displayMetrics.density
-        DayScheduleBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = 10f * density)
+        DayScheduleBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = 10f * density,
+            timeLabelsPx = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, TIME_LABEL_SP, resources.displayMetrics))
     }
 }
 

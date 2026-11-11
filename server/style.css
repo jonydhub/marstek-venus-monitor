@@ -148,3 +148,7 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .soc-fill{background-repeat:no-repeat;background-image:linear-gradient(90deg,#ef634d 0%,#f5be28 42%,#8fd18a 72%,#35c9da 100%)}
 .journal-row.cat-system b{color:var(--muted)}
 .today-tiles[hidden],.schedule-block[hidden],.hero-sub[hidden],.today-note[hidden]{display:none}
+/* v11: window start/end and current time above the schedule bars (layout: scheduleTimeLabels in app.js) */
+.sched-times{position:relative;height:13px;margin-bottom:2px}
+.sched-times span{position:absolute;top:0;font-size:10px;line-height:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.sched-times .off{color:var(--amber)}.sched-times .maybe{color:#e6c478}.sched-times .now{color:#fff}

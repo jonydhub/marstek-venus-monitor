@@ -265,17 +265,19 @@ object WidgetRenderer {
         views.setTextViewText(R.id.widget_schedule_caption, listOfNotNull("Сьогодні", info.group?.takeIf { !shape.isBlock }?.let { "черга $it" },
             today.windowsText.takeIf { today.definite.isEmpty() }?.lowercase()).joinToString(" · "))
         views.setTextViewText(R.id.widget_schedule_caption_tomorrow, if (tomorrow.published) "Завтра" + (if (tomorrow.definite.isEmpty()) " · без відключень" else "") else "Завтра · ще не опубліковано")
-        val heightDp = if (shape == WidgetShape.XLARGE) 12f else 9f
+        // Time labels above the bar («07:00 … 13:00», now «10:42») only on ≥ 4-cell-wide widgets (4×2, 4×4).
+        val labelPx = shape.scheduleTimeLabelDp * density
+        val heightDp = shape.scheduleBarDp + DayScheduleBarPainter.timeLabelZone(labelPx, density) / density
         val w = (barWidthDp * density).roundToInt()
         val h = (heightDp * density).roundToInt()
         val gap = 6f * density
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val half = (w - gap) / 2f
-        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), today, density)
+        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), today, density, timeLabelsPx = labelPx)
         canvas.save()
         canvas.translate(half + gap, 0f)
-        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), tomorrow, density)
+        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), tomorrow, density, timeLabelsPx = labelPx)
         canvas.restore()
         views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
         views.setContentDescription(R.id.widget_schedule_bar, "${today.summary}; ${tomorrow.summary}")

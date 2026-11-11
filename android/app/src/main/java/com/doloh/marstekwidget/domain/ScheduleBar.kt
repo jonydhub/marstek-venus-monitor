@@ -7,7 +7,8 @@ import java.time.format.DateTimeFormatter
 
 /** Today + tomorrow (0–24 | 0–24) as fractions of 48 h from local midnight; shared by the app view and widget bitmaps. */
 data class ScheduleBarModel(val segments: List<Segment>, val nowFraction: Float, val hasSchedule: Boolean) {
-    data class Segment(val start: Float, val end: Float, val maybe: Boolean)
+    /** [from]/[to] = «HH:mm» of the (day-clipped) window edges, «24:00» for the end of the day; empty when unknown. */
+    data class Segment(val start: Float, val end: Float, val maybe: Boolean, val from: String = "", val to: String = "")
 }
 
 object ScheduleBar {
@@ -40,6 +41,8 @@ data class DaySchedule(
     /** Clipped to the day, «HH:mm–HH:mm» (24:00 for midnight at the end). */
     val definite: List<String>,
     val maybe: List<String>,
+    /** «10:42» for the now marker (today only). */
+    val nowText: String? = null,
 ) {
     val title: String get() = if (isToday) "Сьогодні" else "Завтра"
 
@@ -76,14 +79,12 @@ object ScheduleDays {
             val b = minOf(w.endMillis, end)
             if (b > a) Triple(a, b, w.maybe) else null
         }
+        fun hm(t: Long) = Instant.ofEpochMilli(t).atZone(kyiv).format(clock)
+        fun toText(b: Long) = if (b >= end) "24:00" else hm(b)
         val segments = clipped.map { (a, b, maybe) ->
-            ScheduleBarModel.Segment(((a - start) / span).toFloat(), ((b - start) / span).toFloat(), maybe)
+            ScheduleBarModel.Segment(((a - start) / span).toFloat(), ((b - start) / span).toFloat(), maybe, hm(a), toText(b))
         }.sortedWith(compareBy({ !it.maybe }, { it.start }))
-        fun label(a: Long, b: Long): String {
-            val from = Instant.ofEpochMilli(a).atZone(kyiv).format(clock)
-            val to = if (b >= end) "24:00" else Instant.ofEpochMilli(b).atZone(kyiv).format(clock)
-            return "$from–$to"
-        }
+        fun label(a: Long, b: Long): String = "${hm(a)}–${toText(b)}"
         val published = info != null && (date.toString() in info.scheduleDates || clipped.isNotEmpty() ||
             (info.scheduleDates.isEmpty() && info.schedulePublished && date == today))
         val isToday = date == today
@@ -95,6 +96,7 @@ object ScheduleDays {
             published = published,
             definite = clipped.filter { !it.third }.sortedBy { it.first }.map { label(it.first, it.second) },
             maybe = clipped.filter { it.third }.sortedBy { it.first }.map { label(it.first, it.second) },
+            nowText = if (isToday) hm(nowMillis) else null,
         )
     }
 }

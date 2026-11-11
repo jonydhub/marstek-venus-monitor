@@ -7,6 +7,13 @@ import org.junit.Test
 
 class WidgetShapeSelectorTest {
     @Test
+    fun scheduleTimeLabelsOnlyOnFourCellWideShapes() {
+        listOf(WidgetShape.WIDE, WidgetShape.LARGE, WidgetShape.XLARGE).forEach { assertTrue(it.name, it.scheduleTimeLabelDp > 0f) }
+        listOf(WidgetShape.SMALL, WidgetShape.SQUARE, WidgetShape.SQUARE_TALL, WidgetShape.TALL, WidgetShape.FLAT, WidgetShape.FLAT_NARROW)
+            .forEach { assertEquals(it.name, 0f, it.scheduleTimeLabelDp, 0f) }
+    }
+
+    @Test
     fun flatSamsungStripUsesSingleRowLayout() {
         assertEquals(WidgetShape.FLAT, WidgetShapeSelector.select(340f, 64f))
         assertEquals(WidgetShape.FLAT, WidgetShapeSelector.select(300f, 40f))

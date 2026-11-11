@@ -25,7 +25,7 @@ class ProgressiveWebAppTests(unittest.TestCase):
         worker = (ROOT / "sw.js").read_text(encoding="utf-8")
         self.assertIn("url.pathname.startsWith('/api/')", worker)
         self.assertIn("cache.addAll(SHELL)", worker)
-        self.assertIn("marstek-shell-v10", worker)
+        self.assertIn("marstek-shell-v11", worker)
         self.assertIn("ignoreSearch: true", worker)
 
     def test_index_links_manifest_and_install_button(self):
@@ -33,7 +33,7 @@ class ProgressiveWebAppTests(unittest.TestCase):
         self.assertIn('rel="manifest" href="/manifest.webmanifest"', html)
         self.assertIn('id="install-app"', html)
         self.assertIn('apple-touch-icon', html)
-        self.assertIn('href="/style.css?v=10"', html)
+        self.assertIn('href="/style.css?v=11"', html)
 
     def test_pwa_assets_are_served_with_expected_content_types(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)

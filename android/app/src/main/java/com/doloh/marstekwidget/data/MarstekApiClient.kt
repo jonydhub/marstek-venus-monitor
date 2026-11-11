@@ -154,8 +154,9 @@ object TelemetryRepository {
             ConnectionMode.SERVER -> when (val raw = MarstekApiClient(context, settings, SettingsStore(context).token()).fetchRaw()) {
                 is MarstekApiClient.Raw.Ok -> withContext(Dispatchers.IO) {
                     val root = raw.root
-                    // A region chosen in the app overrides the server's own outage block.
-                    settings.outageConfig?.let { config ->
+                    // Server mode shows the server's own schedule (its source, e.g. LOE directly); the app fetches
+                    // with its own region only when the server publishes no schedule block.
+                    settings.outageConfig?.takeIf { !ServerOutagePolicy.serverHasSchedule(root) }?.let { config ->
                         val outage = runCatching { outageRepo.refreshIfDue(config) }.getOrNull()
                         root.put("power_outage", localOutageBlock(root, settings, outage))
                     }
@@ -224,4 +225,10 @@ object TelemetryRepository {
         }
         return result
     }
+}
+
+/** Server mode: whose outage schedule to show. */
+object ServerOutagePolicy {
+    /** True when the server's `power_outage` block is enabled — then it wins over the app's own region fetch. */
+    fun serverHasSchedule(root: JSONObject): Boolean = root.optJSONObject("power_outage")?.optBoolean("available", false) == true
 }

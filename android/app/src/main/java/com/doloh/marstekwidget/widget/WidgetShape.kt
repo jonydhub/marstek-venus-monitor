@@ -42,6 +42,19 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
 
     /** Shapes with the today + tomorrow schedule bar (compact cells draw a today-only bar themselves). */
     val showsScheduleBar: Boolean get() = this == WIDE || this == TALL || isBlock
+
+    /**
+     * Time labels above the schedule bar («07:00 … 13:00», now «10:42»), in dp: only the ≥ 4-cell-wide shapes
+     * (4×2, 4×4, tablet); 0 = none. Must match the ImageView heights in the layouts ([scheduleBarDp] + label row).
+     */
+    val scheduleTimeLabelDp: Float get() = when (this) {
+        WIDE, LARGE -> 8f
+        XLARGE -> 11f
+        else -> 0f
+    }
+
+    /** Height of the bar itself inside the schedule bitmap, dp. */
+    val scheduleBarDp: Float get() = if (this == XLARGE) 12f else 8f
 }
 
 enum class SocIndicator { RING, BAR, TEXT }

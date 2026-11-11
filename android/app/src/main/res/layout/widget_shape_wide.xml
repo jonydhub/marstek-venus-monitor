@@ -32,6 +32,6 @@
             <TextView android:id="@+id/widget_schedule_caption" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:textColor="#8B9BA7" android:textSize="9sp" android:maxLines="1" android:ellipsize="end" />
             <TextView android:id="@+id/widget_schedule_caption_tomorrow" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:textColor="#8B9BA7" android:textSize="9sp" android:maxLines="1" android:text="@string/widget_schedule_tomorrow" android:paddingStart="4dp" />
         </LinearLayout>
-        <ImageView android:id="@+id/widget_schedule_bar" android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="3dp" android:scaleType="fitXY" android:contentDescription="@string/widget_schedule_description" />
+        <ImageView android:id="@+id/widget_schedule_bar" android:layout_width="match_parent" android:layout_height="19dp" android:layout_marginTop="3dp" android:scaleType="fitXY" android:contentDescription="@string/widget_schedule_description" />
     </LinearLayout>
 </LinearLayout>

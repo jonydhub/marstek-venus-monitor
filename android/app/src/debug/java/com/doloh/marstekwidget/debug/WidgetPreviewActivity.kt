@@ -38,6 +38,8 @@ import java.time.format.DateTimeFormatter
  * `--es showcase outage|charging|idle --es sizes 2x2|2x2pair|2x2small|4x2|4x4|4x1`: Samsung-sized widgets; `--es page samsung` for the labelled set.
  * `--ez unpublished true`: today's schedule not published (idle-full case «Графік: немає»).
  * `--ez journal true`: the journal screen with a demo journal.
+ * `--es sched none|one_window|two_windows_now_inside|edge_00_24`: schedule rows (main-screen + «Графік відключень»
+ *   sizes) and the 4×2 / 4×4 / 2×2 widgets for fixed windows at a fixed clock 10:42 Kyiv (time-label layout check).
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -70,6 +72,10 @@ class WidgetPreviewActivity : Activity() {
         if (intent.getBooleanExtra("journal", false)) {
             startActivity(Intent(this, com.doloh.marstekwidget.ui.JournalActivity::class.java).putExtra("showcase", true))
             finish()
+            return
+        }
+        intent.getStringExtra("sched")?.let { case ->
+            scheduleLabels(case)
             return
         }
         intent.getStringExtra("showcase")?.let { kind ->
@@ -364,5 +370,66 @@ class WidgetPreviewActivity : Activity() {
             .put("backup_energy_today_wh", 410.0)
             .put("temperature_c", temp)
             .put("soc_history", history)).let { enrich(it, kind, now) }
+    }
+
+    /** FIXTURE: schedule time-label cases at 10:42 Kyiv (see the class comment). */
+    private fun scheduleLabels(case: String) {
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Kyiv"))
+        val kyiv = ZoneId.of("Europe/Kyiv")
+        val now = ZonedDateTime.now(kyiv).withHour(10).withMinute(42).withSecond(0).withNano(0)
+        val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        val midnight = now.toLocalDate().atStartOfDay(kyiv)
+        fun w(day: Long, from: Double, to: Double, kind: String = "off") = JSONObject()
+            .put("start", midnight.plusDays(day).plusMinutes((from * 60).toLong()).format(iso))
+            .put("end", midnight.plusDays(day).plusMinutes((to * 60).toLong()).format(iso)).put("kind", kind)
+        val windows = when (case) {
+            "one_window" -> listOf(w(0, 13.0, 17.0), w(1, 7.0, 13.0))
+            "two_windows_now_inside" -> listOf(w(0, 7.0, 13.0), w(0, 17.0, 21.0), w(0, 21.0, 22.0, "maybe"),
+                w(1, 9.0, 13.0), w(1, 16.0, 17.5, "maybe"))
+            "edge_00_24" -> listOf(w(0, 0.0, 4.0), w(0, 20.0, 24.0), w(1, 0.0, 24.0))
+            else -> emptyList()
+        }
+        val root = showcaseFixture("idle", now)
+        root.getJSONObject("power_outage").apply {
+            put("windows", JSONArray(windows)); put("current_outage", JSONObject.NULL); put("next_outage", JSONObject.NULL)
+            put("maybe_outages", JSONArray()); put("schedule_published", true)
+            put("schedule_dates", JSONArray().put(now.toLocalDate().toString()).put(now.toLocalDate().plusDays(1).toString()))
+        }
+        val snapshot = BatterySnapshotParser.parse(root)
+        val nowMillis = now.toInstant().toEpochMilli()
+        val days = com.doloh.marstekwidget.domain.ScheduleDays.days(snapshot.powerOutage, nowMillis)
+        val density = resources.displayMetrics.density
+        fun px(dp: Int) = (dp * density).toInt()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(12, 24, 36))
+            setPadding(px(16), px(36), px(16), px(16))
+        }
+        fun caption(text: String) = column.addView(TextView(this).apply {
+            this.text = text; setTextColor(Color.rgb(160, 173, 184)); textSize = 10f; setPadding(0, px(10), 0, px(4))
+        })
+        caption("FIXTURE · $case · 10:42 · головний екран (черга 1.1)")
+        column.addView(com.doloh.marstekwidget.ui.ScheduleDaysView(this).apply { setDays(days) })
+        caption("«Графік відключень»")
+        column.addView(com.doloh.marstekwidget.ui.ScheduleDaysView(this, barHeightDp = 44).apply { setDays(days) })
+        val alert = AlertEvaluator.top(AlertEvaluator.evaluate(null, snapshot, nowMillis, AlertSettings()).active)
+        val input = WidgetRenderInput(snapshot, WidgetFetchState.OK, WidgetDisplayOptions(), nowMillis, now = now, alert = alert)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        listOf("4×2" to (350 to 200), "2×2" to (170 to 200)).forEach { (name, size) ->
+            val (wd, ht) = size
+            val shape = WidgetShapeSelector.select(wd.toFloat(), ht.toFloat())
+            val frame = FrameLayout(this)
+            frame.addView(WidgetRenderer.build(this, shape, WidgetVariant.MEDIUM, input, 0, wd.toFloat() to ht.toFloat()).apply(this, frame),
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            if (name == "4×2") { caption("віджет 4×2 · 2×2"); column.addView(frame, LinearLayout.LayoutParams(px(wd), px(ht))) }
+            else row.addView(frame, LinearLayout.LayoutParams(px(wd), px(ht)))
+        }
+        column.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = px(8) })
+        caption("віджет 4×4")
+        val big = FrameLayout(this)
+        big.addView(WidgetRenderer.build(this, WidgetShapeSelector.select(350f, 420f), WidgetVariant.MEDIUM, input, 0, 350f to 420f).apply(this, big),
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        column.addView(big, LinearLayout.LayoutParams(px(350), px(420)))
+        setContentView(ScrollView(this).apply { addView(column) })
     }
 }
