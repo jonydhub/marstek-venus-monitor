@@ -8,7 +8,8 @@ class GridAndAutonomyTest {
     @Test
     fun backupDrawAboveThresholdMeansGridOff() {
         assertEquals("off", GridStateDetector.detect(42.0, deviceOk = true, thresholdW = 5.0))
-        assertEquals("off", GridStateDetector.detect(-42.0, deviceOk = true, thresholdW = 5.0))
+        // Negative backup-port power is not a load draw (Venus E UPS mode: uint16 65522 = −14 W).
+        assertEquals("on", GridStateDetector.detect(-42.0, deviceOk = true, thresholdW = 5.0))
         assertEquals("on", GridStateDetector.detect(3.0, deviceOk = true, thresholdW = 5.0))
         assertEquals("on", GridStateDetector.detect(0.0, deviceOk = true, thresholdW = 5.0))
         assertEquals("unknown", GridStateDetector.detect(null, deviceOk = true, thresholdW = 5.0))

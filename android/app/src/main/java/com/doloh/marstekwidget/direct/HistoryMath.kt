@@ -72,7 +72,7 @@ object HistoryMath {
 
     /** Mean backup-output draw over 24 h, only while it was actually drawing; null before 30 min of draw. */
     fun measuredBackupLoad(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W): Double? {
-        val draw = intervals(rows, now - WINDOW_SECONDS).filter { abs(it.v0) >= thresholdW && abs(it.v1) >= thresholdW }
+        val draw = intervals(rows, now - WINDOW_SECONDS).filter { it.v0 >= thresholdW && it.v1 >= thresholdW }
         val (energy, covered) = integral(draw)
         if (covered < MIN_DRAW_COVERAGE_SECONDS) return null
         return Math.round(energy / covered * 10.0) / 10.0
@@ -104,7 +104,7 @@ object HistoryMath {
             if (t1 > t0) StateSpan(t0, t1, a) else null
         }
 
-    private fun outage(sample: HistorySample, thresholdW: Double) = sample.offgridW?.takeIf(Double::isFinite)?.let { abs(it) >= thresholdW } == true
+    private fun outage(sample: HistorySample, thresholdW: Double) = sample.offgridW?.takeIf(Double::isFinite)?.let { it >= thresholdW } == true
 
     fun localMidnight(now: Double): Double = ZonedDateTime.ofInstant(Instant.ofEpochMilli((now * 1000).toLong()), kyiv)
         .toLocalDate().atStartOfDay(kyiv).toEpochSecond().toDouble()

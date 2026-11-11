@@ -19,6 +19,7 @@ import com.doloh.marstekwidget.domain.BatteryDirection
 import com.doloh.marstekwidget.domain.GridState
 import com.doloh.marstekwidget.domain.JournalDetector
 import com.doloh.marstekwidget.domain.JournalObservation
+import com.doloh.marstekwidget.domain.PowerFields
 import com.doloh.marstekwidget.notify.AlertNotifier
 import com.doloh.marstekwidget.widget.WidgetPreferences
 import org.json.JSONArray
@@ -104,6 +105,7 @@ object DirectEngine {
         DirectStatusComposer.POLL_METHODS.forEach { m -> if (results[m] !is RpcResult.Ok) lastAnswers[m]?.let { results[m] = it } }
 
         val bat = (results["Bat.GetStatus"] as RpcResult.Ok).data
+        (results["ES.GetStatus"] as? RpcResult.Ok)?.let { results["ES.GetStatus"] = it.copy(data = PowerFields.normalize(it.data)) }
         val es = (results["ES.GetStatus"] as? RpcResult.Ok)?.data
         val capacity = bat.optDouble("bat_capacity", Double.NaN).takeIf(Double::isFinite)
         val rated = bat.optDouble("rated_capacity", Double.NaN).takeIf(Double::isFinite)
@@ -116,8 +118,8 @@ object DirectEngine {
         if (capacity != null) samples += CapacitySample(nowS, capacity)
         val trimmed = samples.filter { nowS - it.t <= BatteryFlowCalculator.TREND_WINDOW_SECONDS }.takeLast(120)
         saveSamples(context, trimmed)
-        val offgrid = es?.optDouble("offgrid_power", Double.NaN)?.takeIf(Double::isFinite)
-        val ongrid = es?.optDouble("ongrid_power", Double.NaN)?.takeIf(Double::isFinite)
+        val offgrid = PowerFields.read(es, "offgrid_power")
+        val ongrid = PowerFields.read(es, "ongrid_power")
         val flow = BatteryFlowCalculator.calculate(trimmed, capacity, ratedForEta, ongridW = ongrid, offgridW = offgrid)
 
         val history = HistoryStore(context)

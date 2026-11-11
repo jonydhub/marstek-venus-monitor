@@ -8,6 +8,7 @@ import com.doloh.marstekwidget.direct.GridStateDetector
 import com.doloh.marstekwidget.domain.BatterySnapshot
 import com.doloh.marstekwidget.domain.BatterySnapshotParser
 import com.doloh.marstekwidget.domain.JournalEvent
+import com.doloh.marstekwidget.domain.PowerFields
 import com.doloh.marstekwidget.notify.AlertNotifier
 import com.doloh.marstekwidget.outage.KYIV
 import com.doloh.marstekwidget.outage.OutageStatusBuilder
@@ -173,7 +174,7 @@ object TelemetryRepository {
         val methods = root.optJSONObject("methods") ?: JSONObject()
         val es = methods.optJSONObject("ES.GetStatus")
         val bat = methods.optJSONObject("Bat.GetStatus")?.optJSONObject("data")
-        val offgrid = es?.optJSONObject("data")?.optDouble("offgrid_power", Double.NaN)?.takeIf(Double::isFinite)
+        val offgrid = PowerFields.read(es?.optJSONObject("data"), "offgrid_power")
         val f = root.optJSONObject("battery_flow") ?: JSONObject()
         val flow = BatteryFlow(f.optBoolean("available"), f.optDouble("power_w", Double.NaN).takeIf(Double::isFinite),
             f.optString("direction", "unknown"), 0, 0, null, null, null)

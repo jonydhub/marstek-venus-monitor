@@ -4,13 +4,18 @@ import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
-/** Loads sit on the battery's backup output: any draw above the threshold means the grid is absent. */
+/**
+ * Loads sit on the battery's backup output: a draw above the threshold means the grid is absent.
+ * Same sign convention as `ongrid_power` (power out of the device > 0): a negative `offgrid_power` (e.g. the
+ * −14 W a Venus E reports as uint16 65522 in UPS mode, see [com.doloh.marstekwidget.domain.PowerFields]) is
+ * not a load draw and never means «світло зникло».
+ */
 object GridStateDetector {
     const val DEFAULT_THRESHOLD_W = 5.0
 
     fun detect(offgridPowerW: Double?, deviceOk: Boolean, thresholdW: Double = DEFAULT_THRESHOLD_W): String {
         if (!deviceOk || offgridPowerW == null || !offgridPowerW.isFinite()) return "unknown"
-        return if (abs(offgridPowerW) >= thresholdW) "off" else "on"
+        return if (offgridPowerW >= thresholdW) "off" else "on"
     }
 }
 
