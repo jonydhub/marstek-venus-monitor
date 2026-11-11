@@ -292,10 +292,13 @@ class MainActivity : Activity() {
                 setPadding(dp(11), dp(9), dp(11), dp(9))
                 background = rounded(SURFACE_RAISED, dp(14), STROKE)
             }
-            // «10 год 3 хв» may take two lines (number and unit joined by no-break spaces), never «10 год …».
-            val value = label("—", 16f, TEXT, true).apply { maxLines = 2 }
+            // One line always: «10 год 28 хв» shrinks (16→10 sp) instead of wrapping, so all three tiles stay equal height.
+            val value = label("—", 16f, TEXT, true).apply {
+                maxLines = 1
+                setAutoSizeTextTypeUniformWithConfiguration(10, 16, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            }
             metricValues[key] = value
-            box.addView(value)
+            box.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22)))
             box.addView(label(caption, 10f, if (key == "todayOutage") CORAL else MUTED, false).apply { maxLines = 1 })
             tiles.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 if (i > 0) marginStart = dp(4)
