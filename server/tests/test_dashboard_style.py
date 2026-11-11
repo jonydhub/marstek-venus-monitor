@@ -116,8 +116,17 @@ class WebScheduleTextTests(unittest.TestCase):
         """)
         on, off, unknown = json.loads(out)
         self.assertTrue(on.startswith("За графіком відключення до ") and on.endswith(" · світло є"), on)
-        self.assertTrue(off.startswith("Повернення о "), off)
+        self.assertTrue(off.startswith("Світло за графіком о "), off)
         self.assertTrue(unknown.startswith("За графіком відключення до ") and "світло" not in unknown, unknown)
+
+    def test_durations_use_full_unit_words(self):
+        script = (ROOT / "app.js").read_text(encoding="utf-8")
+        funcs = "const finiteOrNull = v => v === null || v === undefined || !Number.isFinite(Number(v)) ? null : Number(v);\n" + \
+            "\n".join(_extract(script, n) for n in ("shortDuration", "formatDuration"))
+        out = subprocess.run(["node", "-e", funcs + """
+            console.log(JSON.stringify([shortDuration(3600), shortDuration(7500), shortDuration(60), shortDuration(0),
+              formatDuration(3600), formatDuration(12120)]));"""], capture_output=True, text=True, timeout=20, check=True).stdout
+        self.assertEqual(json.loads(out), ["1\u00a0год", "2\u00a0год 5\u00a0хв", "1\u00a0хв", "0\u00a0хв", "1 год", "3 год 22 хв"])
 
     def test_days_split_windows_and_mark_tomorrow_unpublished(self):
         out = self.run_js("""

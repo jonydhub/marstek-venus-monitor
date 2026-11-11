@@ -143,7 +143,7 @@ object PowerOutageFormatter {
         if (info.emergency) return "Аварійні відключення, графік не діє"
         info.currentEnd?.let(::toKyiv)?.let { end ->
             return when (gridState) {
-                GridState.OFF -> "Повернення о ${stamp(end, now)}"
+                GridState.OFF -> if (info.currentKind == "schedule" || info.currentKind == null) "Світло за графіком о ${stamp(end, now)}" else "Повернення о ${stamp(end, now)}"
                 GridState.ON -> "За графіком відключення до ${stamp(end, now)}$LIGHT_ON_SUFFIX"
                 GridState.UNKNOWN -> "За графіком відключення до ${stamp(end, now)}"
             }

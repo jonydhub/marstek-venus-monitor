@@ -66,7 +66,7 @@ object HistoryMath {
     private fun integral(list: List<Interval>): Pair<Double, Double> {
         var energyWs = 0.0
         var covered = 0.0
-        list.forEach { energyWs += (abs(it.v0) + abs(it.v1)) / 2.0 * (it.t1 - it.t0); covered += it.t1 - it.t0 }
+        list.forEach { energyWs += (it.v0.coerceAtLeast(0.0) + it.v1.coerceAtLeast(0.0)) / 2.0 * (it.t1 - it.t0); covered += it.t1 - it.t0 }
         return energyWs to covered
     }
 

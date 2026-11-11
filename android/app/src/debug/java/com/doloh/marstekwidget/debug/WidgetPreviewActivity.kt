@@ -309,7 +309,21 @@ class WidgetPreviewActivity : Activity() {
     }
 
     /** Realistic showcase numbers (requested for a public post); still a fixture, not live telemetry. */
-    private fun showcaseFixture(kind: String, now: ZonedDateTime): JSONObject {
+    private fun showcaseFixture(kind: String, now: ZonedDateTime): JSONObject =
+        if (kind == "outage1330") outage1330Fixture(now) else baseShowcaseFixture(kind, now)
+
+    /** FIXTURE modelled on a real ATS outage: 98 %, 5030 Wh, backup load +1330 W, floor 11 % → 3 год 22 хв. */
+    private fun outage1330Fixture(now: ZonedDateTime): JSONObject = baseShowcaseFixture("outage", now).apply {
+        getJSONObject("methods").getJSONObject("Bat.GetStatus").getJSONObject("data").put("soc", 98).put("bat_capacity", 5030.0)
+        getJSONObject("methods").getJSONObject("ES.GetStatus").getJSONObject("data").put("offgrid_power", 1330)
+        put("battery_flow", JSONObject("""{"available":true,"power_w":-1330.0,"direction":"discharging","estimated":false,"charge_eta_seconds":null,"discharge_eta_seconds":12091}"""))
+        getJSONObject("insights").put("backup_output_w", 1330.0)
+            .put("today", JSONObject().put("charge_seconds", 3600).put("discharge_seconds", 7200).put("outage_seconds", 60))
+        getJSONObject("power_outage").getJSONObject("autonomy").put("load_w", 1330.0).put("stored_wh", 5030)
+            .put("usable_wh", 4467).put("runtime_seconds", 12091).put("load_basis", "measured_backup_output")
+    }
+
+    private fun baseShowcaseFixture(kind: String, now: ZonedDateTime): JSONObject {
         val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
         fun today(hour: Int) = now.withHour(hour).withMinute(0).withSecond(0).withNano(0).format(iso)
         // Outage windows relative to `now` (main showcase runs on the real clock): started 5 h ago, back in ~3 h.
@@ -351,16 +365,16 @@ class WidgetPreviewActivity : Activity() {
             "next_outage":{"kind":"schedule","start":"${hourStart.plusHours(2).format(iso)}","end":"${hourStart.plusHours(6).format(iso)}","duration_seconds":14400},
             "schedule_published":true,
             "autonomy":{"load_w":52.0,"load_basis":"measured_average_24h","stored_wh":$stored,"runtime_seconds":${(stored / 52.0 * 3600).toLong()},"outage_seconds":14400,"covers_next_outage":true}}""")
-        val chargeEta = ((5120.0 - stored) / 820.0 * 3600).toLong()
+        val chargeEta = ((5120.0 - stored) / 1200.0 * 3600).toLong()
         val flow = if (outage) """{"available":true,"power_w":-130.0,"direction":"discharging","charge_eta_seconds":null,"discharge_eta_seconds":$runtime}"""
         else if (full) """{"available":true,"power_w":0.0,"direction":"idle","charge_eta_seconds":null,"discharge_eta_seconds":null}"""
-        else """{"available":true,"power_w":820.0,"direction":"charging","charge_eta_seconds":$chargeEta,"discharge_eta_seconds":null}"""
+        else """{"available":true,"power_w":1200.0,"direction":"charging","charge_eta_seconds":$chargeEta,"discharge_eta_seconds":null}"""
         val offgrid = if (outage) load else 0.0
         return JSONObject("""{
             "collected_at":"${now.toInstant()}",
             "methods":{
               "Bat.GetStatus":{"data":{"soc":$soc,"bat_capacity":$stored,"rated_capacity":5120,"bat_temp":$temp}},
-              "ES.GetStatus":{"data":{"ongrid_power":${if (outage || full) 0 else -840},"offgrid_power":$offgrid,"total_grid_input_energy":412340,"total_grid_output_energy":380120,"total_load_energy":96210}},
+              "ES.GetStatus":{"data":{"ongrid_power":${if (outage || full) 0 else -1220},"offgrid_power":$offgrid,"total_grid_input_energy":412340,"total_grid_output_energy":380120,"total_load_energy":96210}},
               "ES.GetMode":{"data":{"mode":"Manual","ct_state":0}}
             },
             "battery_flow":$flow

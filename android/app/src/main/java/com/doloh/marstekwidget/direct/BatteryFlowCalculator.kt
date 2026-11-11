@@ -54,7 +54,7 @@ object BatteryFlowCalculator {
     /** + = charging, − = discharging; null when neither AC port shows a flow. */
     fun measuredPower(ongridW: Double?, offgridW: Double?): Double? {
         val ongrid = ongridW?.takeIf { it.isFinite() && abs(it) >= MEASURED_MIN_W } ?: 0.0
-        val offgrid = offgridW?.takeIf { it.isFinite() && abs(it) >= MEASURED_MIN_W }?.let(::abs) ?: 0.0
+        val offgrid = offgridW?.takeIf { it.isFinite() && it >= MEASURED_MIN_W } ?: 0.0 // negative = noise, not a load
         if (ongrid == 0.0 && offgrid == 0.0) return null
         return -ongrid - offgrid
     }

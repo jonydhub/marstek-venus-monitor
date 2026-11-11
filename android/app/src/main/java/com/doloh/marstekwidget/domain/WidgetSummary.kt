@@ -81,7 +81,8 @@ object WidgetSummaryResolver {
         }
 
         if (info != null && light == GridState.OFF) {
-            val backup = (snapshot.insights?.backupOutputWatts ?: snapshot.offgridPowerWatts)?.let(::formatWatts)
+            val backupW = backupLoadWatts(snapshot)
+            val backup = backupW?.let(::formatWatts)
             val returnAt = info.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now) }
             // One runtime number during an outage: autonomy runtime if known, else the battery ETA to 0%.
             val runtime = info.runtimeSeconds ?: dischargeEtaSeconds(snapshot)?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
@@ -89,9 +90,9 @@ object WidgetSummaryResolver {
                 runCatching { java.time.Duration.between(now, java.time.OffsetDateTime.parse(end)).seconds }.getOrNull()
             }?.takeIf { it > 0 }
             val covers = info.coversOutage ?: if (runtime != null && remaining != null) runtime >= remaining else null
-            val verdict = when (covers) { true -> " · вистачить"; false -> " · не вистачить"; null -> "" }
             val runtimeValue = runtime?.let(EtaTextFormatter::formatSeconds)
-            val reserveText = runtimeValue?.let { "Запас ≈ $it$verdict" } ?: "Запас: оцінюю розряд…"
+            // Power always shown: «Споживання 1330 Вт · вистачить на 3 год 22 хв».
+            val reserveText = outagePowerLine(backupW, runtime, covers) ?: "Запас: оцінюю розряд…"
             val outageTone = when (covers) {
                 true -> SummaryTone.GOOD
                 false -> SummaryTone.CRITICAL
@@ -100,7 +101,7 @@ object WidgetSummaryResolver {
             return WidgetSummary(
                 mode = SummaryMode.OUTAGE,
                 lightState = light,
-                primary = listOfNotNull("Світла нема", backup?.let { "вихід $it" }).joinToString(SEP),
+                primary = listOfNotNull("Світла нема", backup).joinToString(SEP),
                 primaryTone = SummaryTone.WARNING,
                 // The runtime number sits in the trailing column ("0% · X · °C"); the middle line carries only the verdict.
                 secondary = when {
@@ -111,15 +112,17 @@ object WidgetSummaryResolver {
                 },
                 trailingPrimary = returnAt ?: "до —",
                 trailingSecondary = listOfNotNull("${floorTarget(info)} · ${runtimeValue ?: "—"}", temperature).joinToString(SEP),
+                // Priority: power + runtime first, then when the light returns.
                 lines = listOfNotNull(
+                    SummaryLine(SummaryLineKind.RESERVE, reserveText, outageTone),
                     SummaryLine(
                         SummaryLineKind.RETURN_TIME,
                         if (info.currentEnd != null) PowerOutageFormatter.detail(info, now) else "Час повернення невідомий",
                     ),
-                    SummaryLine(SummaryLineKind.RESERVE, reserveText, outageTone),
                     temperatureLine,
                 ),
-                batteryState = listOfNotNull(directionWord(snapshot.direction), backup?.let { "резервний вихід $it" }).joinToString(SEP),
+                // 4×4 headline: the power sits in the light block's «Споживання … · вистачить на …» row, not here too.
+                batteryState = directionWord(snapshot.direction),
             )
         }
 
@@ -185,7 +188,24 @@ object WidgetSummaryResolver {
         BatteryDirection.UNKNOWN -> "Стан невідомий"
     }
 
-    fun formatWatts(watts: Double): String = String.format(uk, "%.0f W", abs(watts))
-    fun formatKw(watts: Double): String = String.format(uk, "%.2f кВт", abs(watts) / 1000.0)
+    fun formatWatts(watts: Double): String = String.format(uk, "%.0f\u00A0Вт", abs(watts))
+    /** Battery flow: «300 Вт» below 1 kW, «1,2 кВт» from 1 kW (value and unit joined by a no-break space). */
+    fun formatKw(watts: Double): String = if (abs(watts) < 999.5) formatWatts(watts) else String.format(uk, "%.1f\u00A0кВт", abs(watts) / 1000.0)
+
+    /** The house load on the backup output during an outage: only a POSITIVE reading (negative = noise), else null. */
+    fun backupLoadWatts(snapshot: BatterySnapshot?): Double? =
+        (snapshot?.insights?.backupOutputWatts ?: snapshot?.offgridPowerWatts)?.takeIf { it.isFinite() && it >= 1.0 }
+
+    /** «Споживання 1330 Вт · вистачить на 3 год 22 хв» — the outage power row shared by all widget shapes. */
+    fun outagePowerLine(backupW: Double?, runtimeSeconds: Long?, covers: Boolean?): String? {
+        val runtime = runtimeSeconds?.let(EtaTextFormatter::formatSeconds)
+        val verdict = if (covers == false) "вистачить лише на" else "вистачить на"
+        return when {
+            backupW != null && runtime != null -> "Споживання ${formatWatts(backupW)} · $verdict $runtime"
+            backupW != null -> "Споживання ${formatWatts(backupW)} · оцінюю запас…"
+            runtime != null -> "Запас ≈ $runtime" + if (covers == false) " · не вистачить" else if (covers == true) " · вистачить" else ""
+            else -> null
+        }
+    }
     fun formatTemperature(celsius: Double): String = String.format(uk, "%.1f\u00A0°C", celsius)
 }

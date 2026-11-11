@@ -5,7 +5,6 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
@@ -79,40 +78,11 @@ object CompactWidgetTexts {
         return HeaderChoice(headlines.last(), false, time && timeImportant, false)
     }
 
-    /** «1 год 4 хв» / «57 хв» / «0» — the exact today duration with no-break spaces. */
-    fun duration(seconds: Long?): String {
-        val minutes = ((seconds ?: 0L) + 30) / 60
-        if (minutes <= 0) return "0"
-        val hours = minutes / 60
-        return if (hours > 0) "$hours${NBSP}год ${minutes % 60}${NBSP}хв" else "$minutes${NBSP}хв"
-    }
+    /** «1 год», «2 год 5 хв», «57 хв», «0 хв» — the exact today duration with no-break spaces (full unit words). */
+    fun duration(seconds: Long?): String = TodayFormatter.short(seconds ?: 0L)
 
-    private fun durationTight(seconds: Long?): String {
-        val minutes = ((seconds ?: 0L) + 30) / 60
-        if (minutes <= 0) return "0"
-        val hours = minutes / 60
-        return if (hours > 0) "${hours}г${NBSP}${minutes % 60}хв" else "${minutes}хв"
-    }
-
-    private fun durationRounded(seconds: Long?): String {
-        val minutes = ((seconds ?: 0L) + 30) / 60
-        if (minutes <= 0) return "0"
-        return if (minutes >= 60) "${(minutes / 60.0).roundToLong()}г" else "${minutes}хв"
-    }
-
-    /** Today's charge / discharge / no-light durations, all three always present: «З 31 хв · Р 36 хв · Без світла 0». */
-    fun todayCandidates(today: TodayDurations?): List<String> {
-        today ?: return emptyList()
-        val c = today.chargeSeconds
-        val d = today.dischargeSeconds
-        val o = today.outageSeconds
-        return listOf(
-            "З ${duration(c)}${SEP}Р ${duration(d)}${SEP}Без світла ${duration(o)}",
-            "З ${durationTight(c)}${SEP}Р ${durationTight(d)}${SEP}Без світла ${durationTight(o)}",
-            "З ${durationTight(c)}${SEP}Р ${durationTight(d)}${SEP}Без св. ${durationTight(o)}",
-            "З ${durationRounded(c)}${SEP}Р ${durationRounded(d)}${SEP}Без св. ${durationRounded(o)}",
-        ).distinct()
-    }
+    /** 2×2 today row: only the no-light total, «Сьогодні без світла 1 хв» (never «З 1г · Р 2г»). */
+    fun todayCandidates(today: TodayDurations?): List<String> = TodayFormatter.outageCandidates(today)
 
     /** «14 год» — a runtime rounded to whole hours (≥ 1 h) for the shortest candidates. */
     private fun roughly(seconds: Long): String {
@@ -128,76 +98,103 @@ object CompactWidgetTexts {
         .replace(Regex("(\\d) (год|хв|д)")) { "${it.groupValues[1]}$NBSP${it.groupValues[2]}" }
 
     /**
-     * State + runtime/ETA line under the ring: «Очікування · Заряджено», «Вистачить ≈ 22 год», «Заряд · 100% за 1 год».
-     * Ordered longest-first; the last candidate is the shortest that still carries the number.
+     * Power row under the ring — the current power is always there, joined with the runtime/ETA while it fits:
+     * outage «1330 Вт · вистачить 3 год 22 хв» → «1330 Вт · 3 год 22 хв» → «Споживання 1330 Вт»; charging
+     * «Заряд ≈ 1,2 кВт · 100% за 1 год» → «Заряд ≈ 1,2 кВт»; discharging with grid «Розряд ≈ 300 Вт»; idle «Очікування».
+     * Ordered longest-first; priority power > runtime, so the last candidates keep the power and drop the time.
      */
     fun stateCandidates(summary: WidgetSummary, snapshot: BatterySnapshot, now: ZonedDateTime = ZonedDateTime.now(kyiv)): List<String> {
         val info = snapshot.powerOutage
         return when (summary.mode) {
             SummaryMode.OUTAGE -> {
+                val backup = WidgetSummaryResolver.backupLoadWatts(snapshot)?.let { WidgetSummaryResolver.formatWatts(it) }
                 val runtime = info?.runtimeSeconds ?: WidgetSummaryResolver.dischargeEtaSeconds(snapshot)
                     ?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
-                    ?: return listOf("Запас: оцінюю розряд…", "Запас: оцінюю…")
+                if (runtime == null) {
+                    return backup?.let { listOf("Споживання $it$SEP" + "оцінюю запас…", "Споживання $it", it) }
+                        ?: listOf("Запас: оцінюю розряд…", "Запас: оцінюю…")
+                }
                 val remaining = info?.currentEnd?.let { runCatching { java.time.Duration.between(now, OffsetDateTime.parse(it)).seconds }.getOrNull() }
                     ?.takeIf { it > 0 }
                 val covers = info?.coversOutage ?: remaining?.let { runtime >= it }
-                val verdict = when (covers) { true -> "Вистачить"; false -> "Не вистачить"; null -> "Запас" }
-                listOf("$verdict ≈ ${exact(runtime)}", "$verdict ≈ ${roughly(runtime)}", "$verdict ${roughly(runtime)}")
+                val word = if (covers == false) "лише" else "вистачить"
+                if (backup == null) {
+                    val verdict = when (covers) { true -> "Вистачить"; false -> "Не вистачить"; null -> "Запас" }
+                    return listOf("$verdict ≈ ${exact(runtime)}", "$verdict ≈ ${roughly(runtime)}", "$verdict ${roughly(runtime)}")
+                }
+                listOf(
+                    "Споживання $backup$SEP$word ${exact(runtime)}",
+                    "$backup$SEP$word ${exact(runtime)}",
+                    "$backup$SEP${exact(runtime)}",
+                    "$backup$SEP≈ ${roughly(runtime)}",
+                    "Споживання $backup",
+                    backup,
+                ).distinct()
             }
             SummaryMode.CHARGING, SummaryMode.DISCHARGING -> {
                 val charging = summary.mode == SummaryMode.CHARGING
                 val word = if (charging) "Заряд" else "Розряд"
-                val power = snapshot.batteryPowerWatts?.takeIf(Double::isFinite)?.let { WidgetSummaryResolver.formatKw(it).replace(' ', NBSP) }
-                val eta = if (charging) snapshot.etaSeconds else WidgetSummaryResolver.dischargeEtaSeconds(snapshot)
+                val approx = if (snapshot.batteryPowerEstimated) " ≈" else ""
+                val power = snapshot.batteryPowerWatts?.takeIf(Double::isFinite)?.let { WidgetSummaryResolver.formatKw(it) }
+                val eta = (if (charging) snapshot.etaSeconds else WidgetSummaryResolver.dischargeEtaSeconds(snapshot))?.takeIf { it > 0 }
                 val target = if (charging) "100%" else WidgetSummaryResolver.floorTarget(info)
-                if (eta == null || eta <= 0) return listOfNotNull(power?.let { "$word ≈ $it" }, word)
+                val head = power?.let { "$word$approx $it" }
                 listOfNotNull(
-                    power?.let { "$word $it$SEP$target за ${exact(eta)}" },
-                    "$word$SEP$target за ${exact(eta)}",
-                    "До $target$SEP${exact(eta)}",
-                    "$word$SEP$target за ≈ ${roughly(eta)}",
-                    "До $target$SEP≈ ${roughly(eta)}",
-                )
+                    if (head != null && eta != null) "$head$SEP$target за ${exact(eta)}" else null,
+                    if (head != null && eta != null) "$head$SEP${exact(eta)}" else null,
+                    if (head != null && eta != null) "$head$SEP≈ ${roughly(eta)}" else null,
+                    head,
+                    power?.let { "$word $it" },
+                    if (head == null && eta != null) "$word$SEP$target за ${exact(eta)}" else null,
+                    if (head == null && eta != null) "До $target$SEP≈ ${roughly(eta)}" else null,
+                    if (head == null) word else null,
+                ).distinct()
             }
             SummaryMode.IDLE, SummaryMode.UNKNOWN -> {
                 val state = if (summary.mode == SummaryMode.IDLE) "Очікування" else "Стан невідомий"
                 val full = summary.mode == SummaryMode.IDLE && (snapshot.socPercent ?: 0) >= 99
                 val runtime = info?.runtimeSeconds
                 when {
-                    full -> listOf("$state${SEP}Заряджено", "Заряджено")
-                    runtime != null -> listOf("$state${SEP}запас ≈ ${exact(runtime)}", "$state$SEP≈ ${roughly(runtime)}", "Запас ≈ ${roughly(runtime)}")
+                    full -> listOf("$state${SEP}Заряджено", state)
+                    runtime != null -> listOf("$state${SEP}запас ≈ ${exact(runtime)}", "$state$SEP≈ ${roughly(runtime)}", state)
                     else -> listOf(state)
                 }
             }
         }
     }
 
-    /** What the schedule row of a 2×2 shows: a today bar with a short caption, or a single short text line. */
-    data class ScheduleRow(val showBar: Boolean, val caption: String?)
+    /** What the schedule row of a 2×2 shows: a today bar with a short caption, or one text line (longest-first [captions]). */
+    data class ScheduleRow(val showBar: Boolean, val captions: List<String>) {
+        val caption: String? get() = captions.firstOrNull()
+    }
 
     /**
-     * Today's schedule row: not published → one short line «Графік: немає» (no bar), otherwise the bar plus a short
-     * caption — «до 21:00» while the light is off, «відкл. 14:00» before today's next window, «без відкл.» otherwise.
+     * Today's schedule row. Text only: not published «Графік не опубліковано» → «Графіка нема»; while the light is off
+     * and the schedule names the end, «Світло за графіком о 21:00». Otherwise the bar plus a short caption — «відкл. до 21:00»
+     * during a window with the light on, «відкл. 14:00» before today's next window, «без відкл.» otherwise.
      * Null when no schedule is configured (the row is dropped).
      */
     fun scheduleRow(info: PowerOutageInfo?, today: DaySchedule?, now: ZonedDateTime = ZonedDateTime.now(kyiv)): ScheduleRow? {
         info ?: return null
         if (!info.scheduleEnabled) return null
-        if (info.scheduleUnavailable) return ScheduleRow(false, "Графік: недоступний")
-        if (info.emergency) return ScheduleRow(false, "Графік: аварійні")
-        if (today == null || !today.published) return ScheduleRow(false, "Графік: немає")
+        if (info.scheduleUnavailable) return ScheduleRow(false, listOf("Графік недоступний", "Графіка нема"))
+        if (info.emergency) return ScheduleRow(false, listOf("Аварійні відключення", "Аварійні"))
         fun at(value: String?) = value?.let { runCatching { OffsetDateTime.parse(it).atZoneSameInstant(kyiv) }.getOrNull() }
         val end = at(info.currentEnd)
+        if (end != null && info.gridState == GridState.OFF) {
+            val hhmm = end.format(clock)
+            return ScheduleRow(false, listOf("Світло за графіком о $hhmm", "За графіком о $hhmm", "Світло о $hhmm"))
+        }
+        if (today == null || !today.published) return ScheduleRow(false, listOf("Графік не опубліковано", "Графіка нема"))
         val next = at(info.nextStart)
         val todayDate = now.withZoneSameInstant(kyiv).toLocalDate()
         val caption = when {
-            end != null && info.gridState == GridState.OFF -> "до ${end.format(clock)}"
             end != null -> "відкл. до ${end.format(clock)}"
             next != null && next.toLocalDate() == todayDate -> "відкл. ${next.format(clock)}"
             today.definite.isEmpty() -> "без відкл."
             else -> null
         }
-        return ScheduleRow(true, caption)
+        return ScheduleRow(true, listOfNotNull(caption))
     }
 }
 

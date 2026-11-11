@@ -83,7 +83,7 @@ def _signed_ac_battery_power(ongrid_w, offgrid_w):
     """
     ongrid, offgrid = _optional_float(ongrid_w), _optional_float(offgrid_w)
     ongrid = ongrid if ongrid is not None and abs(ongrid) >= MEASURED_MIN_W else 0.0
-    offgrid = abs(offgrid) if offgrid is not None and abs(offgrid) >= MEASURED_MIN_W else 0.0
+    offgrid = offgrid if offgrid is not None and offgrid >= MEASURED_MIN_W else 0.0  # negative = noise, not load
     if not ongrid and not offgrid:
         return None
     return -ongrid - offgrid

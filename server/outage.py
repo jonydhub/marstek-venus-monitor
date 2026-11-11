@@ -76,11 +76,14 @@ def building_matches(building_names, building) -> bool:
 
 
 def detect_grid_state(offgrid_power_w, ongrid_power_w, device_ok: bool, threshold_w=BACKUP_DRAW_THRESHOLD_W) -> str:
-    """Loads on the backup output draw power only while the grid is absent (UPS-style backup)."""
+    """Loads on the backup output draw power only while the grid is absent (UPS-style backup).
+
+    Signed: a real outage reports a POSITIVE offgrid_power (backup load, e.g. +1330 W); small negative
+    readings (uint16-folded -14 W with grid present) are noise, never a load, so they mean grid on."""
     if not device_ok or offgrid_power_w is None:
         return "unknown"
     try:
-        offgrid = abs(float(offgrid_power_w))
+        offgrid = float(offgrid_power_w)
     except (TypeError, ValueError):
         return "unknown"
     if not math.isfinite(offgrid):
@@ -245,8 +248,8 @@ def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, meas
     load, basis = None, None
     measured = _finite_or_none(flow.get("power_w"))
     backup = _finite_or_none(backup_output_w)
-    if grid_state == "off" and backup is not None and abs(backup) >= float(backup_threshold_w):
-        load, basis = abs(backup), "measured_backup_output"
+    if grid_state == "off" and backup is not None and backup >= float(backup_threshold_w):
+        load, basis = backup, "measured_backup_output"
     elif grid_state == "off" and flow.get("direction") == "discharging" and measured is not None:
         load, basis = abs(measured), "measured_discharge"
     elif expected_load_w is not None and float(expected_load_w) > 0:

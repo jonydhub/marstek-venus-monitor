@@ -292,7 +292,8 @@ class MainActivity : Activity() {
                 setPadding(dp(11), dp(9), dp(11), dp(9))
                 background = rounded(SURFACE_RAISED, dp(14), STROKE)
             }
-            val value = label("—", 16f, TEXT, true).apply { maxLines = 1 }
+            // «10 год 3 хв» may take two lines (number and unit joined by no-break spaces), never «10 год …».
+            val value = label("—", 16f, TEXT, true).apply { maxLines = 2 }
             metricValues[key] = value
             box.addView(value)
             box.addView(label(caption, 10f, if (key == "todayOutage") CORAL else MUTED, false).apply { maxLines = 1 })
@@ -571,10 +572,11 @@ class MainActivity : Activity() {
                     else -> "Вистачить на ${EtaTextFormatter.formatSeconds(runtime)}"
                 }
                 etaColor = if (covers == false) CORAL else POWER_ON
-                val backup = snapshot?.insights?.backupOutputWatts ?: snapshot?.offgridPowerWatts
+                // Only a positive backup-output reading is the house load (negative = noise).
+                val backup = WidgetSummaryResolver.backupLoadWatts(snapshot)
                 sub = listOfNotNull(
-                    backup?.let { "${kotlin.math.abs(it).roundToInt()} Вт" },
-                    info?.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now)?.replace("до ", "світло о ") } ?: "час повернення невідомий",
+                    backup?.let { "Споживання ${it.roundToInt()} Вт" },
+                    info?.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now)?.replace("до ", "світло за графіком о ") } ?: "час повернення невідомий",
                 ).joinToString(" · ")
             }
             summary?.etaText != null -> {

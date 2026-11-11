@@ -91,8 +91,8 @@ def initial_state_event(obs: Observation, now):
     """The state at the first answered poll after start: light (backup output only), battery direction, SOC."""
     grid = {"on": "світло є", "off": "світла нема"}.get(obs.grid_state, "стан світла невідомий")
     backup = _num(obs.backup_w)
-    if obs.grid_state == "off" and backup is not None:
-        grid += f" (резервний вихід {round(abs(backup))} Вт)"
+    if obs.grid_state == "off" and backup is not None and backup > 0:
+        grid += f" (резервний вихід {round(backup)} Вт)"
     direction = {"charging": "заряджається", "discharging": "розряджається", "idle": "очікування"}.get(obs.direction)
     parts = [grid, direction, f"заряд {obs.soc}%" if obs.soc is not None else None]
     return _event(now, "initial_state", "Стан на старті: " + " · ".join(p for p in parts if p),
@@ -135,7 +135,7 @@ def step(state: DetectorState | None, obs: Observation, now: float,
     # --- light: backup-output power only; unknown keeps the last known state ---
     if grid is not None and s.grid is not None and grid != s.grid:
         if grid == "off":
-            watts = f"резервний вихід {round(abs(backup))} Вт" if backup is not None else "живлення від батареї"
+            watts = f"резервний вихід {round(backup)} Вт" if backup is not None and backup > 0 else "живлення від батареї"
             events.append(_event(now, "light_lost", f"Світло зникло: {watts}{soc_text}", backup))
             s = replace(s, outage_started_at=now)
         else:
@@ -184,7 +184,7 @@ def step(state: DetectorState | None, obs: Observation, now: float,
     # --- anomalies: from measured power only (backup output during an outage, ongrid/offgrid otherwise) ---
     threshold = clamp_threshold(discharge_threshold_w)
     measured_discharge = battery is not None and obs.battery_measured and direction == "discharging"
-    discharge = max(abs(backup) if backup is not None and s.grid == "off" else 0.0,
+    discharge = max(backup if backup is not None and backup > 0 and s.grid == "off" else 0.0,
                     abs(battery) if measured_discharge else 0.0)
     if discharge > threshold:
         if not s.high_discharge_sent:
@@ -196,7 +196,7 @@ def step(state: DetectorState | None, obs: Observation, now: float,
         s = replace(s, high_discharge_sent=False)
 
     on_grid = (grid == "on" and measured_discharge and abs(battery) > DISCHARGE_ON_GRID_W
-               and (backup is None or abs(backup) < 5.0))
+               and (backup is None or backup < 5.0))
     if on_grid:
         since = s.on_grid_since if s.on_grid_since is not None else now
         s = replace(s, on_grid_count=s.on_grid_count + 1, on_grid_since=since)

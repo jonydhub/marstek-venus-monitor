@@ -119,7 +119,7 @@ def _intervals(rows, start_ts, key="offgrid_w"):
 def _integral(intervals):
     energy_ws = covered = 0.0
     for t0, t1, v0, v1 in intervals:
-        energy_ws += (abs(v0) + abs(v1)) / 2.0 * (t1 - t0)
+        energy_ws += (max(0.0, v0) + max(0.0, v1)) / 2.0 * (t1 - t0)  # only positive = backup load
         covered += t1 - t0
     return energy_ws, covered
 
@@ -131,7 +131,7 @@ def measured_backup_load(rows, *, now):
     excluded instead of diluting the average. None until 30 min of draw has been observed.
     """
     draw = [iv for iv in _intervals(rows, now - WINDOW_SECONDS)
-            if abs(iv[2]) >= BACKUP_DRAW_THRESHOLD_W and abs(iv[3]) >= BACKUP_DRAW_THRESHOLD_W]
+            if iv[2] >= BACKUP_DRAW_THRESHOLD_W and iv[3] >= BACKUP_DRAW_THRESHOLD_W]
     energy_ws, covered = _integral(draw)
     if covered < MIN_DRAW_COVERAGE_SECONDS:
         return None
@@ -172,7 +172,7 @@ def _state_intervals(rows, start_ts, now):
 
 def _is_outage(row, threshold_w):
     value = _finite(row.get("offgrid_w"))
-    return value is not None and abs(value) >= threshold_w
+    return value is not None and value >= threshold_w  # signed: negative offgrid is noise, not a load
 
 
 def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):

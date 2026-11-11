@@ -62,7 +62,7 @@ class PowerOutageTest {
              "current_outage":{"kind":"schedule","start":"2026-10-17T20:00:00+03:00","end":"2026-10-17T22:00:00+03:00","duration_seconds":7200,"remaining_seconds":5400},
              "schedule_published":true,"autonomy":{}}
         """.trimIndent())
-        assertEquals("Повернення о 22:00", PowerOutageFormatter.detail(current, now))
+        assertEquals("Світло за графіком о 22:00", PowerOutageFormatter.detail(current, now))
     }
 
     @Test
@@ -83,9 +83,9 @@ class PowerOutageTest {
 
     @Test
     fun reserveVerdictOnlyWhenRuntimeKnown() {
-        assertEquals("Запас ≈ 4 год 0 хв · вистачить", PowerOutageFormatter.reserve(outage(scheduled)))
+        assertEquals("Запас ≈ 4 год · вистачить", PowerOutageFormatter.reserve(outage(scheduled)))
         val short = outage(scheduled.replace("\"covers_next_outage\":true", "\"covers_next_outage\":false"))
-        assertEquals("Запас ≈ 4 год 0 хв · не вистачить", PowerOutageFormatter.reserve(short))
+        assertEquals("Запас ≈ 4 год · не вистачить", PowerOutageFormatter.reserve(short))
         val unknown = outage("""{"available":true,"group":"1.1","grid_state":"on","schedule_published":false,"autonomy":{"runtime_seconds":null}}""")
         assertNull(PowerOutageFormatter.reserve(unknown))
     }

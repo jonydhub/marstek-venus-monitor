@@ -73,7 +73,7 @@ object AutonomyCalculator {
         val measured = flow?.powerW
         val backup = backupOutputW?.takeIf(Double::isFinite)
         val (load, basis) = when {
-            gridState == "off" && backup != null && abs(backup) >= backupThresholdW -> abs(backup) to "measured_backup_output"
+            gridState == "off" && backup != null && backup >= backupThresholdW -> backup to "measured_backup_output"
             gridState == "off" && flow?.direction == "discharging" && measured != null -> abs(measured) to "measured_discharge"
             expectedLoadW != null && expectedLoadW > 0 -> expectedLoadW to "configured_average"
             measuredLoadW != null && measuredLoadW > 0 -> measuredLoadW to "measured_average_24h"

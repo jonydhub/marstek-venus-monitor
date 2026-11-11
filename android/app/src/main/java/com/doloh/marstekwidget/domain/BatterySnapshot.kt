@@ -180,7 +180,8 @@ object EtaTextFormatter {
 
         return when {
             days > 0L -> "$days д ${remainingHours} год"
-            totalMinutes >= 60L -> "${totalMinutes / 60L} год ${remainingMinutes} хв"
+            // «1 год», «2 год 5 хв» — never «1 год 0 хв».
+            totalMinutes >= 60L -> if (remainingMinutes == 0L) "${totalMinutes / 60L} год" else "${totalMinutes / 60L} год ${remainingMinutes} хв"
             else -> "$totalMinutes хв"
         }
     }

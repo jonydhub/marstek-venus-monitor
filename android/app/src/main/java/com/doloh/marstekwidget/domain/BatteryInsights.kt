@@ -14,23 +14,57 @@ data class TimeSpan(val startMillis: Long, val endMillis: Long)
 data class ChartEvent(val epochMillis: Long, val kind: String)
 
 object TodayFormatter {
-    /** «1г 4хв», «57хв». */
+    private const val NBSP = '\u00A0'
+
+    /** «1 год», «2 год 5 хв», «57 хв», «0 хв» — full unit words (never «1г 0хв»), value and unit never split. */
     fun short(seconds: Long?): String {
         seconds ?: return "—"
-        val minutes = (seconds + 30) / 60
+        val minutes = ((seconds + 30) / 60).coerceAtLeast(0)
         val hours = minutes / 60
-        return if (hours > 0) "${hours}г ${minutes % 60}хв" else "${minutes}хв"
+        val rest = minutes % 60
+        return when {
+            hours == 0L -> "$minutes${NBSP}хв"
+            rest == 0L -> "$hours${NBSP}год"
+            else -> "$hours${NBSP}год $rest${NBSP}хв"
+        }
     }
 
-    /** Compact one-liner for tight widgets: «З 1г 4хв · Р 9г 57хв · Без світла 10г 3хв» (zero parts dropped). */
-    fun compact(today: TodayDurations?): String? {
-        today ?: return null
-        val parts = listOfNotNull(
-            today.chargeSeconds.takeIf { it >= 60 }?.let { "З ${short(it)}" },
-            today.dischargeSeconds.takeIf { it >= 60 }?.let { "Р ${short(it)}" },
-            today.outageSeconds.takeIf { it >= 60 }?.let { "Без світла ${short(it)}" },
+    /** Whole hours once ≥ 1 h («2 год»), else minutes — for the shortest candidates. */
+    fun rounded(seconds: Long): String {
+        val minutes = (seconds + 30) / 60
+        return if (minutes >= 60) "${Math.round(minutes / 60.0)}${NBSP}год" else "$minutes${NBSP}хв"
+    }
+
+    /** One line for 4×2 / 4×4: «Заряд 1 год · Розряд 2 год · Без світла 1 хв» (zero parts dropped, full words). */
+    fun compact(today: TodayDurations?): String? = candidates(today).firstOrNull()?.removePrefix(LABEL)
+
+    private const val LABEL = "Сьогодні: "
+
+    /**
+     * Labelled «Сьогодні: Заряд 1 год · Розряд 2 год 5 хв · Без світла 1 хв», longest first: exact, rounded hours,
+     * then only the no-light total. Never single-letter abbreviations.
+     */
+    fun candidates(today: TodayDurations?): List<String> {
+        today ?: return emptyList()
+        fun parts(fmt: (Long) -> String) = listOfNotNull(
+            today.chargeSeconds.takeIf { it >= 60 }?.let { "Заряд ${fmt(it)}" },
+            today.dischargeSeconds.takeIf { it >= 60 }?.let { "Розряд ${fmt(it)}" },
+            today.outageSeconds.takeIf { it >= 60 }?.let { "Без світла ${fmt(it)}" },
         )
-        return if (parts.isEmpty()) "Сьогодні без заряду, розряду і відключень" else parts.joinToString(" · ")
+        val exact = parts(::short)
+        if (exact.isEmpty()) return listOf("Сьогодні без заряду, розряду і відключень", "Сьогодні без змін")
+        return listOf(
+            LABEL + exact.joinToString(" · "),
+            LABEL + parts(::rounded).joinToString(" · "),
+        ).plus(outageCandidates(today)).distinct()
+    }
+
+    /** 2×2: only the no-light total — «Сьогодні без світла 1 хв» / «Сьогодні без відключень». */
+    fun outageCandidates(today: TodayDurations?): List<String> {
+        today ?: return emptyList()
+        val o = today.outageSeconds
+        if (o < 60) return listOf("Сьогодні без відключень", "Без відключень")
+        return listOf("Сьогодні без світла ${short(o)}", "Сьогодні без світла ${rounded(o)}", "Без світла ${rounded(o)}").distinct()
     }
 }
 

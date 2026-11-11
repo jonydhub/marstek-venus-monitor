@@ -149,7 +149,7 @@ object JournalDetector {
         val grid = obs.gridState.takeIf { it != GridState.UNKNOWN }
         if (grid != null && m.grid != null && grid != m.grid) {
             if (grid == GridState.OFF) {
-                val watts = backup?.let { "резервний вихід ${abs(it).roundToInt()} Вт" } ?: "живлення від батареї"
+                val watts = backup?.takeIf { it > 0 }?.let { "резервний вихід ${it.roundToInt()} Вт" } ?: "живлення від батареї"
                 add("light_lost", JournalCategory.LIGHT, "Світло зникло: $watts$socText", backup)
                 m = m.copy(outageStartedAtMillis = nowMillis)
             } else {
@@ -200,7 +200,7 @@ object JournalDetector {
         val threshold = clampThreshold(dischargeThresholdW).toDouble()
         val measuredDischarge = battery != null && obs.batteryMeasured && direction == BatteryDirection.DISCHARGING
         val discharge = maxOf(
-            if (backup != null && m.grid == GridState.OFF) abs(backup) else 0.0,
+            if (backup != null && backup > 0 && m.grid == GridState.OFF) backup else 0.0,
             if (measuredDischarge) abs(battery!!) else 0.0,
         )
         if (discharge > threshold) {
@@ -213,7 +213,7 @@ object JournalDetector {
             m = m.copy(highDischargeSent = false)
         }
         val onGrid = grid == GridState.ON && measuredDischarge && abs(battery!!) > DISCHARGE_ON_GRID_W &&
-            (backup == null || abs(backup) < 5.0)
+            (backup == null || backup < 5.0)
         if (onGrid) {
             val since = m.onGridSinceMillis ?: nowMillis
             m = m.copy(onGridCount = m.onGridCount + 1, onGridSinceMillis = since)

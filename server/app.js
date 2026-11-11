@@ -97,7 +97,7 @@ function formatDuration(seconds) {
   const total = Math.max(1, Math.ceil(Number(seconds) / 60));
   const days = Math.floor(total / 1440), hours = Math.floor((total % 1440) / 60), minutes = total % 60;
   if (days) return `${days} д ${hours} год`;
-  if (hours) return `${hours} год ${minutes} хв`;
+  if (hours) return minutes ? `${hours} год ${minutes} хв` : `${hours} год`;
   return `${minutes} хв`;
 }
 function renderBatteryFlow(flow = {}) {
@@ -172,8 +172,11 @@ function autonomyBasisText(a) {
 function shortDuration(seconds) {
   const s = finiteOrNull(seconds);
   if (s === null) return '—';
+  // «1 год», «2 год 5 хв», «1 хв», «0 хв» — full unit words, never «1г 0хв».
   const total = Math.round(s / 60), h = Math.floor(total / 60), m = total % 60;
-  return h ? `${h}г ${m}хв` : `${m}хв`;
+  // No-break space keeps «11 год» / «35 хв» whole; a long value wraps between them instead of «11 год …».
+  if (!h) return `${m}\u00A0хв`;
+  return m ? `${h}\u00A0год ${m}\u00A0хв` : `${h}\u00A0год`;
 }
 const SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(name, attrs = {}, text) {
@@ -268,7 +271,7 @@ function scheduleDetail(outage = {}, gridState = outage.grid_state) {
   if (outage.emergency) return 'Діють аварійні відключення — графік не застосовується';
   const cur = outage.current_outage, next = outage.next_outage, maybe = (outage.maybe_outages || [])[0];
   if (cur?.end) {
-    if (gridState === 'off') return `Повернення о ${formatClock(cur.end)}`;
+    if (gridState === 'off') return `Світло за графіком о ${formatClock(cur.end)}`;
     if (gridState === 'on') return `За графіком відключення до ${formatClock(cur.end)} · світло є`;
     return `За графіком відключення до ${formatClock(cur.end)}`;
   }
@@ -409,8 +412,10 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     if (runtime === null) set('hero-forecast', 'Запас: збираю виміри навантаження…');
     else if (covers === false) { set('hero-forecast', `Вистачить лише на ${formatDuration(runtime)}`); forecast.classList.add('bad'); }
     else { set('hero-forecast', `Вистачить на ${formatDuration(runtime)}`); forecast.classList.add('good'); }
-    const parts = [finiteOrNull(insights.backup_output_w) !== null ? `${Math.round(Math.abs(insights.backup_output_w))} Вт` : null,
-      current?.end ? `Повернення о ${formatClock(current.end)}${current.kind === 'schedule' ? ' (за графіком)' : ''}` : 'час повернення невідомий'];
+    // Only a positive backup-output reading is the house load (negative = sensor noise).
+    const backupW = finiteOrNull(insights.backup_output_w);
+    const parts = [backupW !== null && backupW > 0 ? `Споживання ${Math.round(backupW)} Вт` : null,
+      current?.end ? (current.kind === 'schedule' ? `Світло за графіком о ${formatClock(current.end)}` : `Повернення о ${formatClock(current.end)}`) : 'час повернення невідомий'];
     set('hero-sub', parts.filter(Boolean).join(' · '));
     set('hero-note', `Час — енергія ${floorText} ${autonomyBasisText(a)}.${err}`);
   } else {

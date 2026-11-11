@@ -84,7 +84,7 @@ class AlertEvaluatorTest {
         assertEquals("Світло зникло", alert.title)
         assertTrue(alert.text, alert.text.contains("Резервний вихід 430 W"))
         assertTrue(alert.text, alert.text.contains("заряд 64%"))
-        assertTrue(alert.text, alert.text.contains("до 0% ≈ 4 год 10 хв"))
+        assertTrue(alert.text, alert.text.contains("вистачить на 4 год 10 хв (оцінка)"))
         assertTrue(alert.text, alert.text.contains("повернення о 22:00"))
         val still = eval(lost.memory, snap(now = at(15), grid = "off", soc = 62), at(15))
         assertFalse(AlertId.LIGHT_LOST in still.ids())
@@ -124,7 +124,7 @@ class AlertEvaluatorTest {
         val first = eval(on, snap(grid = "off", runtime = 7200, covers = false, currentEnd = at(180)))
         val alert = first.one(AlertId.RESERVE_SHORT_CURRENT)
         assertEquals(AlertSeverity.CRITICAL, alert.severity)
-        assertTrue(alert.text, alert.text.contains("Запас ≈ 2 год 0 хв"))
+        assertTrue(alert.text, alert.text.contains("Запас ≈ 2 год"))
         assertTrue(alert.text, alert.text.contains("о 22:00"))
         assertTrue(AlertId.LIGHT_LOST in first.ids())
         val again = eval(first.memory, snap(grid = "off", runtime = 7000, covers = false))
@@ -153,7 +153,7 @@ class AlertEvaluatorTest {
         val alert = soon.one(AlertId.OUTAGE_SOON)
         assertEquals("Відключення о 19:45 (черга 1.1)", alert.title)
         assertTrue(alert.text, alert.text.contains("заряд 84%"))
-        assertTrue(alert.text, alert.text.contains("запас ≈ 8 год 0 хв — вистачить"))
+        assertTrue(alert.text, alert.text.contains("запас ≈ 8 год — вистачить"))
         assertEquals(AlertSeverity.INFO, alert.severity)
         val dup = eval(soon.memory, snap(now = at(15), soc = 84, nextStart = start, runtime = 28800, covers = true), at(15))
         assertFalse(AlertId.OUTAGE_SOON in dup.ids())
@@ -271,7 +271,7 @@ class AlertEvaluatorTest {
         assertFalse("250 W is below max(200, 2×150)", AlertId.HIGH_LOAD in off.ids())
         val high = eval(off.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 350.0, avg24h = 150.0))
         val alert = high.one(AlertId.HIGH_LOAD)
-        assertEquals("Споживання 350 W — запасу вистачить лише на 4 год 0 хв", alert.text.substringBefore(" ("))
+        assertEquals("Споживання 350 W — запасу вистачить лише на 4 год", alert.text.substringBefore(" ("))
         assertTrue(alert.text, alert.text.contains("поріг 300 W"))
         assertFalse(AlertId.HIGH_LOAD in eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 260.0, avg24h = 150.0)).ids())
         val calm = eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 200.0, avg24h = 150.0)).memory
@@ -279,6 +279,33 @@ class AlertEvaluatorTest {
         val custom = AlertSettings(highLoadThresholdWatts = 500)
         assertFalse(AlertId.HIGH_LOAD in eval(off.memory, snap(grid = "off", offgrid = 450.0, avg24h = 150.0), settings = custom).ids())
         assertFalse("grid on: Venus bypasses, no alert", AlertId.HIGH_LOAD in eval(null, snap(offgrid = 900.0)).ids())
+    }
+
+    /** Real outage: 98 %, 5030 Wh stored, backup 1330 W, floor 11 % of 5120 Wh → 3 год 22 хв (not 3 год 47 хв to 0 %). */
+    private fun outage1330(autonomy: String) = BatterySnapshot(
+        socPercent = 98, batteryCapacityWh = 5030.0, ratedCapacityWh = 5120.0, temperatureCelsius = 24.0,
+        batteryPowerWatts = -1330.0, direction = BatteryDirection.DISCHARGING, etaSeconds = 13_615,
+        collectedAt = base.toInstant().toString(), offgridPowerWatts = 1330.0,
+        powerOutageJson = """{"available":true,"group":"1.1","grid_state":"off","current_outage":null,"next_outage":null,
+            "schedule_published":true,"autonomy":{$autonomy}}""", insightsJson = null,
+    )
+
+    @Test
+    fun highLoadRuntimeMatchesTheHeroAboveTheDischargeFloor() {
+        val on = eval(null, snap()).memory
+        val server = outage1330(""""load_w":1330.0,"load_basis":"measured_backup_output","runtime_seconds":12091,
+            "usable_wh":4467,"stored_wh":5030,"floor_pct":11""")
+        val alert = eval(on, server).one(AlertId.HIGH_LOAD)
+        assertEquals(12_091L, AlertEvaluator.unifiedRuntime(server))
+        assertTrue(alert.text, alert.text.contains("запасу вистачить лише на 3 год 22 хв"))
+        assertFalse("measured load: no «оцінка»", alert.text.contains("оцінка"))
+        // Direct mode without a server runtime: the same floor rule from stored − rated × floor %.
+        val local = outage1330(""""stored_wh":5030,"floor_pct":11""")
+        assertEquals(12_091L, AlertEvaluator.runtimeAtLoad(local, 1330.0))
+        assertTrue(eval(on, local).one(AlertId.HIGH_LOAD).text.contains("3 год 22 хв"))
+        // Light lost with a measured load: runtime above the floor, no estimate mark.
+        val lost = eval(on, server).one(AlertId.LIGHT_LOST)
+        assertTrue(lost.text, lost.text.contains("вистачить на 3 год 22 хв") && !lost.text.contains("оцінка"))
     }
 
     // ---- SOC ----

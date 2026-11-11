@@ -181,8 +181,14 @@ object WidgetRenderer {
 
         // Primary state line.
         // 4×4 has its own light block («Світло є · черга 1.1»), so its headline names only the battery state.
-        val primary = summary?.let { if (shape.isBlock && snapshot?.powerOutage != null && !linkLost && !snapshot.batteryLinkLost) it.batteryState else it.primary }
-            ?: noDataText(context, input.state)
+        val primary = summary?.let {
+            when {
+                shape.isBlock && snapshot?.powerOutage != null && !linkLost && !snapshot.batteryLinkLost -> it.batteryState
+                // 4×2: the power row «Споживання 1330 Вт · вистачить на …» follows, so the headline names only the light.
+                it.mode == SummaryMode.OUTAGE && (shape == WidgetShape.WIDE || shape == WidgetShape.TALL) -> it.primary.substringBefore(SEP)
+                else -> it.primary
+            }
+        } ?: noDataText(context, input.state)
         views.setTextViewText(R.id.widget_primary, primary)
         views.setTextColor(R.id.widget_primary, summary?.let { modeColor(it.mode) } ?: noDataColor(context, input.state))
 
@@ -211,7 +217,7 @@ object WidgetRenderer {
                 renderFlows(views, context, snapshot, options)
             }
         }
-        if (shape.showsToday) renderToday(views, shape, snapshot)
+        if (shape.showsToday) renderToday(views, context, snapshot, size.first, if (shape == WidgetShape.XLARGE) 15f else 11f)
         if (shape.showsScheduleBar) renderSchedule(views, context, shape, snapshot, input, size.first)
         if (shape.isBlock) renderChart(views, context, shape, snapshot, input, size)
         bindActions(context, views, widgetId, shape)
@@ -245,9 +251,11 @@ object WidgetRenderer {
         if (showTrailing && summary != null) setTrailing(views, summary, input.options)
     }
 
-    private fun renderToday(views: RemoteViews, shape: WidgetShape, snapshot: BatterySnapshot?) {
+    /** «Сьогодні: Заряд 1 год · Розряд 2 год · Без світла 1 хв» — the longest labelled form that fits one line. */
+    private fun renderToday(views: RemoteViews, context: Context, snapshot: BatterySnapshot?, widthDp: Float, textSp: Float) {
         val today = snapshot?.insights?.today
-        val text = TodayFormatter.compact(today)?.let { "Сьогодні: $it" }
+        val measure = measurer(context)
+        val text = TextFit.pick(TodayFormatter.candidates(today), widthDp - 34f) { measure(it, textSp, false) }
         views.setViewVisibility(R.id.widget_today, visibility(text != null))
         text?.let { views.setTextViewText(R.id.widget_today, it) }
     }
@@ -370,7 +378,7 @@ object WidgetRenderer {
         views.setViewVisibility(R.id.widget_updated, visibility(updated.isNotEmpty()))
         if (!header.refreshButton) views.setContentDescription(R.id.widget_updated, context.getString(R.string.widget_refresh_description))
 
-        // Row 1: battery alert, else state + runtime/ETA (temperature joins it only when the header had no room).
+        // Row 1: battery alert, else current power + runtime/ETA («1330 Вт · вистачить 3 год 22 хв») (temperature joins it only when the header had no room).
         val alert = warning?.takeIf { it != BatteryWarning.HIGH_POWER }
         var stateCandidates = when {
             alert != null -> listOf(warningText(context, alert))
@@ -387,22 +395,22 @@ object WidgetRenderer {
         val stateTone = summary?.let { compactStateTone(it, snapshot) }
         views.setTextColor(R.id.widget_secondary, alert?.let { warningColor(context, it) } ?: toneColor(stateTone ?: SummaryTone.NEUTRAL, Color.rgb(201, 213, 220)))
 
-        // Row 2: today «З 31 хв · Р 36 хв · Без світла 0».
+        // Row 2: today's no-light total «Сьогодні без світла 1 хв».
         val todayText = if (plan.showToday) TextFit.pick(todayCandidates, textWidthDp) { measure(it, plan.todaySp, false) } else null
         views.setTextViewTextSize(R.id.widget_today, sp, plan.todaySp)
         views.setViewVisibility(R.id.widget_today, visibility(todayText != null))
         todayText?.let {
             views.setTextViewText(R.id.widget_today, it)
-            views.setContentDescription(R.id.widget_today, "Сьогодні: $it")
+            views.setContentDescription(R.id.widget_today, it)
         }
 
-        // Row 3: today's schedule bar + short caption, or one short full-width line («Графік: немає»).
+        // Row 3: today's schedule bar + short caption, or one full-width line («Графік не опубліковано», «Світло за графіком о 21:00»).
         val row = scheduleRow?.takeIf { plan.showSchedule }
         val today = days?.get(0)
         val barRow = row?.takeIf { it.showBar && today != null }
         views.setViewVisibility(R.id.widget_schedule_group, visibility(barRow != null))
         views.setViewVisibility(R.id.widget_schedule_note, visibility(row != null && barRow == null && row.caption != null))
-        if (row != null && barRow == null) row.caption?.let {
+        if (row != null && barRow == null) TextFit.pick(row.captions, textWidthDp) { measure(it, plan.captionSp, false) }?.let {
             views.setTextViewTextSize(R.id.widget_schedule_note, sp, plan.captionSp)
             views.setTextViewText(R.id.widget_schedule_note, it)
         }
@@ -499,7 +507,9 @@ object WidgetRenderer {
     /** «Температура 27,0 °C · вихід 0 W» — the backup output joins the temperature row outside an outage. */
     private fun withBackup(line: SummaryLine, summary: WidgetSummary, input: WidgetRenderInput): SummaryLine {
         if (summary.mode == SummaryMode.OUTAGE || !input.options.showBackupPower) return line
-        val backup = input.snapshot?.insights?.backupOutputWatts ?: input.snapshot?.offgridPowerWatts ?: return line
+        input.snapshot?.let { it.insights?.backupOutputWatts ?: it.offgridPowerWatts } ?: return line
+        // Grid present: the backup output idles at ~0 W; a negative reading is noise, not a load.
+        val backup = WidgetSummaryResolver.backupLoadWatts(input.snapshot) ?: 0.0
         return line.copy(text = line.text + SEP + "вихід " + WidgetSummaryResolver.formatWatts(backup))
     }
 

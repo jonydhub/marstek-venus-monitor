@@ -109,6 +109,8 @@ object AlertEvaluator {
     private val clock = DateTimeFormatter.ofPattern("HH:mm")
     private const val SEP = " · "
 
+    private const val MEASURED_BACKUP = "measured_backup_output"
+
     fun top(active: List<Alert>): Alert? = active.maxByOrNull { it.severity.ordinal }
 
     /** Delay for a one-time check exactly [OUTAGE_SOON_MINUTES] before a start that is 60–75 min away; else null. */
@@ -166,7 +168,7 @@ object AlertEvaluator {
             events += Alert(AlertId.LIGHT_LOST, AlertSeverity.WARN, "Світло зникло", listOfNotNull(
                 backupW?.let { "Резервний вихід ${watts(it)}" },
                 soc?.let { "заряд $it%" },
-                runtime?.let { "до 0% ≈ ${duration(it)} (оцінка)" },
+                runtime?.let { "вистачить на ${duration(it)}" + if (info?.loadBasis == MEASURED_BACKUP) "" else " (оцінка)" },
                 info?.currentEnd?.let(::parseZoned)?.let { "повернення о ${stamp(it, now)}" },
             ).joinToString(SEP).ifBlank { "Батарея живить резервний вихід" })
             m = m.copy(outageStartedAtMillis = nowMillis, socAtOutageStart = soc, returnedAtMillis = null, notChargingChecks = 0, notChargingSent = false)
@@ -215,7 +217,7 @@ object AlertEvaluator {
         val nextDuration = info?.nextDurationSeconds ?: if (nextStart != null && nextEnd != null) Duration.between(nextStart, nextEnd).seconds else null
         if (info != null && grid != GridState.OFF && nextStart != null && nextStart.isAfter(now)) {
             val minutes = Duration.between(now, nextStart).toMinutes()
-            val nextRuntime = info.runtimeSeconds ?: runtimeFromLoad(snapshot.batteryCapacityWh, loadWatts(snapshot))
+            val nextRuntime = info.runtimeSeconds ?: runtimeAtLoad(snapshot, loadWatts(snapshot))
             val covers = info.coversOutage ?: if (nextRuntime != null && nextDuration != null) nextRuntime >= nextDuration else null
             if (minutes <= OUTAGE_SOON_MINUTES) {
                 val verdict = when (covers) { true -> " — вистачить"; false -> " — не вистачить"; null -> "" }
@@ -291,15 +293,16 @@ object AlertEvaluator {
         }
 
         // --- high load during an outage (Venus bypasses while the grid is on) ---
-        if (grid == GridState.OFF && backupW != null) {
-            val load = abs(backupW)
+        if (grid == GridState.OFF && backupW != null && backupW > 0) {
+            val load = backupW
             val avg = snapshot.insights?.backupAverageWatts24h
             val limit = max(settings.highLoadThresholdWatts.toDouble(), avg?.let { 2 * it } ?: 0.0)
             if (load > limit) {
-                val left = runtimeFromLoad(snapshot.batteryCapacityWh, load)
+                // Same number as the hero «Вистачить на…»: usable energy above the discharge floor / measured load.
+                val left = info?.runtimeSeconds?.takeIf { info.loadBasis == MEASURED_BACKUP } ?: runtimeAtLoad(snapshot, load)
                 val alert = Alert(AlertId.HIGH_LOAD, AlertSeverity.WARN, "Велике споживання під час відключення",
                     "Споживання ${watts(load)}" + (left?.let { " — запасу вистачить лише на ${duration(it)}" } ?: "") +
-                        " (поріг ${watts(limit)}${avg?.let { ", середнє ${watts(it)}" } ?: ""}; оцінка)")
+                        " (поріг ${watts(limit)}${avg?.let { ", середнє ${watts(it)}" } ?: ""})")
                 active += alert
                 if (!m.highLoadSent) {
                     events += alert
@@ -317,7 +320,7 @@ object AlertEvaluator {
             if (soc >= SOC_LOW_REARM) m = m.copy(socLowSent = false)
             if (soc >= SOC_CRITICAL_REARM) m = m.copy(socCriticalSent = false)
             val stored = snapshot.batteryCapacityWh?.let { kwh(it) }
-            val outageRuntime = runtime?.takeIf { grid == GridState.OFF }?.let { "до 0% ≈ ${duration(it)}" }
+            val outageRuntime = runtime?.takeIf { grid == GridState.OFF }?.let { "вистачить на ${duration(it)}" }
             if (soc < SOC_CRITICAL) {
                 val alert = Alert(AlertId.SOC_CRITICAL, AlertSeverity.CRITICAL, "Критично низький заряд: $soc%",
                     listOfNotNull("Заряд $soc%", stored, outageRuntime).joinToString(SEP))
@@ -405,14 +408,23 @@ object AlertEvaluator {
 
     /** One runtime number during an outage: the server's autonomy runtime if known, else the battery ETA to 0%. */
     fun unifiedRuntime(snapshot: BatterySnapshot): Long? =
-        snapshot.powerOutage?.runtimeSeconds ?: snapshot.etaSeconds?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
+        snapshot.powerOutage?.runtimeSeconds
+            ?: WidgetSummaryResolver.dischargeEtaSeconds(snapshot)?.takeIf { snapshot.direction == BatteryDirection.DISCHARGING }
 
     private fun loadWatts(snapshot: BatterySnapshot): Double? =
         snapshot.powerOutage?.loadWatts?.takeIf { it > 0 } ?: snapshot.insights?.backupAverageWatts24h?.takeIf { it > 0 }
 
-    private fun runtimeFromLoad(capacityWh: Double?, load: Double?): Long? {
-        if (capacityWh == null || load == null || load <= 0.0) return null
-        return (capacityWh / load * 3600.0).toLong()
+    /**
+     * Runtime at [load] W from the energy above the discharge floor (same rule as the server/autonomy runtime and
+     * the main-screen «Вистачить на…»): usable_wh if known, else stored − rated × floor %, else stored (floor 0 %).
+     */
+    fun runtimeAtLoad(snapshot: BatterySnapshot, load: Double?): Long? {
+        if (load == null || !load.isFinite() || load <= 0.0) return null
+        val info = snapshot.powerOutage
+        val stored = info?.storedWh ?: snapshot.batteryCapacityWh ?: return null
+        val floorWh = info?.floorPct?.let { pct -> snapshot.ratedCapacityWh?.let { it * pct / 100.0 } }
+        val usable = info?.usableWh ?: (stored - (floorWh ?: 0.0)).coerceAtLeast(0.0)
+        return Math.round(usable / load * 3600.0)
     }
 
     private fun parseMillis(value: String): Long? = runCatching { OffsetDateTime.parse(value).toInstant().toEpochMilli() }.getOrNull()

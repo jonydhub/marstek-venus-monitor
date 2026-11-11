@@ -57,22 +57,50 @@ class CompactWidgetTextsTest {
     }
 
     @Test
-    fun todayLineKeepsAllThreeNumbersIncludingZero() {
-        val today = TodayDurations(chargeSeconds = 31 * 60L, dischargeSeconds = 36 * 60L, outageSeconds = 0)
-        val c = CompactWidgetTexts.todayCandidates(today)
-        assertEquals("З 31\u00A0хв · Р 36\u00A0хв · Без світла 0", c.first())
-        assertTrue(c.all { it.contains("31") && it.contains("36") && it.endsWith(" 0") })
+    fun todayLineIn2x2IsOnlyTheNoLightTotalInWords() {
+        val c = CompactWidgetTexts.todayCandidates(TodayDurations(chargeSeconds = 3600, dischargeSeconds = 7200, outageSeconds = 60))
+        assertEquals("Сьогодні без світла 1\u00A0хв", c.first())
+        assertEquals(listOf("Сьогодні без відключень", "Без відключень"),
+            CompactWidgetTexts.todayCandidates(TodayDurations(chargeSeconds = 31 * 60L, dischargeSeconds = 36 * 60L, outageSeconds = 0)))
         assertTrue(CompactWidgetTexts.todayCandidates(null).isEmpty())
     }
 
     @Test
-    fun todayLineShortensLabelsNotNumbersAt170dp() {
+    fun noSingleLetterAbbreviationsAnywhere() {
+        val today = TodayDurations(chargeSeconds = 3600, dischargeSeconds = 7500, outageSeconds = 60)
+        val all = CompactWidgetTexts.todayCandidates(today) + TodayFormatter.candidates(today)
+        val cryptic = Regex("(^|\\s)[ЗР] |\\dг|\\dхв|Без св\\.")
+        assertTrue(all.toString(), all.none { cryptic.containsMatchIn(it) })
+    }
+
+    @Test
+    fun wideTodayLineHasLabelAndFullWords() {
+        val today = TodayDurations(chargeSeconds = 3600, dischargeSeconds = 7200, outageSeconds = 60)
+        assertEquals("Сьогодні: Заряд 1\u00A0год · Розряд 2\u00A0год · Без світла 1\u00A0хв", TodayFormatter.candidates(today).first())
+        assertEquals("Заряд 1\u00A0год · Розряд 2\u00A0год · Без світла 1\u00A0хв", TodayFormatter.compact(today))
+        val c = TodayFormatter.candidates(TodayDurations(3840, 7500, 36_180))
+        assertEquals("Сьогодні: Заряд 1\u00A0год 4\u00A0хв · Розряд 2\u00A0год 5\u00A0хв · Без світла 10\u00A0год 3\u00A0хв", c[0])
+        assertEquals("Сьогодні: Заряд 1\u00A0год · Розряд 2\u00A0год · Без світла 10\u00A0год", c[1])
+    }
+
+    @Test
+    fun durationsUseFullUnitWords() {
+        assertEquals("1\u00A0год", TodayFormatter.short(3600))
+        assertEquals("2\u00A0год 5\u00A0хв", TodayFormatter.short(7500))
+        assertEquals("1\u00A0хв", TodayFormatter.short(60))
+        assertEquals("0\u00A0хв", TodayFormatter.short(0))
+        assertEquals("1 год", EtaTextFormatter.formatSeconds(3600))
+        assertEquals("3 год 22 хв", EtaTextFormatter.formatSeconds(12_120))
+        assertEquals("1 хв", EtaTextFormatter.formatSeconds(60))
+    }
+
+    @Test
+    fun todayLineFitsAt170dp() {
         val today = TodayDurations(chargeSeconds = 3840, dischargeSeconds = 35_820, outageSeconds = 36_180)
         // 2×2 at 170 dp: 148 dp of text width at 11 sp.
         val picked = TextFit.pick(CompactWidgetTexts.todayCandidates(today), 148f, width(11f))!!
         assertTrue(picked, width(11f)(picked) <= 148f)
-        // Every candidate keeps the three numbers; only labels and minute precision shrink.
-        assertTrue(picked, picked.startsWith("З 1г") && picked.contains("Р ") && picked.contains("Без св"))
+        assertTrue(picked, picked.contains("без світла 10\u00A0год") || picked.contains("Без світла 10\u00A0год"))
     }
 
     @Test
@@ -81,16 +109,18 @@ class CompactWidgetTextsTest {
         val day = ScheduleDays.days(s.powerOutage, nowMillis)[0]
         val row = CompactWidgetTexts.scheduleRow(s.powerOutage, day, now)!!
         assertFalse(row.showBar)
-        assertEquals("Графік: немає", row.caption)
-        assertTrue(width(10.5f)(row.caption!!) < 100f)
+        assertEquals(listOf("Графік не опубліковано", "Графіка нема"), row.captions)
+        assertTrue(width(10.5f)(row.captions.last()) < 100f)
     }
 
     @Test
     fun scheduleRowCaptionsAreShort() {
         val off = snapshot(BatteryDirection.DISCHARGING, power = -420.0, outage = outageOff)
         val offRow = CompactWidgetTexts.scheduleRow(off.powerOutage, ScheduleDays.days(off.powerOutage, nowMillis)[0], now)!!
-        assertTrue(offRow.showBar)
-        assertEquals("до 22:00", offRow.caption)
+        // Light off now and the schedule names the end: one text line, no bar.
+        assertFalse(offRow.showBar)
+        assertEquals("Світло за графіком о 22:00", offRow.caption)
+        assertTrue(offRow.captions.last().contains("22:00"))
         val on = snapshot(BatteryDirection.IDLE, outage = onWithNext)
         assertEquals("відкл. 21:00", CompactWidgetTexts.scheduleRow(on.powerOutage, ScheduleDays.days(on.powerOutage, nowMillis)[0], now)!!.caption)
         assertNull(CompactWidgetTexts.scheduleRow(null, null, now))
@@ -117,10 +147,54 @@ class CompactWidgetTextsTest {
     fun stateLineChargingFitsWithoutLosingTheEta() {
         val s = snapshot(BatteryDirection.CHARGING, soc = 72, power = 820.0, eta = 5040)
         val c = CompactWidgetTexts.stateCandidates(WidgetSummaryResolver.resolve(s, now), s, now)
-        assertEquals("Заряд 0,82\u00A0кВт · 100% за 1\u00A0год 24\u00A0хв", c.first())
-        val picked = TextFit.pick(c, 148f, width(12.5f))!!
-        assertTrue(picked, picked.contains("100%") && picked.contains("год"))
-        assertTrue(width(12.5f)(picked) <= 148f)
+        assertEquals("Заряд ≈ 820\u00A0Вт · 100% за 1\u00A0год 24\u00A0хв", c.first())
+        val picked = TextFit.pick(c, 190f, width(12.5f))!!
+        assertTrue(picked, picked.startsWith("Заряд ≈ 820\u00A0Вт") && picked.contains("год"))
+        assertTrue(width(12.5f)(picked) <= 190f)
+        // Narrow: power beats the ETA.
+        assertEquals("Заряд ≈ 820\u00A0Вт", TextFit.pick(c, 95f, width(12.5f)))
+        val kw = snapshot(BatteryDirection.CHARGING, soc = 72, power = 1200.0, eta = 3600)
+        assertTrue(CompactWidgetTexts.stateCandidates(WidgetSummaryResolver.resolve(kw, now), kw, now).contains("Заряд ≈ 1,2\u00A0кВт"))
+    }
+
+    private fun outage1330(): BatterySnapshot = BatterySnapshot(
+        socPercent = 98, batteryCapacityWh = 5030.0, ratedCapacityWh = 5120.0, temperatureCelsius = 24.0,
+        batteryPowerWatts = -1330.0, direction = BatteryDirection.DISCHARGING, etaSeconds = null, collectedAt = null,
+        offgridPowerWatts = 1330.0, powerOutageJson = JSONObject("""
+            {"available":true,"group":"1.1","grid_state":"off",
+             "current_outage":{"kind":"schedule","start":"2026-10-17T18:00:00+03:00","end":"2026-10-17T21:00:00+03:00"},
+             "schedule_published":true,"schedule_dates":["2026-10-17"],
+             "windows":[{"start":"2026-10-17T18:00:00+03:00","end":"2026-10-17T21:00:00+03:00","kind":"off"}],
+             "autonomy":{"load_w":1330.0,"load_basis":"measured_backup_output","runtime_seconds":12091,"usable_wh":4467,
+                         "stored_wh":5030,"floor_pct":11,"outage_seconds":7200,"covers_next_outage":true}}
+        """.trimIndent()).toString(), insightsJson = null,
+    )
+
+    @Test
+    fun outagePowerRowAlwaysShowsTheMeasuredLoadThenRuntime() {
+        val s = outage1330()
+        val c = CompactWidgetTexts.stateCandidates(WidgetSummaryResolver.resolve(s, now), s, now)
+        assertEquals("Споживання 1330\u00A0Вт · вистачить 3\u00A0год 22\u00A0хв", c[0])
+        assertEquals("1330\u00A0Вт · вистачить 3\u00A0год 22\u00A0хв", c[1])
+        assertEquals("1330\u00A0Вт · 3\u00A0год 22\u00A0хв", c[2])
+        assertTrue(c.all { it.contains("1330") })
+        assertEquals("1330\u00A0Вт · вистачить 3\u00A0год 22\u00A0хв", TextFit.pick(c, 210f, width(12.5f)))
+        assertEquals("1330\u00A0Вт · 3\u00A0год 22\u00A0хв", TextFit.pick(c, 140f, width(12.5f)))
+    }
+
+    @Test
+    fun negativeBackupNoiseIsNeverShownAsLoad() {
+        val s = outage1330().copy(offgridPowerWatts = -14.0)
+        assertNull(WidgetSummaryResolver.backupLoadWatts(s))
+        assertEquals(1330.0, WidgetSummaryResolver.backupLoadWatts(outage1330())!!, 0.0)
+    }
+
+    @Test
+    fun idleAndDischargingWithGridRows() {
+        val idle = snapshot(BatteryDirection.IDLE, soc = 80, outage = onWithNext)
+        assertEquals("Очікування", CompactWidgetTexts.stateCandidates(WidgetSummaryResolver.resolve(idle, now), idle, now).last())
+        val dis = snapshot(BatteryDirection.DISCHARGING, soc = 80, power = -300.0, outage = onWithNext)
+        assertTrue(CompactWidgetTexts.stateCandidates(WidgetSummaryResolver.resolve(dis, now), dis, now).contains("Розряд ≈ 300\u00A0Вт"))
     }
 
     @Test

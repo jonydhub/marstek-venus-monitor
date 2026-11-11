@@ -35,7 +35,7 @@ class ScheduleTextsTest {
 
     @Test
     fun returnTimeOnlyWhenGridIsReallyOff() {
-        assertEquals("Повернення о 13:00", PowerOutageFormatter.detail(info("off"), now))
+        assertEquals("Світло за графіком о 13:00", PowerOutageFormatter.detail(info("off"), now))
         assertEquals("до 13:00", PowerOutageFormatter.shortDetail(info("off"), now))
         assertEquals("За графіком відключення до 13:00", PowerOutageFormatter.detail(info("unknown"), now))
     }
