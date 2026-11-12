@@ -606,7 +606,7 @@ class MainActivity : Activity() {
                 // still off = a load pause (or a trip): «Світла нема · навантаження зараз 0 Вт».
                 val backup = WidgetSummaryResolver.backupLoadWatts(snapshot)
                 sub = listOfNotNull(
-                    info?.overloadTripWatts?.let { "Можливо, спрацював захист від перевантаження (останнє ${it.roundToInt()} Вт)" },
+                    // The overload trip is already the «На що звернути увагу» card; not repeated here.
                     backup?.let { "Споживання ${it.roundToInt()} Вт" } ?: "навантаження зараз 0 Вт",
                     info?.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now)?.replace("до ", "світло за графіком о ") } ?: "час повернення невідомий",
                 ).joinToString(" · ")

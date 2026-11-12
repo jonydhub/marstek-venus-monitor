@@ -232,9 +232,15 @@ object PowerOutageFormatter {
         return "Запас ≈ ${EtaTextFormatter.formatSeconds(runtime)}$verdict"
     }
 
-    private fun stamp(value: ZonedDateTime, now: ZonedDateTime): String =
-        if (value.toLocalDate() == now.withZoneSameInstant(kyiv).toLocalDate()) value.format(clock)
-        else "${value.format(dayMonth)} ${value.format(clock)}"
+    private fun stamp(value: ZonedDateTime, now: ZonedDateTime): String {
+        val today = now.withZoneSameInstant(kyiv).toLocalDate()
+        return when {
+            value.toLocalDate() == today -> value.format(clock)
+            // A window ending at midnight reads «о 24:00», not «о 13.11 00:00».
+            value.toLocalDate() == today.plusDays(1) && value.hour == 0 && value.minute == 0 -> "24:00"
+            else -> "${value.format(dayMonth)} ${value.format(clock)}"
+        }
+    }
 
     private fun toKyiv(value: String): ZonedDateTime? =
         runCatching { OffsetDateTime.parse(value).atZoneSameInstant(kyiv) }.getOrNull()
