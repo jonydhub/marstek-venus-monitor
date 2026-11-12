@@ -31,7 +31,7 @@ class TextTests(unittest.TestCase):
     def test_tooltip_contents_and_limit(self):
         tip = trayicon.tooltip(status(soc=64, direction="charging", bat_wh=3277.0))
         self.assertIn("64%", tip)
-        self.assertIn("3.28 kWh", tip)
+        self.assertIn("3,28 кВт·год", tip)
         self.assertIn("Світло є", tip)
         self.assertIn("до 100%", tip)
         self.assertLessEqual(len(tip), trayicon.TOOLTIP_MAX)

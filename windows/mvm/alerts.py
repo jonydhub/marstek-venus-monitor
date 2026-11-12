@@ -24,6 +24,8 @@ ALERT_LABELS = {
     "charged_full": "Батарею заряджено",
     "not_charging_after_return": "Світло є, але батарея не заряджається",
     "high_load": "Велике споживання під час відключення",
+    "overload_trip": "Можливо, спрацював захист від перевантаження",
+    "mode_left_ups": "Станція вийшла з режиму UPS",
     "temperature_high": "Висока температура батареї",
     "temperature_cold_charging": "Заряджання на холоді",
     "data_stale": "Немає зв’язку з батареєю",
@@ -41,6 +43,7 @@ FULL_REARM_SOC = 95
 REAL_CHARGE_FROM_SOC = 97  # «Батарею заряджено» only after a charge that started at ≤ this SOC
 DEFAULT_HIGH_LOAD_W = 200
 HIGH_LOAD_REARM_FACTOR = 0.8
+LOAD_MEAN_MIN_COVERAGE_S = 1800  # «середнє» only from ≥ 30 min of real (non-zero) backup load
 SEP = " · "
 
 
@@ -80,6 +83,8 @@ class Memory:
     soc_critical_sent: bool = False
     temp_high_sent: bool = False
     temp_cold_sent: bool = False
+    trip_sent_for: str | None = None
+    mode: str | None = None
 
 
 @dataclass
@@ -255,15 +260,16 @@ def evaluate(previous: Memory | None, status, now: datetime, enabled: dict, high
                 events.append(alert)
                 m = dataclasses.replace(m, reserve_current_sent=True)
 
-    # --- high load during an outage ---
-    if grid == "off" and v.backup_w is not None:
-        load = abs(v.backup_w)
-        limit = max(float(high_load_w), 2 * v.avg_backup_w if v.avg_backup_w else 0.0)
+    # --- high load during an outage: above max(setting, 2 × the 7-day mean real load) ---
+    if grid == "off" and v.backup_w is not None and v.backup_w > 0:
+        load = v.backup_w
+        mean = v.load_mean_7d_w if v.load_mean_7d_w and v.load_coverage_7d_s >= LOAD_MEAN_MIN_COVERAGE_S else None
+        limit = max(float(high_load_w), 2 * mean if mean else 0.0)
         if load > limit:
             left = _runtime_from_load(v.capacity_wh, load)
             alert = Alert("high_load", "warn", "Велике споживання під час відключення",
                           f"Споживання {watts(load)}" + (f" — запасу вистачить лише на {duration(left)}" if left else "")
-                          + f" (поріг {watts(limit)}; оцінка)")
+                          + f" (поріг {watts(limit)}" + (f", середнє {watts(mean)} за 7 дн" if mean else "") + "; оцінка)")
             active.append(alert)
             if not m.high_load_sent:
                 events.append(alert)
@@ -272,6 +278,20 @@ def evaluate(previous: Memory | None, status, now: datetime, enabled: dict, high
             m = dataclasses.replace(m, high_load_sent=False)
     elif grid != "off":
         m = dataclasses.replace(m, high_load_sent=False)
+
+    # --- suspected overload trip / leaving UPS mode (server journal: anomaly_overload_trip / mode_left_ups) ---
+    trip = v.overload_trip
+    if trip and trip.get("at") and trip.get("at") != m0.trip_sent_for:
+        events.append(Alert("overload_trip", "warn", "Можливо, спрацював захист від перевантаження",
+                            f"Можливо, спрацював захист станції від перевантаження (резервний вихід: останнє значення "
+                            f"{round(float(trip.get('last_w') or 0))} Вт). Код помилки дивіться в застосунку Marstek; "
+                            "якщо там 405 — зменшіть пускове навантаження."))
+        m = dataclasses.replace(m, trip_sent_for=trip.get("at"))
+    if v.mode:
+        if m0.mode and m0.mode.lower() == "ups" and v.mode.lower() != "ups":
+            events.append(Alert("mode_left_ups", "warn", "Станція вийшла з режиму UPS",
+                                f"Станція вийшла з режиму UPS (зараз: {v.mode})"))
+        m = dataclasses.replace(m, mode=v.mode)
 
     # --- state of charge ---
     if soc is not None:

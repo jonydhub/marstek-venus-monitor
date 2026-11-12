@@ -1,7 +1,7 @@
 ; Inno Setup 6 script — per-user install, no admin rights.
-; Build: iscc /DAppVersion=1.3.5 windows\packaging\installer.iss  (after the PyInstaller onedir build)
+; Build: iscc /DAppVersion=1.3.7 windows\packaging\installer.iss  (after the PyInstaller onedir build)
 #ifndef AppVersion
-  #define AppVersion "1.3.5"
+  #define AppVersion "1.3.7"
 #endif
 #define AppName "Marstek Venus Monitor"
 #define AppExe "MarstekVenusMonitor.exe"

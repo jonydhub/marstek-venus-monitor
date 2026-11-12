@@ -56,6 +56,10 @@ class View:
     schedule_published: bool | None
     avg_backup_w: float | None
     has_outage_info: bool
+    load_mean_7d_w: float | None = None      # 7-day mean backup draw while drawing (zero-load excluded)
+    load_coverage_7d_s: float = 0.0
+    overload_trip: dict | None = None        # power_outage.grid_detail.overload_trip {last_w, at}
+    mode: str | None = None                  # ES.GetMode mode
 
 
 def view(status) -> View:
@@ -83,6 +87,8 @@ def view(status) -> View:
         duration = (next_end - next_start).total_seconds()
     insights = status.get("insights") or {}
     covers = autonomy.get("covers_next_outage")
+    detail = po.get("grid_detail") if isinstance(po.get("grid_detail"), dict) else {}
+    mode = data("ES.GetMode") or {}
     return View(
         poll_ok=poll_ok,
         soc=None if soc is None else int(round(soc)),
@@ -106,6 +112,10 @@ def view(status) -> View:
         schedule_published=po.get("schedule_published") if "schedule_published" in po else None,
         avg_backup_w=_num(insights.get("backup_avg_w_24h")),
         has_outage_info=bool(po),
+        load_mean_7d_w=_num(insights.get("backup_load_mean_w_7d")),
+        load_coverage_7d_s=_num(insights.get("backup_load_coverage_seconds_7d")) or 0.0,
+        overload_trip=detail.get("overload_trip") if isinstance(detail.get("overload_trip"), dict) else None,
+        mode=mode.get("mode") if isinstance(mode.get("mode"), str) else None,
     )
 
 
@@ -123,11 +133,11 @@ def duration(seconds) -> str:
 
 
 def kwh(wh) -> str:
-    return f"{wh / 1000.0:.2f} kWh"
+    return f"{wh / 1000.0:.2f}".replace(".", ",") + " кВт·год"
 
 
 def watts(w) -> str:
-    return f"{abs(w):.0f} W"
+    return f"{abs(w):.0f} Вт"
 
 
 def celsius(c) -> str:
