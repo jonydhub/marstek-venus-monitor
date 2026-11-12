@@ -44,10 +44,13 @@ data class Autonomy(
 
 /**
  * Port of outage.py `_autonomy`: runtime = usable energy above the discharge floor / load.
- * Load: (1) during an outage the measured backup output; (2) the capacity-trend discharge; (3) configured average;
- * (4) the 24 h measured backup average.
+ * Load during an outage: (1) the energy-weighted mean backup output over the last 10 min of the outage
+ * ([HistoryMath.smoothedBackupLoad], shown with «≈»); (2) the current backup output; (3) the capacity-trend discharge;
+ * otherwise (4) the configured average; (5) the 24 h measured backup average.
  */
 object AutonomyCalculator {
+    const val MEASURED_BACKUP_AVG = "measured_backup_avg_10min"
+
     fun calculate(
         gridState: String,
         storedWh: Double?,
@@ -60,6 +63,7 @@ object AutonomyCalculator {
         socPercent: Double? = null,
         floorPct: Double? = null,
         backupThresholdW: Double = GridStateDetector.DEFAULT_THRESHOLD_W,
+        smoothedLoadW: Double? = null,
     ): Autonomy {
         val none = Autonomy(null, null, null, null, null, null)
         if (storedWh == null || !storedWh.isFinite() || storedWh < 0) return none
@@ -72,7 +76,9 @@ object AutonomyCalculator {
             floorPct = floorWh?.let { floorPct }, floorWh = floorWh?.let { Math.round(it) })
         val measured = flow?.powerW
         val backup = backupOutputW?.takeIf(Double::isFinite)
+        val smoothed = smoothedLoadW?.takeIf(Double::isFinite)
         val (load, basis) = when {
+            gridState == "off" && smoothed != null && smoothed >= backupThresholdW -> smoothed to MEASURED_BACKUP_AVG
             gridState == "off" && backup != null && backup >= backupThresholdW -> backup to "measured_backup_output"
             gridState == "off" && flow?.direction == "discharging" && measured != null -> abs(measured) to "measured_discharge"
             expectedLoadW != null && expectedLoadW > 0 -> expectedLoadW to "configured_average"

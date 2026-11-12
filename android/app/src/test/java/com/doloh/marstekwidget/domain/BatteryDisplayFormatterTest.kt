@@ -6,7 +6,7 @@ import org.junit.Test
 class BatteryDisplayFormatterTest {
     @Test
     fun formatsStoredEnergyAsKilowattHours() {
-        assertEquals("5,04 kWh", BatteryDisplayFormatter.formatKwh(5_043.0))
+        assertEquals("5,04\u00A0кВт·год", BatteryDisplayFormatter.formatKwh(5_043.0))
     }
 
     @Test

@@ -5,8 +5,22 @@ import java.time.OffsetDateTime
 
 data class SocPoint(val epochMillis: Long, val soc: Int)
 
-/** Seconds since local midnight charging / discharging / without grid (backup output drawing); gaps count as nothing. */
-data class TodayDurations(val chargeSeconds: Long, val dischargeSeconds: Long, val outageSeconds: Long)
+/**
+ * Since local midnight: seconds charging / discharging / without light (confirmed timeline; gaps count as nothing) and
+ * the battery energy in / out (Wh; `*Estimated` = partly the capacity-trend estimate → shown with «≈»).
+ */
+data class TodayDurations(
+    val chargeSeconds: Long,
+    val dischargeSeconds: Long,
+    val outageSeconds: Long,
+    val chargeWh: Double? = null,
+    val dischargeWh: Double? = null,
+    val chargeEstimated: Boolean = false,
+    val dischargeEstimated: Boolean = false,
+)
+
+/** One span of today's confirmed light timeline («Фактично»): on / off / unknown. */
+data class LightSpan(val startMillis: Long, val endMillis: Long, val state: String)
 
 data class TimeSpan(val startMillis: Long, val endMillis: Long)
 
@@ -15,6 +29,16 @@ data class ChartEvent(val epochMillis: Long, val kind: String)
 
 object TodayFormatter {
     private const val NBSP = '\u00A0'
+    private val uk = java.util.Locale.forLanguageTag("uk-UA")
+
+    /** «0,81 кВт·год», «≈ 0,15 кВт·год» (part of it estimated from the capacity trend); null without data. */
+    fun energy(wh: Double?, estimated: Boolean = false): String? = wh?.takeIf(Double::isFinite)?.let {
+        (if (estimated) "≈$NBSP" else "") + String.format(uk, "%.2f", it / 1000.0) + "${NBSP}кВт·год"
+    }
+
+    /** «Заряджено 0,81 кВт·год» / «Розряджено ≈ 0,15 кВт·год». */
+    fun chargedText(today: TodayDurations?): String? = today?.let { energy(it.chargeWh, it.chargeEstimated) }?.let { "Заряджено $it" }
+    fun dischargedText(today: TodayDurations?): String? = today?.let { energy(it.dischargeWh, it.dischargeEstimated) }?.let { "Розряджено $it" }
 
     /** «1 год», «2 год 5 хв», «57 хв», «0 хв» — full unit words (never «1г 0хв»), value and unit never split. */
     fun short(seconds: Long?): String {
@@ -53,7 +77,20 @@ object TodayFormatter {
         )
         val exact = parts(::short)
         if (exact.isEmpty()) return listOf("Сьогодні без заряду, розряду і відключень", "Сьогодні без змін")
+        // 4×2 / 4×4: the energy next to the durations when it fits — «Заряд 1 год (0,81 кВт·год)».
+        val withEnergy = listOfNotNull(
+            today.chargeSeconds.takeIf { it >= 60 }?.let { s -> "Заряд ${short(s)}" + (energy(today.chargeWh, today.chargeEstimated)?.let { " ($it)" } ?: "") },
+            today.dischargeSeconds.takeIf { it >= 60 }?.let { s -> "Розряд ${short(s)}" + (energy(today.dischargeWh, today.dischargeEstimated)?.let { " ($it)" } ?: "") },
+            today.outageSeconds.takeIf { it >= 60 }?.let { "Без світла ${short(it)}" },
+        )
+        val roundedEnergy = listOfNotNull(
+            today.chargeSeconds.takeIf { it >= 60 }?.let { s -> "Заряд ${rounded(s)}" + (energy(today.chargeWh, today.chargeEstimated)?.let { " ($it)" } ?: "") },
+            today.dischargeSeconds.takeIf { it >= 60 }?.let { s -> "Розряд ${rounded(s)}" + (energy(today.dischargeWh, today.dischargeEstimated)?.let { " ($it)" } ?: "") },
+            today.outageSeconds.takeIf { it >= 60 }?.let { "Без світла ${rounded(it)}" },
+        )
         return listOf(
+            LABEL + withEnergy.joinToString(" · "),
+            LABEL + roundedEnergy.joinToString(" · "),
             LABEL + exact.joinToString(" · "),
             LABEL + parts(::rounded).joinToString(" · "),
         ).plus(outageCandidates(today)).distinct()
@@ -81,6 +118,14 @@ data class BatteryInsights(
     val chartEvents: List<ChartEvent> = emptyList(),
     /** Standby self-consumption at 100 % from the top-up cadence (W), null until one full cycle was seen. */
     val standbyWatts: Double? = null,
+    /** Today's confirmed light on/off/unknown spans (insights.today.grid_timeline); null = server older than 1.3.7. */
+    val lightTimeline: List<LightSpan>? = null,
+    /** Last poll that charged from the grid (UPS top-up): watts and when. */
+    val lastGridChargeWatts: Double? = null,
+    val lastGridChargeMillis: Long? = null,
+    /** 7-day mean backup draw while drawing (zero-load excluded) and how much real load it is based on. */
+    val backupLoadMean7dWatts: Double? = null,
+    val backupLoadCoverage7dSeconds: Double = 0.0,
 )
 
 object BatteryInsightsParser {
@@ -104,8 +149,22 @@ object BatteryInsightsParser {
             standbyWatts = block.finite("standby_w"),
             socHistory = points,
             today = block.optJSONObject("today")?.let { t ->
-                TodayDurations(t.optLong("charge_seconds"), t.optLong("discharge_seconds"), t.optLong("outage_seconds"))
+                TodayDurations(t.optLong("charge_seconds"), t.optLong("discharge_seconds"), t.optLong("outage_seconds"),
+                    t.finite("charge_wh"), t.finite("discharge_wh"), t.optBoolean("charge_estimated", false),
+                    t.optBoolean("discharge_estimated", false))
             },
+            lightTimeline = block.optJSONObject("today")?.optJSONArray("grid_timeline")?.let { arr ->
+                (0 until arr.length()).mapNotNull { i ->
+                    val s = arr.optJSONObject(i) ?: return@mapNotNull null
+                    val a = parseTime(s.opt("start")) ?: return@mapNotNull null
+                    val b = parseTime(s.opt("end")) ?: return@mapNotNull null
+                    if (b > a) LightSpan(a, b, s.optString("state", "unknown")) else null
+                }
+            },
+            lastGridChargeWatts = block.optJSONObject("last_grid_charge")?.finite("w"),
+            lastGridChargeMillis = block.optJSONObject("last_grid_charge")?.let { parseTime(it.opt("t")) },
+            backupLoadMean7dWatts = block.finite("backup_load_mean_w_7d"),
+            backupLoadCoverage7dSeconds = block.finite("backup_load_coverage_seconds_7d") ?: 0.0,
             outagePeriods = buildList {
                 val arr = block.optJSONArray("outage_periods")
                 if (arr != null) for (i in 0 until arr.length()) {

@@ -132,7 +132,7 @@ object BatteryDisplayFormatter {
 
     fun formatKwh(wattHours: Double?): String {
         if (wattHours == null || !wattHours.isFinite()) return "—"
-        return String.format(uk, "%.2f kWh", wattHours / 1000.0)
+        return String.format(uk, "%.2f\u00A0кВт·год", wattHours / 1000.0)
     }
 
     fun formatPowerKw(watts: Double?): String {
@@ -153,7 +153,7 @@ object BatteryDisplayFormatter {
             watts < 0.0 -> "−"
             else -> ""
         }
-        return "$sign$magnitude W"
+        return "$sign$magnitude\u00A0Вт"
     }
 
     fun formatCompactFlowPower(direction: BatteryDirection, watts: Double?): String {

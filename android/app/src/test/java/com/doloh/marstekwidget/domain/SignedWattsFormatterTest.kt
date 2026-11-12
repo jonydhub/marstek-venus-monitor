@@ -6,9 +6,9 @@ import org.junit.Test
 class SignedWattsFormatterTest {
     @Test
     fun preservesRawApiSignWithoutAssigningImportOrExportMeaning() {
-        assertEquals("−330 W", BatteryDisplayFormatter.formatSignedWatts(-330.0))
-        assertEquals("+250 W", BatteryDisplayFormatter.formatSignedWatts(250.0))
-        assertEquals("0 W", BatteryDisplayFormatter.formatSignedWatts(0.0))
+        assertEquals("−330\u00A0Вт", BatteryDisplayFormatter.formatSignedWatts(-330.0))
+        assertEquals("+250\u00A0Вт", BatteryDisplayFormatter.formatSignedWatts(250.0))
+        assertEquals("0\u00A0Вт", BatteryDisplayFormatter.formatSignedWatts(0.0))
     }
 
     @Test

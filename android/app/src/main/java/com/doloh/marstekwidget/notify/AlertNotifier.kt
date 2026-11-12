@@ -50,7 +50,8 @@ object AlertNotifier {
 
     /** Journal anomalies → one notification each (toggle «Сповіщати про аномалії»). Light/connection events stay in the journal. */
     fun notifyJournal(context: Context, events: List<JournalEvent>) {
-        val anomalies = events.filter { it.category == JournalCategory.ANOMALY }
+        // Overload trip / leaving UPS come from the alert engine in both modes; not posted twice.
+        val anomalies = events.filter { it.category == JournalCategory.ANOMALY && it.kind !in com.doloh.marstekwidget.domain.JournalDetector.ALERT_ENGINE_KINDS }
         if (anomalies.isEmpty() || !WidgetPreferences(context).anomalyNotificationsEnabled() || !canPost(context)) return
         ensureChannels(context)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return

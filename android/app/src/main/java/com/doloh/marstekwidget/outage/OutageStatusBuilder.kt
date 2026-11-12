@@ -38,6 +38,8 @@ object OutageStatusBuilder {
         socPercent: Double? = null,
         floorPct: Double? = null,
         backupThresholdW: Double = 5.0,
+        smoothedLoadW: Double? = null,
+        gridDetail: JSONObject? = null,
     ): JSONObject {
         val windows = schedule?.windows.orEmpty().filter { it.end.isAfter(now) }
         val definite = windows.filter { !it.maybe }
@@ -47,7 +49,7 @@ object OutageStatusBuilder {
         val outage = current ?: next
         val remaining = outage?.let { window(it, now).getLong("remaining_seconds") }
         val autonomy = AutonomyCalculator.calculate(gridState, storedWh, flow, expectedLoadW, measuredLoadW, remaining,
-            backupOutputW, ratedWh, socPercent, floorPct, backupThresholdW)
+            backupOutputW, ratedWh, socPercent, floorPct, backupThresholdW, smoothedLoadW)
         // Schedule bar: every window touching today 00:00 … tomorrow 24:00 (past ones today included).
         val midnight = now.withZoneSameInstant(KYIV).toLocalDate().atStartOfDay(KYIV)
         val barEnd = midnight.plusDays(2)
@@ -66,6 +68,7 @@ object OutageStatusBuilder {
             .put("schedule_unavailable", config != null && OutageRegions.byId(config.regionId)?.hasScheduleSource == false)
             .put("grid_state", gridState)
             .put("grid_state_basis", "backup_output_power")
+            .put("grid_detail", gridDetail ?: JSONObject.NULL)
             .put("current_outage", current?.let { window(it, now) } ?: JSONObject.NULL)
             .put("next_outage", next?.let { window(it, now) } ?: JSONObject.NULL)
             .put("maybe_outage", maybe?.let { window(it, now) } ?: JSONObject.NULL)

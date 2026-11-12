@@ -38,6 +38,8 @@ enum class AlertId(val group: AlertGroup) {
     TEMPERATURE_HIGH(AlertGroup.BATTERY_HEALTH),
     TEMPERATURE_COLD_CHARGING(AlertGroup.BATTERY_HEALTH),
     DATA_STALE(AlertGroup.BATTERY_HEALTH),
+    OVERLOAD_TRIP(AlertGroup.BATTERY_HEALTH),
+    MODE_LEFT_UPS(AlertGroup.BATTERY_HEALTH),
 }
 
 data class Alert(val id: AlertId, val severity: AlertSeverity, val title: String, val text: String) {
@@ -76,6 +78,10 @@ data class AlertMemory(
     val socCriticalSent: Boolean = false,
     val tempHighSent: Boolean = false,
     val tempColdSent: Boolean = false,
+    /** Overload-trip notification already posted for this trip (power_outage.grid_detail.overload_trip.at). */
+    val tripSentFor: String? = null,
+    /** Last answered operating mode (ES.GetMode), to notice leaving UPS. */
+    val mode: String? = null,
 )
 
 /** [notifications] = events to post now (already filtered by toggles); [active] = conditions currently true. */
@@ -110,6 +116,9 @@ object AlertEvaluator {
     private const val SEP = " · "
 
     private const val MEASURED_BACKUP = "measured_backup_output"
+    private val MEASURED_BACKUP_BASES = setOf(MEASURED_BACKUP, "measured_backup_avg_10min")
+    /** «середнє … за 7 дн» only from ≥ 30 min of real (non-zero) backup load. */
+    const val LOAD_MEAN_MIN_COVERAGE_SECONDS = 1800.0
 
     fun top(active: List<Alert>): Alert? = active.maxByOrNull { it.severity.ordinal }
 
@@ -168,7 +177,7 @@ object AlertEvaluator {
             events += Alert(AlertId.LIGHT_LOST, AlertSeverity.WARN, "Світло зникло", listOfNotNull(
                 backupW?.let { "Резервний вихід ${watts(it)}" },
                 soc?.let { "заряд $it%" },
-                runtime?.let { "вистачить на ${duration(it)}" + if (info?.loadBasis == MEASURED_BACKUP) "" else " (оцінка)" },
+                runtime?.let { "вистачить на ${duration(it)}" + if (info?.loadBasis in MEASURED_BACKUP_BASES) "" else " (оцінка)" },
                 info?.currentEnd?.let(::parseZoned)?.let { "повернення о ${stamp(it, now)}" },
             ).joinToString(SEP).ifBlank { "Батарея живить резервний вихід" })
             m = m.copy(outageStartedAtMillis = nowMillis, socAtOutageStart = soc, returnedAtMillis = null, notChargingChecks = 0, notChargingSent = false)
@@ -295,14 +304,15 @@ object AlertEvaluator {
         // --- high load during an outage (Venus bypasses while the grid is on) ---
         if (grid == GridState.OFF && backupW != null && backupW > 0) {
             val load = backupW
-            val avg = snapshot.insights?.backupAverageWatts24h
+            // 2 × the 7-day mean of REAL load (zero-load excluded); a mean from < 30 min of load is neither used nor shown.
+            val avg = snapshot.insights?.takeIf { it.backupLoadCoverage7dSeconds >= LOAD_MEAN_MIN_COVERAGE_SECONDS }?.backupLoadMean7dWatts
             val limit = max(settings.highLoadThresholdWatts.toDouble(), avg?.let { 2 * it } ?: 0.0)
             if (load > limit) {
                 // Same number as the hero «Вистачить на…»: usable energy above the discharge floor / measured load.
                 val left = info?.runtimeSeconds?.takeIf { info.loadBasis == MEASURED_BACKUP } ?: runtimeAtLoad(snapshot, load)
                 val alert = Alert(AlertId.HIGH_LOAD, AlertSeverity.WARN, "Велике споживання під час відключення",
                     "Споживання ${watts(load)}" + (left?.let { " — запасу вистачить лише на ${duration(it)}" } ?: "") +
-                        " (поріг ${watts(limit)}${avg?.let { ", середнє ${watts(it)}" } ?: ""})")
+                        " (поріг ${watts(limit)}${avg?.let { ", середнє ${watts(it)} за 7 дн" } ?: ""})")
                 active += alert
                 if (!m.highLoadSent) {
                     events += alert
@@ -313,6 +323,25 @@ object AlertEvaluator {
             }
         } else if (grid != GridState.OFF) {
             m = m.copy(highLoadSent = false)
+        }
+
+        // --- suspected overload trip / leaving UPS (same events as the journal; posted here in both modes) ---
+        val tripAt = info?.overloadTripAt
+        val tripW = info?.overloadTripWatts
+        if (tripAt != null && tripW != null) {
+            val alert = Alert(AlertId.OVERLOAD_TRIP, AlertSeverity.WARN, "Можливо, спрацював захист від перевантаження",
+                JournalDetector.overloadTripText(tripW))
+            active += alert
+            if (m0.tripSentFor != tripAt) {
+                events += alert
+                m = m.copy(tripSentFor = tripAt)
+            }
+        }
+        snapshot.operatingMode?.takeIf { !snapshot.batteryLinkLost }?.let { mode ->
+            if (JournalDetector.isUps(m0.mode) && !JournalDetector.isUps(mode)) {
+                events += Alert(AlertId.MODE_LEFT_UPS, AlertSeverity.WARN, "Станція вийшла з режиму UPS", JournalDetector.modeLeftUpsText(mode))
+            }
+            m = m.copy(mode = mode)
         }
 
         // --- SOC ---
@@ -438,8 +467,8 @@ object AlertEvaluator {
         if (value.toLocalDate() == now.toLocalDate()) value.format(clock) else "${value.format(DateTimeFormatter.ofPattern("dd.MM"))} ${value.format(clock)}"
 
     private fun duration(seconds: Long): String = EtaTextFormatter.formatSeconds(seconds.coerceAtLeast(1))
-    private fun watts(value: Double): String = String.format(uk, "%.0f W", abs(value))
-    private fun kwh(wh: Double): String = String.format(uk, "%.2f kWh", wh / 1000.0)
+    private fun watts(value: Double): String = String.format(uk, "%.0f Вт", abs(value))
+    private fun kwh(wh: Double): String = String.format(uk, "%.2f кВт·год", wh / 1000.0)
     private fun celsius(value: Double): String = String.format(uk, "%.1f\u00A0°C", value)
 }
 
@@ -470,6 +499,8 @@ object AlertMemoryCodec {
         .put("socCriticalSent", m.socCriticalSent)
         .put("tempHighSent", m.tempHighSent)
         .put("tempColdSent", m.tempColdSent)
+        .put("tripSentFor", m.tripSentFor ?: JSONObject.NULL)
+        .put("mode", m.mode ?: JSONObject.NULL)
         .toString()
 
     fun decode(raw: String?): AlertMemory? {
@@ -504,6 +535,8 @@ object AlertMemoryCodec {
             socCriticalSent = bool("socCriticalSent"),
             tempHighSent = bool("tempHighSent"),
             tempColdSent = bool("tempColdSent"),
+            tripSentFor = str("tripSentFor"),
+            mode = str("mode"),
         )
     }
 }

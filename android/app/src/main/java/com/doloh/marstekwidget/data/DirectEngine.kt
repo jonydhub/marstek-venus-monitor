@@ -5,7 +5,9 @@ import com.doloh.marstekwidget.direct.BatteryFlowCalculator
 import com.doloh.marstekwidget.direct.CapacitySample
 import com.doloh.marstekwidget.direct.DeviceInfo
 import com.doloh.marstekwidget.direct.DirectStatusComposer
-import com.doloh.marstekwidget.direct.GridStateDetector
+import com.doloh.marstekwidget.direct.GridHysteresis
+import com.doloh.marstekwidget.direct.GridPoint
+import com.doloh.marstekwidget.direct.LoadStatsAccumulator
 import com.doloh.marstekwidget.direct.HistoryMath
 import com.doloh.marstekwidget.direct.HistorySample
 import com.doloh.marstekwidget.direct.MarstekRpc
@@ -58,12 +60,13 @@ class HistoryStore(context: Context) {
  */
 object DirectEngine {
     private const val FULL_EVERY_MS = 60_000L
-    private const val HISTORY_EVERY_S = 30.0
+    /** Every poll is stored (the light hysteresis replays them); only near-duplicates from a widget + app poll are skipped. */
+    private const val HISTORY_EVERY_S = 10.0
     private val lastAnswers = mutableMapOf<String, RpcResult.Ok>()
     private var lastFullAt = 0L
     private var lastHistoryTs = 0.0
 
-    private val CHART_KINDS = setOf("light_lost", "light_returned", "charging_started", "charged_full")
+    private val CHART_KINDS = setOf("light_lost", "light_returned", "charging_started", "charged_full", "anomaly_overload_trip")
 
     /** Journal: feed one poll into the detector, persist new events, notify anomalies. Never breaks telemetry. */
     private fun journal(context: Context, obs: JournalObservation, nowMs: Long) {
@@ -78,6 +81,8 @@ object DirectEngine {
     }
 
     private fun failed(context: Context, message: String, nowMs: Long): DirectPoll.Failed {
+        // A poll without an answer is kept as a bare marker: it breaks the light-return run (GridHysteresis).
+        runCatching { HistoryStore(context).append(HistorySample(nowMs / 1000.0, null, null, null, null, null, null, null)) }
         journal(context, JournalObservation(ok = false), nowMs)
         return DirectPoll.Failed(message)
     }
@@ -124,17 +129,38 @@ object DirectEngine {
 
         val history = HistoryStore(context)
         val socValue = bat.optDouble("soc", Double.NaN).takeIf(Double::isFinite)
+        val sample = HistorySample(nowS, socValue?.toInt(), capacity, flow.powerW.takeIf { flow.available }, flow.direction,
+            if (es != null) offgrid else null, if (es != null) ongrid else null, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite))
+        val before = runCatching { history.rows(nowS) }.getOrDefault(emptyList())
+        var rows = before
         if (nowS - lastHistoryTs >= HISTORY_EVERY_S) {
             lastHistoryTs = nowS
-            runCatching {
-                history.append(HistorySample(nowS, socValue?.toInt(), capacity, flow.powerW.takeIf { flow.available }, flow.direction,
-                    offgrid, ongrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite)))
+            runCatching { history.append(sample) }
+            rows = before + sample
+            HistoryMath.drawIncrement(before.lastOrNull(), sample, settings.backupThresholdW)?.let { (wh, seconds) ->
+                val today = java.time.LocalDate.now(KYIV)
+                prefs(context).edit().putString("load_stats", LoadStatsAccumulator.add(prefs(context).getString("load_stats", null),
+                    today.toString(), wh, seconds, LoadStatsAccumulator.windowStart(today))).apply()
             }
         }
-        val rows = runCatching { history.rows(nowS) }.getOrDefault(emptyList())
         val measured = HistoryMath.measuredBackupLoad(rows, nowS, settings.backupThresholdW)
-        // Light only from the backup-output power (this or the previous ES answer); no ES answer = unknown, never «off».
-        val grid = GridStateDetector.detect(offgrid, es != null, settings.backupThresholdW)
+        // Light only from the backup output, through the hysteresis (GridHysteresis, same rules as the server):
+        // lost at once, back only on grid charging or ≥ 5 min without load; no ES answer = unknown, never «off».
+        val points = HistoryMath.gridPoints(rows).let { if (it.lastOrNull()?.ts == nowS) it else it + GridPoint(nowS, sample.offgridW, sample.ongridW) }
+        val (tracker, signal) = GridHysteresis.replay(points, settings.backupThresholdW, HistoryMath.CONFIRM_GAP_SECONDS)
+        val grid = if (es == null) "unknown" else tracker.state ?: "unknown"
+        val smoothed = if (grid == "off") HistoryMath.smoothedBackupLoad(rows, nowS, tracker.offSince) else null
+        fun iso(t: Double?) = t?.let { Instant.ofEpochMilli((it * 1000).toLong()).atZone(KYIV).toOffsetDateTime().withNano(0).toString() }
+        val gridDetail = JSONObject()
+            .put("basis", "backup_output_hysteresis")
+            .put("pending_return", signal.pending)
+            .put("outage_since", iso(tracker.offSince) ?: JSONObject.NULL)
+            .put("zero_load_since", iso(tracker.zeroSince) ?: JSONObject.NULL)
+            .put("light_since", iso(tracker.onSince) ?: JSONObject.NULL)
+            .put("confirmed_by", tracker.confirmedBy ?: JSONObject.NULL)
+            .put("return_confirm_seconds", GridHysteresis.RETURN_CONFIRM_SECONDS.toInt())
+            .put("overload_trip", if (tracker.tripped && tracker.tripW != null)
+                JSONObject().put("last_w", Math.round(tracker.tripW!!)).put("at", iso(tracker.tripAt) ?: JSONObject.NULL) else JSONObject.NULL)
         val outage = OutageStatusBuilder.build(
             config = settings.outageConfig,
             schedule = cachedOutage?.schedule,
@@ -151,7 +177,10 @@ object DirectEngine {
             socPercent = socValue,
             floorPct = settings.dischargeFloorPct,
             backupThresholdW = settings.backupThresholdW,
+            smoothedLoadW = smoothed,
+            gridDetail = gridDetail,
         )
+        val mode = (results["ES.GetMode"] as? RpcResult.Ok)?.data?.optString("mode")?.takeIf(String::isNotBlank)
         journal(context, JournalObservation(
             ok = true,
             gridState = when (grid) { "on" -> GridState.ON; "off" -> GridState.OFF; else -> GridState.UNKNOWN },
@@ -161,13 +190,19 @@ object DirectEngine {
             backupWatts = offgrid,
             soc = socValue?.toInt(),
             temperatureC = bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),
+            returnedAtMillis = signal.returnedAt?.let { (it * 1000).toLong() },
+            returnBasis = tracker.confirmedBy.takeIf { signal.returnedAt != null },
+            overloadTripW = signal.tripW,
+            mode = mode,
         ), nowMs)
         val chart = runCatching {
             JournalStore(context).events(200).filter { it.kind in CHART_KINDS && it.tsMillis >= nowMs - 24 * 3600_000L }
                 .sortedBy { it.tsMillis }.map { it.tsMillis to it.kind }
         }.getOrDefault(emptyList())
         val insights = HistoryMath.insights(rows, nowS, offgrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),
-            settings.backupThresholdW, chart)
+            settings.backupThresholdW, chart,
+            loadStats = LoadStatsAccumulator.stats(prefs(context).getString("load_stats", null),
+                LoadStatsAccumulator.windowStart(java.time.LocalDate.now(KYIV))))
         val root = DirectStatusComposer.compose(
             results, flow, outage, insights, Instant.ofEpochMilli(nowMs).toString(), settings.deviceModel,
             fallbackRatedWh = settings.ratedCapacityWh,

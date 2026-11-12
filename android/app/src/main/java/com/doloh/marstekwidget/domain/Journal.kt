@@ -50,6 +50,13 @@ data class JournalObservation(
     val backupWatts: Double? = null,
     val soc: Int? = null,
     val temperatureC: Double? = null,
+    /** Light-return hysteresis: when the confirmed return happened (epoch ms, ≤ now) and why («grid_charging» / «idle_5min»). */
+    val returnedAtMillis: Long? = null,
+    val returnBasis: String? = null,
+    /** Suspected overload trip detected at this poll: the last backup-output reading (W). */
+    val overloadTripW: Double? = null,
+    /** ES.GetMode `mode` (UPS / Manual / Auto …), null = no answer. */
+    val mode: String? = null,
 )
 
 data class DetectorMemory(
@@ -68,6 +75,8 @@ data class DetectorMemory(
     val topupAtMillis: Long? = null,
     val onGridCount: Int = 0,
     val onGridSinceMillis: Long? = null,
+    val mode: String? = null,
+    val answered: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("grid", grid?.name ?: JSONObject.NULL).put("direction", direction?.name ?: JSONObject.NULL)
@@ -76,6 +85,7 @@ data class DetectorMemory(
         .put("fullSent", fullSent).put("highDischargeSent", highDischargeSent).put("onGridSent", onGridSent).put("tempSent", tempSent)
         .put("lowSoc", lowSoc ?: JSONObject.NULL).put("topupAt", topupAtMillis ?: JSONObject.NULL)
         .put("onGridCount", onGridCount).put("onGridSince", onGridSinceMillis ?: JSONObject.NULL)
+        .put("mode", mode ?: JSONObject.NULL).put("answered", answered)
 
     companion object {
         fun fromJson(raw: String?): DetectorMemory? = runCatching {
@@ -93,6 +103,8 @@ data class DetectorMemory(
                 topupAtMillis = if (j.has("topupAt")) long("topupAt") else null,
                 onGridCount = j.optInt("onGridCount"),
                 onGridSinceMillis = if (j.has("onGridSince")) long("onGridSince") else null,
+                mode = if (!j.has("mode") || j.isNull("mode")) null else j.optString("mode"),
+                answered = j.optBoolean("answered", false),
             )
         }.getOrNull()
     }
@@ -116,6 +128,16 @@ object JournalDetector {
     private const val TOPUP_REPEAT_MILLIS = 6 * 3600_000L
     private const val ON_GRID_MIN_SAMPLES = 3
     private const val ON_GRID_MIN_MILLIS = 120_000L
+    /** Kinds the alert engine also posts as notifications (both modes) — [AlertNotifier.notifyJournal] skips them. */
+    val ALERT_ENGINE_KINDS = setOf("anomaly_overload_trip", "mode_left_ups")
+
+    fun overloadTripText(lastW: Double): String =
+        "Можливо, спрацював захист станції від перевантаження (резервний вихід: останнє значення ${lastW.roundToInt()} Вт). " +
+            "Код помилки дивіться в застосунку Marstek; якщо там 405 — зменшіть пускове навантаження."
+
+    fun modeLeftUpsText(mode: String): String = "Станція вийшла з режиму UPS (зараз: $mode)"
+
+    fun isUps(mode: String?): Boolean = mode?.trim()?.equals("ups", ignoreCase = true) == true
 
     fun clampThreshold(watts: Int): Int = watts.coerceIn(MIN_ANOMALY_DISCHARGE_W, MAX_ANOMALY_DISCHARGE_W)
 
@@ -147,18 +169,35 @@ object JournalDetector {
         val backup = obs.backupWatts?.takeIf(Double::isFinite)
         val battery = obs.batteryWatts?.takeIf(Double::isFinite)
         val grid = obs.gridState.takeIf { it != GridState.UNKNOWN }
-        if (grid != null && m.grid != null && grid != m.grid) {
+        // off after a known state or after an answered poll whose light was still unconfirmed (hysteresis); on only after off
+        if (grid != null && grid != m.grid && (m.grid != null || (grid == GridState.OFF && m.answered))) {
             if (grid == GridState.OFF) {
                 val watts = backup?.takeIf { it > 0 }?.let { "резервний вихід ${it.roundToInt()} Вт" } ?: "живлення від батареї"
                 add("light_lost", JournalCategory.LIGHT, "Світло зникло: $watts$socText", backup)
                 m = m.copy(outageStartedAtMillis = nowMillis)
             } else {
-                val lasted = m.outageStartedAtMillis?.let { " після ${durationText((nowMillis - it) / 1000)}" }.orEmpty()
-                add("light_returned", JournalCategory.LIGHT, "Світло повернулось$lasted$socText")
+                val back = obs.returnedAtMillis?.takeIf { it <= nowMillis } ?: nowMillis
+                val lasted = m.outageStartedAtMillis?.let { " після ${durationText((back - it) / 1000)}" }.orEmpty()
+                val basis = when (obs.returnBasis) {
+                    "grid_charging" -> " (заряджання від мережі)"
+                    "idle_5min" -> " (без навантаження з ${JournalExport.time(back).substring(11, 16)})"
+                    else -> ""
+                }
+                add("light_returned", JournalCategory.LIGHT, "Світло повернулось$lasted$basis$socText")
                 m = m.copy(outageStartedAtMillis = null)
             }
         }
         if (grid != null) m = m.copy(grid = grid)
+        obs.overloadTripW?.takeIf(Double::isFinite)?.let { add("anomaly_overload_trip", JournalCategory.ANOMALY, overloadTripText(it), it) }
+        m = m.copy(answered = true)
+        obs.mode?.trim()?.takeIf(String::isNotEmpty)?.let { mode ->
+            val before = m.mode
+            if (before != null && !mode.equals(before, ignoreCase = true)) {
+                if (isUps(before)) add("mode_left_ups", JournalCategory.ANOMALY, modeLeftUpsText(mode))
+                else add("mode_changed", JournalCategory.SYSTEM, "Режим роботи змінився: $before → $mode")
+            }
+            m = m.copy(mode = mode)
+        }
 
         // Standby top-ups at 100 % (self-drain to 99 %, ~1 min from the grid every ~40 min) are maintenance:
         // no «Почалось заряджання» / «Батарею заряджено», at most one «Підзаряд до 100% (утримання)» per 6 h.

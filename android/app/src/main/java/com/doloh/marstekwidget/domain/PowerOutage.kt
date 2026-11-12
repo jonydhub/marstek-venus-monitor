@@ -45,6 +45,13 @@ data class PowerOutageInfo(
     /** Machine id of the schedule source (loe, yasno, kharkiv, LOE, YASNO, …) for the official-site link. */
     val sourceId: String? = null,
     val regionId: String? = null,
+    /** Light hysteresis: the light is still off but the backup output reads ~0 W now (a load pause, or a trip). */
+    val pendingReturn: Boolean = false,
+    /** Suspected overload trip in this outage: last backup reading (W) and when it was detected (ISO). */
+    val overloadTripWatts: Double? = null,
+    val overloadTripAt: String? = null,
+    /** Start of the current outage (ISO) per the hysteresis. */
+    val outageSince: String? = null,
 )
 
 data class ScheduleWindow(val startMillis: Long, val endMillis: Long, val maybe: Boolean)
@@ -107,6 +114,11 @@ object PowerOutageParser {
             fetchedAt = block.optStringOrNull("fetched_at"),
             sourceId = block.optStringOrNull("source_id") ?: block.optStringOrNull("source"),
             regionId = block.optStringOrNull("region"),
+            pendingReturn = block.optJSONObject("grid_detail")?.optBoolean("pending_return", false) == true,
+            overloadTripWatts = block.optJSONObject("grid_detail")?.optJSONObject("overload_trip")?.optDouble("last_w", Double.NaN)
+                ?.takeIf(Double::isFinite),
+            overloadTripAt = block.optJSONObject("grid_detail")?.optJSONObject("overload_trip")?.optStringOrNull("at"),
+            outageSince = block.optJSONObject("grid_detail")?.optStringOrNull("outage_since"),
         )
     }
 

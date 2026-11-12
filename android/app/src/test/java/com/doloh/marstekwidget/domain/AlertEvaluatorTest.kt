@@ -35,6 +35,10 @@ class AlertEvaluatorTest {
         loadW: Double? = null,
         published: Boolean = true,
         avg24h: Double? = null,
+        mean7d: Double? = null,
+        coverage7d: Double = 7200.0,
+        gridDetail: String = "null",
+        mode: String? = null,
         collectedAt: ZonedDateTime? = now,
     ): BatterySnapshot {
         val outage = grid?.let {
@@ -48,14 +52,15 @@ class AlertEvaluatorTest {
                 loadW?.let { add("\"load_w\":$it") }
             }.joinToString(",")
             """{"available":true,"group":"1.1","grid_state":"$grid","current_outage":$current,"next_outage":$next,
-               "schedule_published":$published,"autonomy":{$autonomy}}"""
+               "schedule_published":$published,"autonomy":{$autonomy},"grid_detail":$gridDetail}"""
         }
-        val insights = avg24h?.let { """{"backup_avg_w_24h":$it,"soc_history":[]}""" }
+        val insights = if (avg24h == null && mean7d == null) null else
+            """{"backup_avg_w_24h":$avg24h,"backup_load_mean_w_7d":$mean7d,"backup_load_coverage_seconds_7d":$coverage7d,"soc_history":[]}"""
         return BatterySnapshot(
             socPercent = soc, batteryCapacityWh = capacityWh, ratedCapacityWh = 5120.0, temperatureCelsius = temp,
             batteryPowerWatts = power, direction = direction, etaSeconds = eta,
             collectedAt = collectedAt?.toInstant()?.toString(), offgridPowerWatts = offgrid,
-            powerOutageJson = outage, insightsJson = insights,
+            powerOutageJson = outage, insightsJson = insights, operatingMode = mode,
         )
     }
 
@@ -82,7 +87,7 @@ class AlertEvaluatorTest {
         val alert = lost.one(AlertId.LIGHT_LOST)
         assertEquals(AlertSeverity.WARN, alert.severity)
         assertEquals("Світло зникло", alert.title)
-        assertTrue(alert.text, alert.text.contains("Резервний вихід 430 W"))
+        assertTrue(alert.text, alert.text.contains("Резервний вихід 430 Вт"))
         assertTrue(alert.text, alert.text.contains("заряд 64%"))
         assertTrue(alert.text, alert.text.contains("вистачить на 4 год 10 хв (оцінка)"))
         assertTrue(alert.text, alert.text.contains("повернення о 22:00"))
@@ -99,7 +104,7 @@ class AlertEvaluatorTest {
         assertEquals(AlertSeverity.INFO, alert.severity)
         assertTrue(alert.text, alert.text.contains("Без світла ≈ 2 год 15 хв"))
         // (64 − 40) % × 5.12 kWh = 1.23 kWh
-        assertTrue(alert.text, alert.text.contains("витрачено ≈ 1,23 kWh (64% → 40%)"))
+        assertTrue(alert.text, alert.text.contains("витрачено ≈ 1,23 кВт·год (64% → 40%)"))
         assertTrue(alert.text, alert.text.contains("заряджання почалось"))
 
         val lost2 = eval(back.memory, snap(now = at(200), grid = "off", soc = 60), at(200)).memory
@@ -181,8 +186,8 @@ class AlertEvaluatorTest {
         val r = eval(null, snap(soc = 20, capacityWh = 1000.0, nextStart = at(180), nextEnd = at(420), runtime = 9000, covers = false, loadW = 400.0))
         val alert = r.one(AlertId.RESERVE_SHORT_NEXT)
         assertEquals("До відключення варто дозарядити", alert.title)
-        assertTrue(alert.text, alert.text.contains("треба ≈ 1,60 kWh, є 1,00 kWh"))
-        assertTrue(alert.text, alert.text.contains("бракує ≈ 0,60 kWh"))
+        assertTrue(alert.text, alert.text.contains("треба ≈ 1,60 кВт·год, є 1,00 кВт·год"))
+        assertTrue(alert.text, alert.text.contains("бракує ≈ 0,60 кВт·год"))
         assertTrue(alert.text, alert.text.contains("22:00–02:00"))
         assertEquals(AlertSeverity.WARN, alert.severity)
         val dup = eval(r.memory, snap(soc = 21, capacityWh = 1050.0, nextStart = at(180), nextEnd = at(420), runtime = 9400, covers = false, loadW = 400.0))
@@ -221,7 +226,7 @@ class AlertEvaluatorTest {
         val idle = eval(null, snap(soc = 46)).memory
         val r = eval(idle, snap(soc = 46, direction = BatteryDirection.CHARGING, power = 820.0, eta = 11700))
         val alert = r.one(AlertId.CHARGING_STARTED)
-        assertTrue(alert.text, alert.text.contains("≈ 820 W (оцінка)"))
+        assertTrue(alert.text, alert.text.contains("≈ 820 Вт (оцінка)"))
         assertTrue(alert.text, alert.text.contains("до 100% ≈ 3 год 15 хв"))
         val flicker = eval(r.memory, snap(now = at(15), soc = 47), at(15)).memory
         val restart = eval(flicker, snap(now = at(30), soc = 47, direction = BatteryDirection.CHARGING, power = 800.0), at(30))
@@ -265,20 +270,52 @@ class AlertEvaluatorTest {
     // ---- consumption ----
 
     @Test
-    fun highLoadUsesMaxOfThresholdAndTwiceAverageWithRuntime() {
+    fun highLoadUsesMaxOfThresholdAndTwiceTheSevenDayRealLoadWithRuntime() {
         val on = eval(null, snap()).memory
-        val off = eval(on, snap(grid = "off", capacityWh = 1400.0, offgrid = 250.0, avg24h = 150.0))
-        assertFalse("250 W is below max(200, 2×150)", AlertId.HIGH_LOAD in off.ids())
-        val high = eval(off.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 350.0, avg24h = 150.0))
+        val off = eval(on, snap(grid = "off", capacityWh = 1400.0, offgrid = 250.0, mean7d = 150.0))
+        assertFalse("250 Вт is below max(200, 2×150)", AlertId.HIGH_LOAD in off.ids())
+        val high = eval(off.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 350.0, mean7d = 150.0))
         val alert = high.one(AlertId.HIGH_LOAD)
-        assertEquals("Споживання 350 W — запасу вистачить лише на 4 год", alert.text.substringBefore(" ("))
-        assertTrue(alert.text, alert.text.contains("поріг 300 W"))
-        assertFalse(AlertId.HIGH_LOAD in eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 260.0, avg24h = 150.0)).ids())
-        val calm = eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 200.0, avg24h = 150.0)).memory
-        assertTrue(AlertId.HIGH_LOAD in eval(calm, snap(grid = "off", capacityWh = 1400.0, offgrid = 400.0, avg24h = 150.0)).ids())
+        assertEquals("Споживання 350 Вт — запасу вистачить лише на 4 год", alert.text.substringBefore(" ("))
+        assertTrue(alert.text, alert.text.contains("поріг 300 Вт, середнє 150 Вт за 7 дн"))
+        assertFalse(AlertId.HIGH_LOAD in eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 260.0, mean7d = 150.0)).ids())
+        val calm = eval(high.memory, snap(grid = "off", capacityWh = 1400.0, offgrid = 200.0, mean7d = 150.0)).memory
+        assertTrue(AlertId.HIGH_LOAD in eval(calm, snap(grid = "off", capacityWh = 1400.0, offgrid = 400.0, mean7d = 150.0)).ids())
         val custom = AlertSettings(highLoadThresholdWatts = 500)
-        assertFalse(AlertId.HIGH_LOAD in eval(off.memory, snap(grid = "off", offgrid = 450.0, avg24h = 150.0), settings = custom).ids())
+        assertFalse(AlertId.HIGH_LOAD in eval(off.memory, snap(grid = "off", offgrid = 450.0, mean7d = 150.0), settings = custom).ids())
         assertFalse("grid on: Venus bypasses, no alert", AlertId.HIGH_LOAD in eval(null, snap(offgrid = 900.0)).ids())
+    }
+
+    @Test
+    fun noMisleadingAverageFromZeroLoadOrTooLittleRealLoad() {
+        val on = eval(null, snap()).memory
+        // the 24 h average including idle hours (7 Вт) is not a load reference any more
+        val diluted = eval(on, snap(grid = "off", capacityWh = 1400.0, offgrid = 250.0, avg24h = 7.0)).one(AlertId.HIGH_LOAD)
+        assertTrue(diluted.text, diluted.text.endsWith("(поріг 200 Вт)"))
+        assertFalse(diluted.text, diluted.text.contains("середнє"))
+        // a 7-day mean from only 10 min of real load: neither used nor shown
+        val thin = eval(on, snap(grid = "off", capacityWh = 1400.0, offgrid = 250.0, mean7d = 400.0, coverage7d = 600.0)).one(AlertId.HIGH_LOAD)
+        assertFalse(thin.text, thin.text.contains("середнє"))
+    }
+
+    @Test
+    fun overloadTripNotifiesOncePerTripWithTheLastReading() {
+        val detail = """{"pending_return":true,"overload_trip":{"last_w":779,"at":"2026-11-11T22:08:35+02:00"}}"""
+        val on = eval(null, snap(grid = "off", offgrid = 779.0)).memory
+        val first = eval(on, snap(grid = "off", offgrid = 0.0, gridDetail = detail))
+        val alert = first.one(AlertId.OVERLOAD_TRIP)
+        assertEquals("Можливо, спрацював захист станції від перевантаження (резервний вихід: останнє значення 779 Вт). " +
+            "Код помилки дивіться в застосунку Marstek; якщо там 405 — зменшіть пускове навантаження.", alert.text)
+        assertFalse(AlertId.OVERLOAD_TRIP in eval(first.memory, snap(grid = "off", offgrid = 0.0, gridDetail = detail)).ids())
+        assertFalse("still off, not «світло повернулось»", AlertId.LIGHT_RETURNED in first.ids())
+    }
+
+    @Test
+    fun leavingUpsModeNotifies() {
+        val ups = eval(null, snap(mode = "UPS")).memory
+        val left = eval(ups, snap(mode = "Manual"))
+        assertEquals("Станція вийшла з режиму UPS (зараз: Manual)", left.one(AlertId.MODE_LEFT_UPS).text)
+        assertFalse(AlertId.MODE_LEFT_UPS in eval(left.memory, snap(mode = "Auto")).ids())
     }
 
     /** Real outage: 98 %, 5030 Wh stored, backup 1330 W, floor 11 % of 5120 Wh → 3 год 22 хв (not 3 год 47 хв to 0 %). */
