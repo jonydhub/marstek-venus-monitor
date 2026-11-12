@@ -1,6 +1,6 @@
 """Event journal detector: turns consecutive polls into timestamped events (pure, no I/O).
 
-Light on/off comes ONLY from the battery's backup output (grid_state from detect_grid_state).
+Light on/off comes ONLY from the battery's backup output, through the hysteresis in gridstate.py (confirmed grid_state).
 A lost connection is its own event and never implies «світла нема»: while the device does not answer,
 the grid state is unknown and the last known state is kept, so no light event fires.
 """
@@ -26,8 +26,22 @@ CATEGORIES = {
     "maintenance_topup": "battery",
     "connection_lost": "connection", "connection_restored": "connection",
     "anomaly_high_discharge": "anomaly", "anomaly_discharge_on_grid": "anomaly", "anomaly_temperature": "anomaly",
+    "anomaly_overload_trip": "anomaly", "mode_left_ups": "anomaly", "mode_changed": "system",
     "server_started": "system", "initial_state": "system",
 }
+
+
+def overload_trip_text(last_w) -> str:
+    return (f"Можливо, спрацював захист станції від перевантаження (резервний вихід: останнє значення {round(last_w)} Вт). "
+            "Код помилки дивіться в застосунку Marstek; якщо там 405 — зменшіть пускове навантаження.")
+
+
+def mode_left_ups_text(mode) -> str:
+    return f"Станція вийшла з режиму UPS (зараз: {mode})"
+
+
+def is_ups_mode(mode) -> bool:
+    return isinstance(mode, str) and mode.strip().lower() == "ups"
 
 
 @dataclass(frozen=True)
@@ -41,6 +55,10 @@ class Observation:
     backup_w: float | None = None    # ES.GetStatus offgrid_power
     soc: int | None = None
     temp_c: float | None = None
+    returned_at: float | None = None  # grid-state hysteresis: when the confirmed return happened (≤ now)
+    return_basis: str | None = None   # "grid_charging" / "idle_5min"
+    overload_trip_w: float | None = None  # suspected overload trip detected at this poll (last backup W)
+    mode: str | None = None           # ES.GetMode `mode` (UPS / Manual / Auto / …), None = no answer
 
 
 @dataclass(frozen=True)
@@ -60,6 +78,8 @@ class DetectorState:
     topup_at: float | None = None       # last «Підзаряд до 100% (утримання)» record
     on_grid_count: int = 0              # consecutive measured discharge samples with grid present
     on_grid_since: float | None = None
+    mode: str | None = None             # last answered operating mode
+    answered: bool = False              # at least one answered poll before this one
 
 
 def _num(value):
@@ -74,6 +94,12 @@ def duration_text(seconds) -> str:
     minutes = max(0, int(round(float(seconds) / 60)))
     hours, minutes = divmod(minutes, 60)
     return f"{hours} год {minutes} хв" if hours else f"{minutes} хв"
+
+
+def _clock(ts) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Kyiv")).strftime("%H:%M")
 
 
 def _event(ts, kind, text, value=None):
@@ -133,17 +159,35 @@ def step(state: DetectorState | None, obs: Observation, now: float,
     soc_text = f", заряд {soc}%" if soc is not None else ""
 
     # --- light: backup-output power only; unknown keeps the last known state ---
-    if grid is not None and s.grid is not None and grid != s.grid:
+    # off after a known state or after an answered poll whose light was still unconfirmed (hysteresis); on only after off
+    if grid is not None and grid != s.grid and (s.grid is not None or (grid == "off" and s.answered)):
         if grid == "off":
             watts = f"резервний вихід {round(backup)} Вт" if backup is not None and backup > 0 else "живлення від батареї"
             events.append(_event(now, "light_lost", f"Світло зникло: {watts}{soc_text}", backup))
             s = replace(s, outage_started_at=now)
         else:
-            lasted = f" після {duration_text(now - s.outage_started_at)}" if s.outage_started_at else ""
-            events.append(_event(now, "light_returned", f"Світло повернулось{lasted}{soc_text}"))
+            back = obs.returned_at if obs.returned_at is not None and obs.returned_at <= now else now
+            lasted = f" після {duration_text(back - s.outage_started_at)}" if s.outage_started_at else ""
+            basis = {"grid_charging": " (заряджання від мережі)",
+                     "idle_5min": f" (без навантаження з {_clock(back)})"}.get(obs.return_basis, "")
+            events.append(_event(now, "light_returned", f"Світло повернулось{lasted}{basis}{soc_text}"))
             s = replace(s, outage_started_at=None)
     if grid is not None:
         s = replace(s, grid=grid)
+    trip = _num(obs.overload_trip_w)
+    if trip is not None:
+        events.append(_event(now, "anomaly_overload_trip", overload_trip_text(trip), trip))
+    s = replace(s, answered=True)
+
+    # --- operating mode: leaving UPS is an anomaly (backup output no longer guaranteed) ---
+    mode = obs.mode.strip() if isinstance(obs.mode, str) and obs.mode.strip() else None
+    if mode is not None:
+        if s.mode is not None and mode.lower() != s.mode.lower():
+            if is_ups_mode(s.mode):
+                events.append(_event(now, "mode_left_ups", mode_left_ups_text(mode)))
+            else:
+                events.append(_event(now, "mode_changed", f"Режим роботи змінився: {s.mode} → {mode}"))
+        s = replace(s, mode=mode)
 
     # --- charging ---
     # A Venus E at 100 % self-drains to 99 % and tops itself up from the grid (~1 min, ≈ 1.2 kW) about every

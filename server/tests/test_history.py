@@ -84,10 +84,16 @@ class InsightsTests(unittest.TestCase):
             "backup_energy_today_wh": None,
             "temperature_c": 26.0,
             "soc_history": [],
-            "today": {"charge_seconds": 0, "discharge_seconds": 0, "outage_seconds": 0},
+            "today": {"charge_seconds": 0, "discharge_seconds": 0, "outage_seconds": 0, "charge_wh": 0.0,
+                      "discharge_wh": 0.0, "charge_estimated": False, "discharge_estimated": False,
+                      "grid_timeline": [{"start": "2026-11-09T00:00:00+02:00",
+                                         "end": insights["today"]["grid_timeline"][0]["end"], "state": "unknown"}]},
             "outage_periods": [],
             "chart_events": [],
             "standby_w": None,
+            "last_grid_charge": None,
+            "backup_load_mean_w_7d": None,
+            "backup_load_coverage_seconds_7d": 0,
         })
 
     def test_time_weighted_average_needs_one_hour_coverage(self):
@@ -190,7 +196,9 @@ class PollerInsightsTests(unittest.TestCase):
         insights = poller.snapshot()["insights"]
         self.assertEqual(set(insights), {"backup_output_w", "backup_avg_w_24h", "backup_avg_coverage_hours",
                                          "backup_energy_today_wh", "temperature_c", "soc_history",
-                                         "today", "outage_periods", "chart_events", "standby_w"})
+                                         "today", "outage_periods", "chart_events", "standby_w",
+                                         "last_grid_charge", "backup_load_mean_w_7d",
+                                         "backup_load_coverage_seconds_7d"})
         self.assertEqual(insights["backup_output_w"], 0.0)
         self.assertEqual(insights["temperature_c"], 24.0)
         self.assertEqual(len(rows), 1)

@@ -137,7 +137,8 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
                         provider="loe", source="loe", source_name="Львівобленерго", emergency=False,
                         region=None, source_errors=None, available=True, maybe=None, source_stale=False,
                         source_detail=None, schedule_unavailable=False, backup_output_w=None, rated_wh=None,
-                        soc=None, floor_pct=None, backup_threshold_w=BACKUP_DRAW_THRESHOLD_W):
+                        soc=None, floor_pct=None, backup_threshold_w=BACKUP_DRAW_THRESHOLD_W, smoothed_load_w=None,
+                        grid_detail=None):
     now = now if now.tzinfo else now.replace(tzinfo=KYIV)
     current = current_end = None
     upcoming = upcoming_start = None
@@ -173,7 +174,7 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
     published = [schedule for schedule in schedules or [] if schedule]
     autonomy = _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, current or upcoming, measured_load_w,
                          backup_output_w=backup_output_w, rated_wh=rated_wh, soc=soc, floor_pct=floor_pct,
-                         backup_threshold_w=backup_threshold_w)
+                         backup_threshold_w=backup_threshold_w, smoothed_load_w=smoothed_load_w)
     midnight = datetime(now.astimezone(KYIV).year, now.astimezone(KYIV).month, now.astimezone(KYIV).day, tzinfo=KYIV)
     bar_end = midnight + timedelta(days=2)
     bar = [{"start": _iso(s), "end": _iso(e), "kind": "off"} for s, e in _scheduled_windows(schedules, group)
@@ -194,6 +195,7 @@ def build_outage_status(*, now, group, building, schedules, accidents, grid_stat
         "group": group,
         "grid_state": grid_state,
         "grid_state_basis": "backup_output_power",
+        "grid_detail": grid_detail,
         "current_outage": current,
         "next_outage": upcoming,
         "maybe_outages": maybe_windows,
@@ -220,12 +222,14 @@ def _finite_or_none(value):
 
 def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, measured_load_w=None, *,
               backup_output_w=None, rated_wh=None, soc=None, floor_pct=None,
-              backup_threshold_w=BACKUP_DRAW_THRESHOLD_W):
+              backup_threshold_w=BACKUP_DRAW_THRESHOLD_W, smoothed_load_w=None):
     """Runtime on the battery = usable energy above the discharge floor / load.
 
     usable = stored − rated × floor% (the BMS stops discharging at the floor, ~11–12 % on a Venus E).
-    Load precedence: (1) during an outage the measured backup output (ES offgrid_power, a direct reading);
-    (2) the capacity-trend discharge estimate; (3) a configured average; (4) the 24 h measured average.
+    Load precedence during an outage: (1) the energy-weighted mean backup output over the last 10 min of this outage
+    (history.smoothed_backup_load — a compressor that cycles 0 ↔ 800 W gives one steady number, shown with «≈»);
+    (2) the current backup output (ES offgrid_power); (3) the capacity-trend discharge estimate; otherwise
+    (4) a configured average; (5) the 24 h measured average.
     """
     result: dict = {"load_w": None, "load_basis": None, "stored_wh": None, "usable_wh": None, "floor_pct": None,
                     "floor_wh": None, "runtime_seconds": None, "outage_seconds": None, "covers_next_outage": None}
@@ -248,7 +252,10 @@ def _autonomy(grid_state, stored_wh, battery_flow, expected_load_w, outage, meas
     load, basis = None, None
     measured = _finite_or_none(flow.get("power_w"))
     backup = _finite_or_none(backup_output_w)
-    if grid_state == "off" and backup is not None and backup >= float(backup_threshold_w):
+    smoothed = _finite_or_none(smoothed_load_w)
+    if grid_state == "off" and smoothed is not None and smoothed >= float(backup_threshold_w):
+        load, basis = smoothed, "measured_backup_avg_10min"
+    elif grid_state == "off" and backup is not None and backup >= float(backup_threshold_w):
         load, basis = backup, "measured_backup_output"
     elif grid_state == "off" and flow.get("direction") == "discharging" and measured is not None:
         load, basis = abs(measured), "measured_discharge"

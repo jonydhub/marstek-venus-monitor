@@ -21,8 +21,10 @@ from zoneinfo import ZoneInfo
 
 from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
-from history import HistoryStore, compute_insights, measured_backup_load
-from outage import build_outage_service, detect_grid_state
+import gridstate
+from history import (LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
+                     measured_backup_load, smoothed_backup_load)
+from outage import build_outage_service
 from netcache import CachedJsonClient
 from regions import build_region_catalog
 from uaoutages import NOW_URL
@@ -41,8 +43,14 @@ PORT = SETTINGS.port
 HTTP_HOST = SETTINGS.bind
 HTTP_PORT = SETTINGS.http_port
 API_TOKEN = SETTINGS.api_token
-POLL_SECONDS = 30
-MIN_POLL_SECONDS = 15  # VenusE drops requests <1 s apart; a poll is 6 paced requests
+# A poll = 6 read-only requests paced ≥ 1 s apart (VenusE drops UDP bursts): ≈ 6–7 s when the battery answers,
+# ≤ 6 × (2 × 2 s timeout + 0.25 s + 1 s) = 31.5 s in the worst case. Polls start every POLL_SECONDS (cadence, not
+# sleep-after), never closer than POLL_GAP_SECONDS after the previous one ended.
+POLL_SECONDS = 15
+MIN_POLL_SECONDS = 15
+POLL_GAP_SECONDS = 1.0
+REQUEST_PACING_SECONDS = 1.0
+LOAD_STATS_REFRESH_SECONDS = 600
 BATTERY_RATE_WINDOW_SECONDS = 300
 BATTERY_RATE_MIN_SECONDS = 120
 BATTERY_RATE_DEADBAND_W = 10.0
@@ -248,6 +256,10 @@ class MarstekPoller:
         self.history = None  # HistoryStore, attached by __main__ so imports/tests never touch the real DB
         self.detector = None  # events.DetectorState (journal); in memory, rebuilt after a restart
         self.initial_journaled = False  # «Стан на старті» written once per process, at the first answered poll
+        self.grid = None  # gridstate.GridTracker: confirmed light state with hysteresis (seeded from history)
+        self.grid_seeded = False
+        self.load_stats = None  # (mean W, covered s) of the 7-day backup draw, refreshed every 10 min
+        self.load_stats_at = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", 0))
@@ -313,6 +325,10 @@ class MarstekPoller:
         bat = (battery.get("data") or {}) if battery.get("ok") else {}
         es = (energy.get("data") or {}) if energy.get("ok") else {}
         if not bat and not es:
+            try:  # a poll without any answer is kept as a bare marker: it breaks the light-return run
+                self.history.record({"ts": now})
+            except Exception as exc:
+                logging.warning("history write failed: %s", exc)
             return self._history_rows(now)
         soc = _optional_float(bat.get("soc", es.get("bat_soc")))
         sample = {
@@ -338,28 +354,78 @@ class MarstekPoller:
             logging.warning("history read failed: %s", exc)
             return []
 
-    def power_outage(self, results: dict, battery_flow: dict, measured_load_w=None) -> dict:
+    def grid_update(self, results: dict, rows: list, now: float):
+        """Feed this poll into the light hysteresis (gridstate.py); the first poll replays the stored history."""
+        energy = results.get("ES.GetStatus", {})
+        es = (energy.get("data") or {}) if energy.get("ok") else {}
+        offgrid = _optional_float(es.get("offgrid_power")) if energy.get("ok") else None
+        gap = gridstate.confirm_gap_seconds(POLL_SECONDS)
+        if not self.grid_seeded:
+            self.grid_seeded = True
+            earlier = [r for r in rows if r.get("ts") is not None and r["ts"] < now]
+            if earlier:
+                self.grid = gridstate.replay(earlier, threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap)
+        self.grid, signal = gridstate.step(self.grid, now, offgrid, es.get("ongrid_power"),
+                                           threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap)
+        return signal
+
+    def grid_detail(self, signal) -> dict:
+        g = self.grid or gridstate.GridTracker()
+        iso = lambda t: event_time(t) if t is not None else None  # noqa: E731
+        return {
+            "basis": "backup_output_hysteresis",
+            "pending_return": bool(signal.pending),
+            "outage_since": iso(g.off_since),
+            "zero_load_since": iso(g.zero_since),
+            "light_since": iso(g.on_since),
+            "confirmed_by": g.confirmed_by,
+            "return_confirm_seconds": int(gridstate.RETURN_CONFIRM_SECONDS),
+            "overload_trip": {"last_w": round(g.trip_w), "at": iso(g.trip_at)} if g.tripped and g.trip_w is not None
+            else None,
+        }
+
+    def power_outage(self, results: dict, battery_flow: dict, measured_load_w=None, signal=None, rows=None,
+                     now=None) -> dict:
         energy = results.get("ES.GetStatus", {})
         battery = results.get("Bat.GetStatus", {})
         energy_data = (energy.get("data") or {}) if energy.get("ok") else {}
         bat = (battery.get("data") or {}) if battery.get("ok") else {}
-        # Light state comes ONLY from the backup-output power; no answer from the battery = unknown.
-        grid_state = detect_grid_state(
-            energy_data.get("offgrid_power"), energy_data.get("ongrid_power"), bool(energy.get("ok")),
-            threshold_w=BACKUP_THRESHOLD_W,
-        )
+        # Light state comes ONLY from the backup output, through the hysteresis; no ES answer = unknown.
+        if signal is None:
+            signal = self.grid_update(results, rows or [], now if now is not None else time.time())
+        tracker = self.grid or gridstate.GridTracker()
+        grid_state = (tracker.state or "unknown") if energy.get("ok") else "unknown"
+        smoothed = None
+        if grid_state == "off" and rows:
+            smoothed = smoothed_backup_load(rows, now=now if now is not None else time.time(), since=tracker.off_since)
         return self.outage.status(grid_state=grid_state, stored_wh=bat.get("bat_capacity"), battery_flow=battery_flow,
                                   expected_load_w=EXPECTED_LOAD_W, measured_load_w=measured_load_w,
                                   backup_output_w=energy_data.get("offgrid_power"),
                                   rated_wh=bat.get("rated_capacity") or energy_data.get("bat_cap"),
                                   soc=bat.get("soc", energy_data.get("bat_soc")),
-                                  floor_pct=SETTINGS.discharge_floor_pct, backup_threshold_w=BACKUP_THRESHOLD_W)
+                                  floor_pct=SETTINGS.discharge_floor_pct, backup_threshold_w=BACKUP_THRESHOLD_W,
+                                  smoothed_load_w=smoothed, grid_detail=self.grid_detail(signal))
 
-    def journal(self, results: dict, battery_flow: dict, grid_state: str, now: float) -> list:
+    def backup_load_stats(self, now: float):
+        """7-day mean backup draw (zero-load excluded), recomputed at most every 10 min."""
+        if self.history is None:
+            return None
+        if self.load_stats_at is None or now - self.load_stats_at >= LOAD_STATS_REFRESH_SECONDS:
+            try:
+                self.load_stats = backup_load_stats(self.history.since(now - LOAD_STATS_WINDOW_SECONDS), now=now,
+                                                    threshold_w=BACKUP_THRESHOLD_W)
+                self.load_stats_at = now
+            except Exception as exc:
+                logging.warning("load statistics failed: %s", exc)
+        return self.load_stats
+
+    def journal(self, results: dict, battery_flow: dict, grid_state: str, now: float, signal=None) -> list:
         """Feed this poll into the event detector and persist new events (never breaks telemetry)."""
         bat_r, es_r = results.get("Bat.GetStatus", {}), results.get("ES.GetStatus", {})
+        mode_r = results.get("ES.GetMode", {})
         bat = (bat_r.get("data") or {}) if bat_r.get("ok") else {}
         es = (es_r.get("data") or {}) if es_r.get("ok") else {}
+        mode = (mode_r.get("data") or {}).get("mode") if mode_r.get("ok") else None
         soc = _optional_float(bat.get("soc", es.get("bat_soc")))
         obs = journal.Observation(
             ok=bool(bat_r.get("ok") or es_r.get("ok")), grid_state=grid_state,
@@ -367,7 +433,11 @@ class MarstekPoller:
             battery_w=_optional_float(battery_flow.get("power_w")) if battery_flow.get("available") else None,
             battery_measured=battery_flow.get("estimated") is False,
             backup_w=_optional_float(es.get("offgrid_power")), soc=None if soc is None else int(round(soc)),
-            temp_c=_optional_float(bat.get("bat_temp")))
+            temp_c=_optional_float(bat.get("bat_temp")),
+            returned_at=getattr(signal, "returned_at", None),
+            return_basis=self.grid.confirmed_by if self.grid is not None and getattr(signal, "returned_at", None) else None,
+            overload_trip_w=getattr(signal, "trip_w", None),
+            mode=mode if isinstance(mode, str) else None)
         new_events, self.detector = journal.step(self.detector, obs, now, SETTINGS.anomaly_discharge_w)
         if obs.ok and not self.initial_journaled:
             new_events = [journal.initial_state_event(obs, now)] + new_events
@@ -388,7 +458,7 @@ class MarstekPoller:
         except Exception as exc:
             logging.warning("event read failed: %s", exc)
             return []
-        wanted = ("light_lost", "light_returned", "charging_started", "charged_full")
+        wanted = ("light_lost", "light_returned", "charging_started", "charged_full", "anomaly_overload_trip")
         return [{"t": event_time(e["ts"]), "kind": e["kind"]} for e in reversed(rows) if e["kind"] in wanted]
 
     def poll_once(self):
@@ -399,17 +469,21 @@ class MarstekPoller:
             except (OSError, ValueError, json.JSONDecodeError) as exc:
                 results[method] = {"ok": False, "error": "No response" if isinstance(exc, TimeoutError) else str(exc)}
             # Keep one source socket and pace requests; VenusE drops UDP bursts.
-            time.sleep(1.0)
+            time.sleep(REQUEST_PACING_SECONDS)
         battery_flow = self.battery_flow(results.get("Bat.GetStatus", {}), results.get("ES.GetStatus", {}))
         now = time.time()
         rows = self.record_history(results, battery_flow, now)
-        power_outage = self.power_outage(results, battery_flow, measured_backup_load(rows, now=now))
+        signal = self.grid_update(results, rows, now)
+        power_outage = self.power_outage(results, battery_flow, measured_backup_load(rows, now=now), signal=signal,
+                                         rows=rows, now=now)
         es = (results.get("ES.GetStatus", {}).get("data") or {}) if results.get("ES.GetStatus", {}).get("ok") else {}
         bat = (results.get("Bat.GetStatus", {}).get("data") or {}) if results.get("Bat.GetStatus", {}).get("ok") else {}
-        self.journal(results, battery_flow, power_outage.get("grid_state", "unknown"), now)
+        self.journal(results, battery_flow, power_outage.get("grid_state", "unknown"), now, signal=signal)
         insights = compute_insights(rows, now=now, current_offgrid_w=es.get("offgrid_power"),
                                     temperature_c=bat.get("bat_temp"), threshold_w=BACKUP_THRESHOLD_W,
-                                    chart_events=self.chart_events(now))
+                                    chart_events=self.chart_events(now),
+                                    confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
+                                    load_stats=self.backup_load_stats(now))
         detector = self.detector
         connection = {"ok": bool(bat or es), "consecutive_failures": detector.failures if detector else 0,
                       "lost": bool(detector and detector.connection_lost)}
@@ -432,10 +506,11 @@ class MarstekPoller:
 
     def run(self):
         while not self.stop_event.is_set():
+            started = time.monotonic()
             if HOST:  # nothing to poll until the battery address is configured
                 self.poll_once()
             if not self.stop_event.is_set():
-                self.wait(POLL_SECONDS)
+                self.wait(next_poll_delay(started, time.monotonic(), POLL_SECONDS))
 
     def stop(self):
         self.stop_event.set()
@@ -459,6 +534,12 @@ class MarstekPoller:
     def snapshot(self):
         with self.lock:
             return json.loads(json.dumps(self.data))
+
+def next_poll_delay(started, finished, interval=None) -> float:
+    """Seconds to wait so polls START every `interval` s; at least POLL_GAP_SECONDS after a slow poll ended."""
+    interval = POLL_SECONDS if interval is None else interval
+    return max(POLL_GAP_SECONDS, float(interval) - (float(finished) - float(started)))
+
 
 def event_time(ts) -> str:
     return datetime.fromtimestamp(round(float(ts)), timezone.utc).astimezone(KYIV_TZ).isoformat(timespec="seconds")

@@ -33,6 +33,7 @@ class PollerJournalTests(unittest.TestCase):
             p.start()
         poller.detector = None
         poller.initial_journaled = False
+        poller.grid, poller.grid_seeded = None, False
 
     def tearDown(self):
         for p in self.patches:
@@ -71,8 +72,16 @@ class PollerJournalTests(unittest.TestCase):
         events = self.store.events()
         self.assertEqual([e["kind"] for e in events], ["initial_state"])
         self.assertEqual(events[0]["category"], "system")
-        self.assertIn("Стан на старті: світло є", events[0]["text"])
+        # 0 W on the backup output alone does not prove the grid (1.3.7 hysteresis): unknown until confirmed
+        self.assertIn("Стан на старті: стан світла невідомий", events[0]["text"])
         self.assertIn("заряд 100%", events[0]["text"])
+
+    def test_initial_state_is_known_from_stored_history(self):
+        now = server.time.time()
+        for i in range(30):  # 7.5 min of idle answers before this process started
+            self.store.record({"ts": now - 450 + i * 15, "soc": 100, "offgrid_w": 0.0, "ongrid_w": 0.0})
+        self.poll(offgrid=0, soc=100)
+        self.assertIn("Стан на старті: світло є", self.store.events()[0]["text"])
 
 
 class EventsEndpointTests(unittest.TestCase):

@@ -1,19 +1,26 @@
-"""Persisted telemetry samples (SQLite, 48 h) and derived insights for /api/status.
+"""Persisted telemetry samples (SQLite, 8 days) and derived insights for /api/status.
 
-One row per poll (~30 s). Gaps longer than MAX_GAP_SECONDS (service down, device silent)
-are never bridged: they are excluded from averages, coverage and energy integrals.
+One row per poll (~15 s). A poll the battery did not answer is stored too, with only `ts` (or without the ES
+powers) — it breaks the light-return hysteresis run (see gridstate.py). Gaps longer than MAX_GAP_SECONDS
+(service down, device silent) are never bridged: they are excluded from averages, coverage and energy integrals.
 """
 from __future__ import annotations
 
 import math
 import os
+
+import gridstate
 import sqlite3
 import threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 KYIV = ZoneInfo("Europe/Kyiv")
-RETENTION_SECONDS = 48 * 3600
+RETENTION_SECONDS = 8 * 86400  # 7-day load statistics for the high-load alert + 1 day margin
+LOAD_STATS_WINDOW_SECONDS = 7 * 86400
+SMOOTH_WINDOW_SECONDS = 600.0
+MEASURED_MIN_W = 10.0
+GRID_CHARGE_W = gridstate.GRID_CHARGE_W
 WINDOW_SECONDS = 24 * 3600
 MAX_GAP_SECONDS = 300.0
 MIN_AVG_COVERAGE_SECONDS = 3600.0
@@ -175,34 +182,108 @@ def _is_outage(row, threshold_w):
     return value is not None and value >= threshold_w  # signed: negative offgrid is noise, not a load
 
 
-def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
-    """Seconds since local midnight spent charging / discharging / without grid (backup output drawing).
+def _measured_battery_w(row):
+    """Battery power from the AC ports (+ charging, − discharging) like server._signed_ac_battery_power, or None."""
+    ongrid, offgrid = _finite(row.get("ongrid_w")), _finite(row.get("offgrid_w"))
+    ongrid = ongrid if ongrid is not None and abs(ongrid) >= MEASURED_MIN_W else 0.0
+    offgrid = offgrid if offgrid is not None and offgrid >= MEASURED_MIN_W else 0.0
+    if not ongrid and not offgrid:
+        return None
+    return -ongrid - offgrid
 
+
+def grid_timeline(rows, *, start, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+                  confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
+    """Confirmed light on/off/unknown spans (epoch seconds) over [start, now] — see gridstate.timeline."""
+    return gridstate.timeline(rows, start=start, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                              max_gap=MAX_GAP_SECONDS)
+
+
+def _iso(t):
+    return datetime.fromtimestamp(round(t), KYIV).isoformat(timespec="seconds")
+
+
+def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+                    confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
+    """Since local midnight: seconds charging / discharging / without light, energy in/out of the battery (Wh).
+
+    «Без світла» = confirmed OFF time of the light timeline (a compressor pause is still an outage). Energy comes from
+    the measured AC powers; where both read 0 the capacity-trend estimate is used and `*_estimated` says so.
     Gaps longer than MAX_GAP_SECONDS (no samples) count as no state at all."""
-    charge = discharge = outage = 0.0
-    for t0, t1, sample in _state_intervals(rows, _local_midnight(now), now):
+    midnight = _local_midnight(now)
+    charge = discharge = 0.0
+    energy = {"charge": 0.0, "discharge": 0.0, "charge_est": 0.0, "discharge_est": 0.0}
+    for t0, t1, sample in _state_intervals(rows, midnight, now):
         span = t1 - t0
         if sample.get("flow_dir") == "charging":
             charge += span
         elif sample.get("flow_dir") == "discharging":
             discharge += span
-        if _is_outage(sample, threshold_w):
-            outage += span
-    return {"charge_seconds": round(charge), "discharge_seconds": round(discharge), "outage_seconds": round(outage)}
+        power, estimated = _measured_battery_w(sample), False
+        if power is None and sample.get("flow_dir") in ("charging", "discharging"):
+            power, estimated = _finite(sample.get("flow_w")), True
+        if power:
+            key = "charge" if power > 0 else "discharge"
+            wh = abs(power) * span / 3600.0
+            energy[key] += wh
+            if estimated:
+                energy[key + "_est"] += wh
+    timeline = grid_timeline(rows, start=midnight, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap)
+    outage = sum(s["end"] - s["start"] for s in timeline if s["state"] == "off")
+    return {"charge_seconds": round(charge), "discharge_seconds": round(discharge), "outage_seconds": round(outage),
+            "charge_wh": round(energy["charge"], 1), "discharge_wh": round(energy["discharge"], 1),
+            "charge_estimated": energy["charge_est"] > 1.0, "discharge_estimated": energy["discharge_est"] > 1.0,
+            "grid_timeline": [{"start": _iso(s["start"]), "end": _iso(s["end"]), "state": s["state"]} for s in timeline]}
 
 
-def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
-    """Backup-output draw periods over the last 24 h as [{start, end}] (ISO, Kyiv); gaps split periods."""
-    periods = []
-    for t0, t1, sample in _state_intervals(rows, now - WINDOW_SECONDS, now):
-        if not _is_outage(sample, threshold_w):
-            continue
-        if periods and abs(periods[-1][1] - t0) < 1e-6:
-            periods[-1][1] = t1
-        else:
-            periods.append([t0, t1])
-    iso = lambda t: datetime.fromtimestamp(round(t), KYIV).isoformat(timespec="seconds")  # noqa: E731
-    return [{"start": iso(a), "end": iso(b)} for a, b in periods if b - a >= 60]
+def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+                   confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
+    """Confirmed no-light periods over the last 24 h as [{start, end}] (ISO, Kyiv); unknown gaps split periods."""
+    spans = grid_timeline(rows, start=now - WINDOW_SECONDS, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap)
+    return [{"start": _iso(s["start"]), "end": _iso(s["end"])} for s in spans
+            if s["state"] == "off" and s["end"] - s["start"] >= 60]
+
+
+def smoothed_backup_load(rows, *, now, since, window=SMOOTH_WINDOW_SECONDS):
+    """Energy-weighted mean backup-output draw (W) over the last `window` s of the current outage (from `since`).
+
+    Pauses of the load (0 W) count — that is the point: the runtime follows the average, not the last reading.
+    None with fewer than 2 samples or no covered time."""
+    if since is None:
+        return None
+    start = max(float(since), now - window)
+    points = sorted((r["ts"], max(0.0, v)) for r in rows
+                    if r.get("ts") is not None and start <= r["ts"] <= now and (v := _finite(r.get("offgrid_w"))) is not None)
+    if len(points) < 2:
+        return None
+    energy = covered = 0.0
+    for (t0, v0), (t1, v1) in zip(points, points[1:]):
+        if 0 < t1 - t0 <= MAX_GAP_SECONDS:
+            energy += (v0 + v1) / 2.0 * (t1 - t0)
+            covered += t1 - t0
+    if covered <= 0:
+        return None
+    return round(energy / covered, 1)
+
+
+def backup_load_stats(rows, *, now, window=LOAD_STATS_WINDOW_SECONDS, threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """(mean W, covered s) of the backup-output draw over `window`, only while it actually drew (zero-load excluded)."""
+    draw = [iv for iv in _intervals(rows, now - window)
+            if iv[2] >= threshold_w and iv[3] >= threshold_w]
+    energy_ws, covered = _integral(draw)
+    if covered <= 0:
+        return None, 0.0
+    return round(energy_ws / covered, 1), round(covered)
+
+
+def last_grid_charge(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
+    """Last poll that charged from the grid (UPS top-up / recharge): {w, t}, or None within 24 h."""
+    for r in sorted((r for r in rows if r.get("ts") is not None and now - WINDOW_SECONDS <= r["ts"] <= now),
+                    key=lambda r: r["ts"], reverse=True):
+        ongrid, offgrid = _finite(r.get("ongrid_w")), _finite(r.get("offgrid_w"))
+        if ongrid is not None and ongrid < GRID_CHARGE_W and (offgrid is None or offgrid < threshold_w):
+            return {"w": round(-ongrid), "t": _iso(r["ts"])}
+    return None
 
 
 STANDBY_MAX_INTERVAL_SECONDS = 6 * 3600
@@ -241,7 +322,8 @@ def standby_consumption(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
 
 
 def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w=BACKUP_DRAW_THRESHOLD_W,
-                     chart_events=None):
+                     chart_events=None, confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, load_stats=None):
+    """`rows`: the last 24 h. `load_stats`: (mean W, covered s) of the 7-day backup draw (see backup_load_stats)."""
     energy_ws, covered = _integral(_intervals(rows, now - WINDOW_SECONDS))
     average = round(energy_ws / covered, 1) if covered >= MIN_AVG_COVERAGE_SECONDS else None
     today = list(_intervals(rows, _local_midnight(now)))
@@ -255,8 +337,11 @@ def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w
         "backup_energy_today_wh": round(today_ws / 3600.0, 1) if today else None,
         "temperature_c": None if temp is None else float(temp),
         "soc_history": _soc_history(rows, now),
-        "today": today_durations(rows, now=now, threshold_w=threshold_w),
-        "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w),
+        "today": today_durations(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap),
+        "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap),
         "chart_events": list(chart_events or []),
         "standby_w": standby_consumption(rows, now=now, threshold_w=threshold_w),
+        "last_grid_charge": last_grid_charge(rows, now=now, threshold_w=threshold_w),
+        "backup_load_mean_w_7d": (load_stats or (None, 0))[0],
+        "backup_load_coverage_seconds_7d": (load_stats or (None, 0))[1],
     }
