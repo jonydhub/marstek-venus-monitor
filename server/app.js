@@ -42,7 +42,13 @@ function formatKwh(value) {
   const number = Number(value);
   return value === null || value === undefined || value === '' || !Number.isFinite(number)
     ? '—'
-    : `${(number / 1000).toLocaleString('uk-UA', {minimumFractionDigits:2, maximumFractionDigits:2})} kWh`;
+    : `${(number / 1000).toLocaleString('uk-UA', {minimumFractionDigits:2, maximumFractionDigits:2})} кВт·год`;
+}
+/** Today's energy «0,81 кВт·год», «≈ 0,15 кВт·год» when part of it is the capacity-trend estimate; '' without data. */
+function todayKwh(wh, estimated) {
+  const n = finiteOrNull(wh);
+  if (n === null) return '';
+  return `${estimated ? '≈\u00A0' : ''}${(n / 1000).toLocaleString('uk-UA', {minimumFractionDigits: 2, maximumFractionDigits: 2})}\u00A0кВт·год`;
 }
 function formatPowerKw(value) {
   const watts = Number(value);
@@ -89,7 +95,7 @@ function drawChart() {
   const x=i=>p.l+cw*i/(history.length-1), yp=v=>p.t+ch-(v-min)/(max-min)*ch, ys=v=>p.t+ch-v/100*ch;
   const line=(key,color,mapper)=>{ctx.beginPath();let begun=false;history.forEach((pt,i)=>{if(!Number.isFinite(pt[key]))return;const xx=x(i),yy=mapper(pt[key]);if(!begun){ctx.moveTo(xx,yy);begun=true;}else ctx.lineTo(xx,yy);});ctx.strokeStyle=color;ctx.lineWidth=2;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();};
   line('backup','#55dfc2',yp); line('grid','#ffb467',yp); line('soc','#ac9aff',ys);
-  ctx.fillStyle='rgba(180,194,214,.55)';ctx.font='10px system-ui';ctx.fillText(`${Math.round(max)} W`,2,p.t+5);ctx.fillText(`${Math.round(min)} W`,2,h-p.b);
+  ctx.fillStyle='rgba(180,194,214,.55)';ctx.font='10px system-ui';ctx.fillText(`${Math.round(max)} Вт`,2,p.t+5);ctx.fillText(`${Math.round(min)} Вт`,2,h-p.b);
 }
 function formatDuration(seconds) {
   if (seconds === 0) return 'Готово';
@@ -153,7 +159,7 @@ function formatClock(iso) {
   return day === today ? time : `${d.toLocaleDateString('uk-UA', {day:'2-digit', month:'2-digit', timeZone:'Europe/Kyiv'})} ${time}`;
 }
 const finiteOrNull = value => value === null || value === undefined || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
-const watts = value => { const n = finiteOrNull(value); return n === null ? '—' : `${Math.round(Math.abs(n))} W`; };
+const watts = value => { const n = finiteOrNull(value); return n === null ? '—' : `${Math.round(Math.abs(n))} Вт`; };
 function outageSourceText(outage) {
   if (outage?.schedule_unavailable) return 'Графік недоступний — світло визначається за резервним виходом';
   if (!outage || outage.provider === 'off' || !outage.available) return 'Графік вимкнено';
@@ -163,6 +169,7 @@ function outageSourceText(outage) {
   return `${name}${fallback ? ' · резерв' : ''}${outage.source_stale ? ' · застаріле' : ''}`;
 }
 function autonomyBasisText(a) {
+  if (a.load_basis === 'measured_backup_avg_10min') return `при середньому навантаженні ≈ ${Math.round(a.load_w)} Вт за останні 10 хв (вимір резервного виходу)`;
   if (a.load_basis === 'measured_backup_output') return `при поточному навантаженні ${Math.round(a.load_w)} Вт (вимір резервного виходу)`;
   if (a.load_basis === 'measured_average_24h') return `при середньому споживанні ${Math.round(a.load_w)} Вт (за 24 год)`;
   if (a.load_basis === 'configured_average') return `при заданому споживанні ${Math.round(a.load_w)} Вт`;
@@ -200,7 +207,7 @@ function lightView(data, fetchFailed) {
   if (outage.grid_state === 'on') return {state: 'on', title: 'Світло є', hint: null};
   return {state: 'unknown', title: 'Світло: —', hint: null};
 }
-function renderToday(today) {
+function renderToday(today, backupWh) {
   const tiles = $('today-tiles'), note = $('today-note');
   if (tiles) tiles.hidden = !today;
   if (note) note.hidden = Boolean(today);
@@ -208,6 +215,14 @@ function renderToday(today) {
   set('today-charge', shortDuration(today.charge_seconds));
   set('today-discharge', shortDuration(today.discharge_seconds));
   set('today-outage', shortDuration(today.outage_seconds));
+  // second line: energy in / out of the battery today (measured AC powers; «≈» = partly the capacity-trend estimate)
+  const lines = {'today-charge-kwh': todayKwh(today.charge_wh, today.charge_estimated),
+    'today-discharge-kwh': todayKwh(today.discharge_wh, today.discharge_estimated),
+    'today-outage-kwh': finiteOrNull(today.outage_seconds) ? todayKwh(backupWh, false) : ''};
+  for (const [id, text] of Object.entries(lines)) { const n = $(id); if (n) { n.textContent = text || '\u00A0'; } }
+  const t = $('today-tiles');
+  if (t) t.title = [today.charge_wh != null ? `Заряджено ${todayKwh(today.charge_wh, today.charge_estimated)}` : null,
+    today.discharge_wh != null ? `Розряджено ${todayKwh(today.discharge_wh, today.discharge_estimated)}` : null].filter(Boolean).join(' · ');
 }
 function kyivMidnight(now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).formatToParts(now).map(p => [p.type, p.value]));
@@ -285,6 +300,35 @@ function scheduleDetail(outage = {}, gridState = outage.grid_state) {
   if (maybe) return `Можливе відключення ${formatClock(maybe.start)}–${formatClock(maybe.end)}`;
   return outage.schedule_published ? 'За графіком без відключень' : 'Графік не опубліковано';
 }
+/** «За графіком: …» for today's row: the schedule's verdict for right now (never the measured light). */
+function scheduleNowText(outage = {}, nowMs = Date.now()) {
+  if (!outage.available || outage.schedule_unavailable) return null;
+  if (outage.emergency) return 'За графіком: аварійні відключення';
+  const cur = outage.current_outage;
+  if (cur?.end && Date.parse(cur.start) <= nowMs && Date.parse(cur.end) > nowMs) return `За графіком: відключення до ${kyivHm(Date.parse(cur.end))}`;
+  if (!outage.schedule_published) return 'За графіком: графік не опубліковано';
+  const next = outage.next_outage, tomorrow = kyivMidnight(new Date(kyivMidnight(new Date(nowMs)) + 26 * 3600e3));
+  const t = next?.start ? Date.parse(next.start) : NaN;
+  return Number.isFinite(t) && t < tomorrow ? `За графіком: світло є, відключення о ${kyivHm(t)}` : 'За графіком: світло є';
+}
+/**
+ * «Фактично» row: today's confirmed light timeline (insights.today.grid_timeline) as fractions of the day —
+ * on = green, off = coral, unknown/no data = dark, after now = grey (track). Same rules as the Android ActualDay.
+ */
+function actualDay(today, nowMs = Date.now()) {
+  const timeline = today?.grid_timeline;
+  if (!Array.isArray(timeline)) return null;
+  const start = kyivMidnight(new Date(nowMs)), end = kyivMidnight(new Date(start + 26 * 3600e3)), span = end - start;
+  const segments = timeline.map(s => ({a: Math.max(Date.parse(s.start), start), b: Math.min(Date.parse(s.end), nowMs, end), state: s.state}))
+    .filter(s => Number.isFinite(s.a) && Number.isFinite(s.b) && s.b > s.a)
+    .map(s => ({...s, fa: (s.a - start) / span, fb: (s.b - start) / span}));
+  const last = segments[segments.length - 1];
+  const known = last && last.state !== 'unknown' && nowMs - last.b < 10 * 60e3 ? last : null;
+  const word = known ? (known.state === 'on' ? 'Світло є' : 'Світла нема') : 'немає даних';
+  const since = known && known.a > start ? ` (з ${kyivHm(known.a)})` : '';
+  return {segments, now: Math.max(0, Math.min(1, (nowMs - start) / span)), state: known ? known.state : 'unknown',
+    text: `Фактично: ${word}${since}`};
+}
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
 let lastScheduleOutage = null, labelCtx = null;
 function labelWidth(text) {
@@ -300,15 +344,49 @@ function renderScheduleTimes(host, day, width) {
   }
 }
 window.addEventListener('resize', () => { if (lastScheduleOutage) renderScheduleDays(lastScheduleOutage); });
-function renderScheduleDays(outage = {}) {
+function scaleRows(box) {
+  const ticks = el('div', 'sched-ticks');
+  for (let h = 0; h <= 24; h++) { const i = el('i', h % 6 === 0 ? 'major' : ''); i.style.left = `calc(${(h / 24 * 100).toFixed(3)}% - ${h === 24 ? 1 : 0}px)`; ticks.append(i); }
+  const axis = el('div', 'sched-axis');
+  for (const h of [0, 6, 12, 18, 24]) { const sp = el('span', '', String(h)); sp.style.left = `${h / 24 * 100}%`; axis.append(sp); }
+  box.append(ticks, axis);
+}
+function renderActualRow(box, actual) {
+  if (!actual) return;
+  box.append(el('p', `actual-head ${actual.state}`, actual.text));
+  const track = el('div', 'sched-track actual');
+  track.setAttribute('role', 'img');
+  track.setAttribute('aria-label', `${actual.text}; зелене — світло було, червоне — не було, темне — немає даних`);
+  const past = el('i', 'seg nodata'); past.style.left = '0'; past.style.width = `${(actual.now * 100).toFixed(2)}%`; track.append(past);
+  for (const seg of actual.segments) {
+    const i = el('i', `seg ${seg.state === 'on' ? 'on' : seg.state === 'off' ? 'lightoff' : 'nodata'}`);
+    i.style.left = `${(seg.fa * 100).toFixed(2)}%`; i.style.width = `${((seg.fb - seg.fa) * 100).toFixed(2)}%`;
+    track.append(i);
+  }
+  for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
+  const now = el('i', 'now'); now.style.left = `${(actual.now * 100).toFixed(2)}%`; track.append(now);
+  box.append(track);
+  scaleRows(box);
+}
+function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
   const host = $('schedule-days'); if (!host) return;
   host.replaceChildren();
   const block = host.closest('.schedule-block');
-  if (block) block.hidden = !outage.available || Boolean(outage.schedule_unavailable);
+  const noSchedule = !outage.available || Boolean(outage.schedule_unavailable);
+  const actual = actualDay(insights.today);
+  if (block) block.hidden = noSchedule && !actual;
+  if (noSchedule) {  // no schedule source: the «Фактично» row alone (light is measured, not scheduled)
+    if (actual) { const box = el('div', 'sched-day'); box.append(el('h3', '', 'Сьогодні')); renderActualRow(box, actual); host.append(box); }
+    lastScheduleOutage = outage;
+    set('schedule-caption', 'Світло сьогодні');
+    return;
+  }
   for (const day of scheduleDays(outage)) {
     if (!day.isToday && !day.published) { const p = el('div', 'sched-day pending'); p.append(el('p', '', 'Завтра: графік ще не опубліковано')); host.append(p); continue; }
     const box = el('div', 'sched-day');
     box.append(el('h3', '', day.title));
+    const nowText = day.isToday ? scheduleNowText(outage) : null;
+    if (nowText) box.append(el('p', 'sched-head', nowText));
     const track = el('div', `sched-track${day.published ? '' : ' unpublished'}`);
     track.setAttribute('role', 'img');
     track.setAttribute('aria-label', `${day.title}: ${day.text}${day.maybe.length ? `; можливе ${day.maybe.join(', ')}` : ''}`);
@@ -319,13 +397,12 @@ function renderScheduleDays(outage = {}) {
     }
     for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
     if (day.now !== null) { const i = el('i', 'now'); i.style.left = `${(day.now * 100).toFixed(2)}%`; track.append(i); }
-    const ticks = el('div', 'sched-ticks');
-    for (let h = 0; h <= 24; h++) { const i = el('i', h % 6 === 0 ? 'major' : ''); i.style.left = `calc(${(h / 24 * 100).toFixed(3)}% - ${h === 24 ? 1 : 0}px)`; ticks.append(i); }
-    const axis = el('div', 'sched-axis');
-    for (const h of [0, 6, 12, 18, 24]) { const sp = el('span', '', String(h)); sp.style.left = `${h / 24 * 100}%`; axis.append(sp); }
     const times = el('div', 'sched-times'); times.setAttribute('aria-hidden', 'true');
-    box.append(times, track, ticks, axis, el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
+    box.append(times, track);
+    scaleRows(box);
+    box.append(el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
     if (day.maybe.length) box.append(el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`));
+    if (day.isToday) renderActualRow(box, actualDay(insights.today));
     host.append(box);
     if (day.published || day.nowText) renderScheduleTimes(times, day, track.getBoundingClientRect().width);
   }
@@ -333,7 +410,27 @@ function renderScheduleDays(outage = {}) {
   set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
 }
 const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світло зникло'}, light_returned: {label: '○', cls: 'ev-back', title: 'Світло повернулось'},
-  charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'}};
+  charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'},
+  anomaly_overload_trip: {label: '!', cls: 'ev-trip', title: 'Можливо, спрацював захист від перевантаження'}};
+const EVENT_PRIORITY = ['anomaly_overload_trip', 'light_lost', 'light_returned', 'charging_started', 'charged_full'];
+/**
+ * Chart markers: events closer than `minGapMs` (~20 min) or whose marker boxes would overlap (`markerPx` at `x(t)`)
+ * merge into one marker with a count. Same rules as the Android ChartEventClusters (keep in sync).
+ */
+function clusterChartEvents(events, x, markerPx = 14, minGapMs = 20 * 60e3) {
+  const pts = (events || []).map(e => ({kind: e.kind, t: e.t, ms: Date.parse(e.t)})).filter(e => EVENT_MARK[e.kind] && Number.isFinite(e.ms))
+    .sort((p, q) => p.ms - q.ms);
+  const clusters = [];
+  for (const e of pts) {
+    const last = clusters[clusters.length - 1];
+    if (last && (e.ms - last.lastMs < minGapMs || x(e.ms) - x(last.lastMs) < markerPx)) { last.events.push(e); last.lastMs = e.ms; }
+    else clusters.push({events: [e], firstMs: e.ms, lastMs: e.ms});
+  }
+  return clusters.map(c => {
+    const kind = EVENT_PRIORITY.find(k => c.events.some(e => e.kind === k)) || c.events[0].kind;
+    return {ms: (c.firstMs + c.lastMs) / 2, firstMs: c.firstMs, lastMs: c.lastMs, count: c.events.length, kind, events: c.events};
+  });
+}
 function renderSocChart(insights = {}, outage = {}) {
   const svg = $('soc-chart'); if (!svg) return;
   svg.replaceChildren();
@@ -368,15 +465,15 @@ function renderSocChart(insights = {}, outage = {}) {
   const last = clean[clean.length - 1];
   svg.append(svgEl('circle', {cx: x(last.t).toFixed(1), cy: y(last.soc).toFixed(1), r: 3.5, class: 'chart-now'}));
   const socAt = t => { let best = clean[0]; for (const p of clean) if (Math.abs(p.t - t) < Math.abs(best.t - t)) best = p; return best.soc; };
-  for (const ev of insights.chart_events || []) {
-    const mark = EVENT_MARK[ev.kind]; const t = Date.parse(ev.t);
-    if (!mark || !Number.isFinite(t) || t < start) continue;
-    const g = svgEl('g', {class: `chart-event ${mark.cls}`});
-    g.append(svgEl('line', {x1: x(t), x2: x(t), y1: T, y2: B, class: 'chart-event-line'}));
+  const recent = (insights.chart_events || []).filter(ev => Date.parse(ev.t) >= start);
+  for (const c of clusterChartEvents(recent, x)) {
+    const mark = EVENT_MARK[c.kind], t = c.ms;
+    const g = svgEl('g', {class: `chart-event ${mark.cls}${c.count > 1 ? ' cluster' : ''}`});
+    for (const e of c.events) g.append(svgEl('line', {x1: x(e.ms), x2: x(e.ms), y1: T, y2: B, class: 'chart-event-line'}));
     const cy = Math.max(T + 6, y(socAt(t)) - 9);
-    g.append(svgEl('circle', {cx: x(t), cy, r: 6}));
-    g.append(svgEl('text', {x: x(t), y: cy + 3, 'text-anchor': 'middle'}, mark.label));
-    g.append(svgEl('title', {}, `${mark.title} · ${formatClock(ev.t)}`));
+    g.append(svgEl('circle', {cx: x(t), cy, r: c.count > 1 ? 7 : 6}));
+    g.append(svgEl('text', {x: x(t), y: cy + 3, 'text-anchor': 'middle'}, c.count > 1 ? String(c.count) : mark.label));
+    g.append(svgEl('title', {}, c.events.map(e => `${formatClock(e.t)} · ${EVENT_MARK[e.kind].title}`).join('\n')));
     svg.append(g);
   }
   const socs = clean.map(p => p.soc);
@@ -392,8 +489,10 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   set('outage-source', outageSourceText(outage));
   set('backup-today', formatKwh(insights.backup_energy_today_wh));
   set('standby-w', finiteOrNull(insights.standby_w) !== null ? `≈ ${Math.round(insights.standby_w)} Вт` : '—');
-  renderToday(insights.today || null);
-  renderScheduleDays(outage);
+  const topup = insights.last_grid_charge;
+  set('last-topup', topup && finiteOrNull(topup.w) !== null ? `${Math.round(topup.w)} Вт · ${formatClock(topup.t)}` : '—');
+  renderToday(insights.today || null, insights.backup_energy_today_wh);
+  renderScheduleDays(outage, insights);
   renderSocChart(insights, outage);
   const runtime = finiteOrNull(a.runtime_seconds);
   const floor = floorPct(outage);
@@ -409,12 +508,17 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   } else if (light.state === 'off') {
     const current = outage.current_outage;
     const covers = a.covers_next_outage;
+    // «≈»: the runtime follows the 10-min average load (a cycling compressor), not the last reading
+    const approx = a.load_basis === 'measured_backup_avg_10min' ? '≈ ' : '';
     if (runtime === null) set('hero-forecast', 'Запас: збираю виміри навантаження…');
-    else if (covers === false) { set('hero-forecast', `Вистачить лише на ${formatDuration(runtime)}`); forecast.classList.add('bad'); }
-    else { set('hero-forecast', `Вистачить на ${formatDuration(runtime)}`); forecast.classList.add('good'); }
+    else if (covers === false) { set('hero-forecast', `Вистачить лише на ${approx}${formatDuration(runtime)}`); forecast.classList.add('bad'); }
+    else { set('hero-forecast', `Вистачить на ${approx}${formatDuration(runtime)}`); forecast.classList.add('good'); }
     // Only a positive backup-output reading is the house load (negative = sensor noise).
     const backupW = finiteOrNull(insights.backup_output_w);
-    const parts = [backupW !== null && backupW > 0 ? `Споживання ${Math.round(backupW)} Вт` : null,
+    const detail = outage.grid_detail || {};
+    const trip = detail.overload_trip;
+    const parts = [trip ? `Можливо, спрацював захист від перевантаження (останнє ${Math.round(trip.last_w)} Вт)` : null,
+      backupW !== null && backupW > 0 ? `Споживання ${Math.round(backupW)} Вт` : 'навантаження зараз 0 Вт',
       current?.end ? (current.kind === 'schedule' ? `Світло за графіком о ${formatClock(current.end)}` : `Повернення о ${formatClock(current.end)}`) : 'час повернення невідомий'];
     set('hero-sub', parts.filter(Boolean).join(' · '));
     set('hero-note', `Час — енергія ${floorText} ${autonomyBasisText(a)}.${err}`);
@@ -433,6 +537,12 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
       : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${err}`);
   }
   hero.dataset.state = light.state;
+  const modeChip = $('mode-chip');
+  if (modeChip) {
+    const modeName = data.methods?.['ES.GetMode']?.ok ? data.methods['ES.GetMode'].data?.mode : null;
+    modeChip.hidden = !modeName;
+    modeChip.textContent = modeName ? `Режим: ${ukMode(modeName)}` : '';
+  }
   const sub = $('hero-sub'); if (sub) { sub.hidden = light.state !== 'off' && light.state !== 'nolink' && sub.dataset.redundant === '1'; }
 }
 function render(data) {
@@ -466,10 +576,11 @@ function render(data) {
   lastData = data;
   renderHero(data, bat, soc);
   set('grid-sign-note', 'Знак +/− як у пристрої');
-  set('grid-power',num(es.ongrid_power,'W')); set('offgrid-power',num(es.offgrid_power,'W'));
+  set('grid-power',num(es.ongrid_power,'Вт')); set('offgrid-power',num(es.offgrid_power,'Вт'));
   set('ct-state',mode.ct_state === 0 ? 'Не підключено' : mode.ct_state === 1 ? 'Підключено' : '—');
   set('total-grid-in',formatKwh(es.total_grid_input_energy)); set('total-grid-out',formatKwh(es.total_grid_output_energy)); set('total-load',formatKwh(es.total_load_energy));
-  set('em-a',num(em.a_power,'W'));set('em-b',num(em.b_power,'W'));set('em-c',num(em.c_power,'W'));set('em-total',num(em.total_power,'W'));
+  set('em-a',num(em.a_power,'Вт'));set('em-b',num(em.b_power,'Вт'));set('em-c',num(em.c_power,'Вт'));set('em-total',num(em.total_power,'Вт'));
+  set('diag-mode', ukMode(mode.mode));
   set('em-energy',em.input_energy != null || em.output_energy != null ? `${formatKwh(em.input_energy)} / ${formatKwh(em.output_energy)}` : '—');
 
   set('wifi-rssi',num(wifi.rssi,'dBm'));set('wifi-ip',wifi.sta_ip);set('wifi-gateway',wifi.sta_gate);set('wifi-mask',wifi.sta_mask);set('wifi-dns',wifi.sta_dns);set('wifi-ssid',wifi.ssid);set('wifi-mac',wifi.wifi_mac);set('ble-state',ble.state);set('ble-mac',ble.ble_mac);
@@ -563,4 +674,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(error => console.warn('PWA offline shell registration failed', error));
 }
 document.querySelector('.diagnostics')?.addEventListener('toggle', drawChart);
-refresh(); loadJournal(); setInterval(refresh,20000); setInterval(loadJournal,60000); window.addEventListener('resize',drawChart);
+refresh(); loadJournal(); setInterval(refresh,15000); setInterval(loadJournal,60000); window.addEventListener('resize',drawChart);

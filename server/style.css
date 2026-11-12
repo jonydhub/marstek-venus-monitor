@@ -152,3 +152,11 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .sched-times{position:relative;height:13px;margin-bottom:2px}
 .sched-times span{position:absolute;top:0;font-size:10px;line-height:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .sched-times .off{color:var(--amber)}.sched-times .maybe{color:#e6c478}.sched-times .now{color:#fff}
+/* v14 (1.3.7): today's energy under the durations, «За графіком» / «Фактично» rows, clustered chart markers, mode chip */
+.today-tiles small{display:block;color:#c9d5dc;font-size:11px;line-height:1.3;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hero-tags{display:flex;gap:6px;align-items:center;min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.mode-chip{color:#cfe3ea}.mode-chip[hidden]{display:none}
+.sched-head{margin:0 0 3px;font-size:11px;color:var(--muted)}
+.actual-head{margin:8px 0 3px;font-size:11px;font-weight:620;color:var(--muted)}.actual-head.on{color:#7fe3b2}.actual-head.off{color:#ff806f}
+.sched-track.actual .seg.on{background:#7fe3b2}.sched-track.actual .seg.lightoff{background:#ff806f}.sched-track.actual .seg.nodata{background:#0b141d}
+.chart-event.cluster text{font-size:8.5px}.ev-trip circle{fill:#ff806f}.ev-trip line{stroke:#ff806f}
