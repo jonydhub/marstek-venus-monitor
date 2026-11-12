@@ -33,6 +33,8 @@ import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.AccessCookie
 import com.doloh.marstekwidget.data.JournalStore
 import com.doloh.marstekwidget.data.MarstekApiClient
+import com.doloh.marstekwidget.domain.ActualDays
+import com.doloh.marstekwidget.domain.ChartEventClusters
 import com.doloh.marstekwidget.domain.EtaTextFormatter
 import com.doloh.marstekwidget.domain.JournalExport
 import com.doloh.marstekwidget.domain.LightKind
@@ -85,6 +87,7 @@ class MainActivity : Activity() {
     private lateinit var socValue: TextView
     private lateinit var lightDot: TextView
     private lateinit var lightHeadline: TextView
+    private lateinit var modeChip: TextView
     private lateinit var stateLine: TextView
     private lateinit var capacityLine: TextView
     private lateinit var socProgress: SocBarView
@@ -269,8 +272,19 @@ class MainActivity : Activity() {
         }
         lightDot = label("●", 14f, DIM, false).apply { setPadding(0, 0, dp(6), 0) }
         lightRow.addView(lightDot)
-        lightHeadline = label(getString(R.string.widget_power_status_unknown), 17f, TEXT, true)
-        lightRow.addView(lightHeadline)
+        lightHeadline = label(getString(R.string.widget_power_status_unknown), 17f, TEXT, true).apply {
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        lightRow.addView(lightHeadline, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Operating mode (ES.GetMode) as a small chip: «UPS», «Ручний»… — leaving UPS is also a journal anomaly.
+        modeChip = label("", 9f, MUTED, true).apply {
+            setPadding(dp(7), dp(2), dp(7), dp(2))
+            background = rounded(SURFACE_RAISED, dp(10), STROKE)
+            maxLines = 1
+            visibility = View.GONE
+        }
+        lightRow.addView(modeChip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
         stateColumn.addView(lightRow)
         stateLine = label(getString(R.string.main_dashboard_loading), 12f, MUTED, true).apply { setPadding(0, dp(3), 0, 0) }
         stateColumn.addView(stateLine)
@@ -278,7 +292,7 @@ class MainActivity : Activity() {
         hero.addView(heroRow)
         socProgress = SocBarView(this).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         hero.addView(socProgress, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(8)).apply { topMargin = dp(12) })
-        capacityLine = label("— kWh", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
+        capacityLine = label(getString(R.string.widget_kwh_unknown), 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
         hero.addView(capacityLine)
         etaLine = label("", 19f, TEXT, true).apply { setPadding(0, dp(10), 0, 0) }
         hero.addView(etaLine)
@@ -299,6 +313,13 @@ class MainActivity : Activity() {
             }
             metricValues[key] = value
             box.addView(value, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(22)))
+            // Second line: today's energy «0,81 кВт·год» (shrinks instead of wrapping, like the duration above).
+            val energy = label("", 11f, Color.rgb(201, 213, 220), false).apply {
+                maxLines = 1
+                setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+            }
+            metricValues[key + "Kwh"] = energy
+            box.addView(energy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16)))
             box.addView(label(caption, 10f, if (key == "todayOutage") CORAL else MUTED, false).apply { maxLines = 1 })
             tiles.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 if (i > 0) marginStart = dp(4)
@@ -336,7 +357,11 @@ class MainActivity : Activity() {
         // 24 h SOC chart: outage shading, event markers, axis labels, discharge floor.
         historyCard = card()
         historyCard.addView(sectionTitle(getString(R.string.main_history_title)))
-        sparkline = SocChartView(this)
+        sparkline = SocChartView(this).apply {
+            // Chart markers merge into counted clusters; the journal lists every event.
+            isClickable = true
+            setOnClickListener { startActivity(Intent(this@MainActivity, JournalActivity::class.java)) }
+        }
         historyCard.addView(sparkline, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(maxOf(150, spec.sparklineHeightDp + 70))))
         historyCaption = label("", 9f, DIM, false).apply { setPadding(0, dp(5), 0, 0) }
         historyCard.addView(historyCaption)
@@ -569,16 +594,20 @@ class MainActivity : Activity() {
             }
             light.kind == LightKind.OFF -> {
                 val covers = info?.coversOutage
+                // «≈»: the runtime follows the 10-min average load (a cycling compressor), not the last reading.
+                val approx = if (info?.loadBasis == com.doloh.marstekwidget.direct.AutonomyCalculator.MEASURED_BACKUP_AVG) "≈ " else ""
                 eta = when {
                     runtime == null -> reserve?.text ?: "Запас: оцінюю навантаження…"
-                    covers == false -> "Вистачить лише на ${EtaTextFormatter.formatSeconds(runtime)}"
-                    else -> "Вистачить на ${EtaTextFormatter.formatSeconds(runtime)}"
+                    covers == false -> "Вистачить лише на $approx${EtaTextFormatter.formatSeconds(runtime)}"
+                    else -> "Вистачить на $approx${EtaTextFormatter.formatSeconds(runtime)}"
                 }
                 etaColor = if (covers == false) CORAL else POWER_ON
-                // Only a positive backup-output reading is the house load (negative = noise).
+                // Only a positive backup-output reading is the house load (negative = noise). 0 W while the light is
+                // still off = a load pause (or a trip): «Світла нема · навантаження зараз 0 Вт».
                 val backup = WidgetSummaryResolver.backupLoadWatts(snapshot)
                 sub = listOfNotNull(
-                    backup?.let { "Споживання ${it.roundToInt()} Вт" },
+                    info?.overloadTripWatts?.let { "Можливо, спрацював захист від перевантаження (останнє ${it.roundToInt()} Вт)" },
+                    backup?.let { "Споживання ${it.roundToInt()} Вт" } ?: "навантаження зараз 0 Вт",
                     info?.currentEnd?.let { PowerOutageFormatter.shortDetail(info, now)?.replace("до ", "світло за графіком о ") } ?: "час повернення невідомий",
                 ).joinToString(" · ")
             }
@@ -607,6 +636,22 @@ class MainActivity : Activity() {
         metricValues["todayCharge"]?.text = TodayFormatter.short(today?.chargeSeconds)
         metricValues["todayDischarge"]?.text = TodayFormatter.short(today?.dischargeSeconds)
         metricValues["todayOutage"]?.text = TodayFormatter.short(today?.outageSeconds)
+        metricValues["todayChargeKwh"]?.apply {
+            text = TodayFormatter.energy(today?.chargeWh, today?.chargeEstimated == true) ?: "—"
+            contentDescription = TodayFormatter.chargedText(today)
+        }
+        metricValues["todayDischargeKwh"]?.apply {
+            text = TodayFormatter.energy(today?.dischargeWh, today?.dischargeEstimated == true) ?: "—"
+            contentDescription = TodayFormatter.dischargedText(today)
+        }
+        metricValues["todayOutageKwh"]?.apply {
+            // energy the house took from the backup output today (all of it during outages)
+            text = snapshot?.insights?.backupEnergyTodayWh?.takeIf { (today?.outageSeconds ?: 0L) > 0L }?.let { TodayFormatter.energy(it) } ?: "—"
+        }
+        val modeName = snapshot?.operatingMode
+        modeChip.visibility = if (modeName == null) View.GONE else View.VISIBLE
+        modeChip.text = modeName?.let { OperatingModeFormatter.format(it) }.orEmpty()
+        modeChip.contentDescription = modeName?.let { "Режим роботи: ${OperatingModeFormatter.format(it)}" }
         // No «— — —» tiles: without today's data the row is hidden and a short note says why.
         todayTiles.visibility = if (today == null) View.GONE else View.VISIBLE
         todayCaption.text = if (today == null) {
@@ -615,8 +660,10 @@ class MainActivity : Activity() {
         todayCaption.visibility = if (todayCaption.text.isNullOrEmpty()) View.GONE else View.VISIBLE
 
         // Schedule: today / tomorrow rows + windows text (nothing repeated from the hero).
-        scheduleDays.visibility = if (info != null && info.scheduleEnabled && !info.scheduleUnavailable) View.VISIBLE else View.GONE
-        scheduleDays.setDays(days)
+        val hasSchedule = info != null && info.scheduleEnabled && !info.scheduleUnavailable
+        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, System.currentTimeMillis())
+        scheduleDays.visibility = if (hasSchedule || actual != null) View.VISIBLE else View.GONE
+        scheduleDays.setDays(if (hasSchedule) days else emptyList(), actual, ActualDays.scheduleNowText(info, now))
         scheduleCaption.text = listOfNotNull("Графік відключень", info?.group?.let { "черга $it" }).joinToString(" · ") + "  ›"
         val nextText = info?.takeIf { light.kind != LightKind.OFF && light.kind != LightKind.NO_LINK }?.let { PowerOutageFormatter.detail(it, now) }
             ?.takeIf { it != sub && it !in shownBySchedule }
@@ -632,11 +679,17 @@ class MainActivity : Activity() {
         if (history.size >= 2) {
             sparkline.setInput(SocChartPainter.Input(history, snapshot?.insights?.outagePeriods.orEmpty(),
                 snapshot?.insights?.chartEvents.orEmpty(), info?.floorPct, System.currentTimeMillis()))
-            historyCaption.text = listOfNotNull(
+            val density = resources.displayMetrics.density
+            val chartWidth = (sparkline.width.takeIf { it > 0 } ?: (resources.displayMetrics.widthPixels - dp(60))) - 30 * density
+            val nowMs = System.currentTimeMillis()
+            val clusters = ChartEventClusters.cluster(snapshot?.insights?.chartEvents.orEmpty().filter { it.epochMillis >= nowMs - 24 * 3600_000L },
+                com.doloh.marstekwidget.ui.SocChartPainter.markerPx(density)) { t -> ((t - (nowMs - 24 * 3600_000L)).toFloat() / (24 * 3600_000f)) * chartWidth }
+            historyCaption.text = (listOfNotNull(
                 getString(R.string.main_history_range, history.minOf { it.soc }, history.maxOf { it.soc }, history.size),
                 "заштриховано — без світла",
                 info?.floorPct?.let { "червона лінія — резерв розряду ${it.roundToInt()}%" },
-            ).joinToString(" · ")
+                "цифра на мітці — кілька подій поруч (торкніться графіка — журнал)".takeIf { clusters.any { it.count > 1 } },
+            ).joinToString(" · ") + ChartEventClusters.legend(clusters).joinToString("") { "\n• $it" })
         }
 
         metricValues["battery"]?.text = BatteryDisplayFormatter.formatPowerKw(snapshot?.batteryPowerWatts?.takeIf {
@@ -646,7 +699,11 @@ class MainActivity : Activity() {
         metricValues["temperature"]?.text = temperature ?: "—"
         metricValues["grid"]?.text = BatteryDisplayFormatter.formatSignedWatts(snapshot?.gridPowerWatts)
         metricValues["backup"]?.text = BatteryDisplayFormatter.formatSignedWatts(snapshot?.insights?.backupOutputWatts ?: snapshot?.offgridPowerWatts)
-        metricValues["backupAvg"]?.text = snapshot?.insights?.backupAverageWatts24h?.let(WidgetSummaryResolver::formatWatts) ?: "—"
+        // Mean of REAL load only (pauses at 0 Вт excluded), and only once ≥ 30 min of load is behind it — the old 24 h
+        // average counted every idle hour and read a misleading «7 Вт».
+        metricValues["backupAvg"]?.text = snapshot?.insights?.takeIf {
+            it.backupLoadCoverage7dSeconds >= com.doloh.marstekwidget.domain.AlertEvaluator.LOAD_MEAN_MIN_COVERAGE_SECONDS
+        }?.backupLoadMean7dWatts?.let { "≈ " + WidgetSummaryResolver.formatWatts(it) } ?: "—"
         metricValues["backupToday"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.insights?.backupEnergyTodayWh)
         metricValues["energyGridIn"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.totalGridInputEnergyWh)
         metricValues["energyGridOut"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.totalGridOutputEnergyWh)
@@ -661,7 +718,11 @@ class MainActivity : Activity() {
             "Підключення: " + if (settings.mode == ConnectionMode.SERVER) "сервер" else "напряму (UDP, лише читання)",
             settings.deviceModel?.let { "Модель: $it" },
             WidgetPreferences(this).errorMessage()?.takeIf { state == WidgetFetchState.ERROR }?.let { "Остання помилка: $it" },
+            snapshot?.operatingMode?.let { "Режим роботи (ES.GetMode): ${OperatingModeFormatter.format(it)}" },
             snapshot?.insights?.standbyWatts?.let { "Власне споживання в очікуванні ≈ ${Math.round(it)} Вт (за ритмом підзаряду до 100%)" },
+            snapshot?.insights?.lastGridChargeWatts?.let { w ->
+                "Останній підзаряд від мережі: ${Math.round(w)} Вт" + (snapshot.insights?.lastGridChargeMillis?.let { " о ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it))}" } ?: "")
+            },
             snapshot?.insights?.backupAverageCoverageHours?.let { "Історія резервного виходу: ${String.format(Locale.getDefault(), "%.1f", it)} год за 24 год" },
         ).joinToString("\n")
 
@@ -688,7 +749,9 @@ class MainActivity : Activity() {
 
     private fun renderJournalPreview() {
         if (!::journalPreview.isInitialized) return
-        val events = if (showcase) JournalActivity.demoEvents() else if (settings.mode == ConnectionMode.DIRECT) runCatching { JournalStore(this).events(3) }.getOrDefault(emptyList()) else serverJournal
+        val events = if (showcase) (intent.getStringExtra("showcase_events")?.let { raw ->
+            runCatching { org.json.JSONArray(raw).let { a -> (0 until a.length()).mapNotNull { com.doloh.marstekwidget.domain.JournalEvent.fromJson(a.getJSONObject(it)) } } }.getOrNull()
+        } ?: JournalActivity.demoEvents()) else if (settings.mode == ConnectionMode.DIRECT) runCatching { JournalStore(this).events(3) }.getOrDefault(emptyList()) else serverJournal
         journalPreview.removeAllViews()
         if (events.isEmpty()) {
             journalPreview.addView(label("Подій ще немає", 10f, DIM, false))
@@ -735,7 +798,8 @@ class MainActivity : Activity() {
         val watts = (info.loadWatts ?: 0.0).toInt()
         val floor = info.floorPct?.let { " Рахується енергія понад резерв розряду ${it.roundToInt()}% (налаштування)." }.orEmpty()
         val basis = when (info.loadBasis) {
-            "measured_backup_output" -> "За виміряним навантаженням резервного виходу $watts W."
+            "measured_backup_avg_10min" -> "За середнім навантаженням резервного виходу за 10 хв ≈ $watts Вт."
+            "measured_backup_output" -> "За виміряним навантаженням резервного виходу $watts Вт."
             "measured_discharge" -> getString(R.string.main_power_basis_measured, watts)
             "measured_average_24h" -> getString(R.string.main_power_basis_measured_24h, watts)
             "configured_average" -> getString(R.string.main_power_basis_configured, watts)
@@ -793,7 +857,8 @@ class MainActivity : Activity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private companion object {
-        const val DIRECT_INTERVAL_MS = 5_000L
+        /** Direct mode polls the battery like the server: every 15 s (a poll = up to 4 paced requests). */
+        const val DIRECT_INTERVAL_MS = 15_000L
         const val SERVER_INTERVAL_MS = 30_000L
         const val MAX_ALERT_ROWS = 4
         val BG = Color.rgb(7, 21, 34)

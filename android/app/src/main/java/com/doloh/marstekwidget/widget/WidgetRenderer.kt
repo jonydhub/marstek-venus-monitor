@@ -32,6 +32,9 @@ import com.doloh.marstekwidget.domain.CompactPlanner
 import com.doloh.marstekwidget.domain.CompactWidgetTexts
 import com.doloh.marstekwidget.domain.SocGradient
 import com.doloh.marstekwidget.domain.TextFit
+import com.doloh.marstekwidget.domain.ActualDays
+import com.doloh.marstekwidget.ui.ActualBarPainter
+import com.doloh.marstekwidget.ui.ChartColors
 import com.doloh.marstekwidget.ui.DayScheduleBarPainter
 import com.doloh.marstekwidget.ui.ScheduleActivity
 import com.doloh.marstekwidget.ui.SocBarPainter
@@ -276,19 +279,38 @@ object WidgetRenderer {
         // Time labels above the bar («07:00 … 13:00», now «10:42») only on ≥ 4-cell-wide widgets (4×2, 4×4).
         val labelPx = shape.scheduleTimeLabelDp * density
         val heightDp = shape.scheduleBarDp + DayScheduleBarPainter.timeLabelZone(labelPx, density) / density
+        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, input.now.toInstant().toEpochMilli())?.takeIf { shape.actualRowDp > 0f }
         val w = (barWidthDp * density).roundToInt()
-        val h = (heightDp * density).roundToInt()
+        val scheduleH = (heightDp * density).roundToInt()
+        val h = scheduleH + (shape.actualRowDp * density).roundToInt()
         val gap = 6f * density
         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val half = (w - gap) / 2f
-        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), today, density, timeLabelsPx = labelPx)
+        DayScheduleBarPainter.draw(canvas, half, scheduleH.toFloat(), today, density, timeLabelsPx = labelPx)
         canvas.save()
         canvas.translate(half + gap, 0f)
-        DayScheduleBarPainter.draw(canvas, half, h.toFloat(), tomorrow, density, timeLabelsPx = labelPx)
+        DayScheduleBarPainter.draw(canvas, half, scheduleH.toFloat(), tomorrow, density, timeLabelsPx = labelPx)
         canvas.restore()
+        // «Фактично» under today's half (same width and now-marker), its state as text under tomorrow's half.
+        if (actual != null) {
+            val top = scheduleH + 1f * density
+            canvas.save()
+            canvas.translate(0f, top)
+            ActualBarPainter.draw(canvas, half, h - top, actual, density)
+            canvas.restore()
+            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = (if (shape == WidgetShape.XLARGE) 10f else 8f) * density
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                color = when (actual.state) { "on" -> ChartColors.ACTUAL_ON; "off" -> ChartColors.ACTUAL_OFF; else -> ChartColors.LABEL }
+            }
+            var label = actual.text
+            while (label.length > 4 && text.measureText(label) > half) label = label.dropLast(2).trimEnd() + "…"
+            val baseline = top + (h - top) / 2f + text.textSize / 3f
+            canvas.drawText(label, half + gap, baseline, text)
+        }
         views.setImageViewBitmap(R.id.widget_schedule_bar, bitmap)
-        views.setContentDescription(R.id.widget_schedule_bar, "${today.summary}; ${tomorrow.summary}")
+        views.setContentDescription(R.id.widget_schedule_bar, listOfNotNull(today.summary, tomorrow.summary, actual?.text).joinToString("; "))
     }
 
     /** 4×4+: 24 h SOC line with no-light periods shaded and the reserve floor — fills the card's free height. */
@@ -328,9 +350,14 @@ object WidgetRenderer {
         val soc = snapshot?.socPercent?.coerceIn(0, 100)
         views.setImageViewBitmap(R.id.widget_soc_ring_image, socRingBitmap(context, soc, plan.ringDp))
         views.setTextViewTextSize(R.id.widget_soc_text, sp, (plan.ringDp * 0.25f / fontScale).coerceIn(14f, 40f))
-        views.setTextViewTextSize(R.id.widget_capacity_text, sp, (plan.ringDp * 0.105f / fontScale).coerceIn(8.5f, 15f))
+        val capacitySp = (plan.ringDp * 0.105f / fontScale).coerceIn(8.5f, 15f)
+        views.setTextViewTextSize(R.id.widget_capacity_text, sp, capacitySp)
         views.setViewVisibility(R.id.widget_soc_ring_container, visibility(input.options.showSoc))
-        views.setTextViewText(R.id.widget_capacity_text, compactEnergyText(context, snapshot))
+        // Ring centre «5,12 кВт·год», or «5,12 кВт·г» when the ring is too narrow for the full unit.
+        val ringText = compactEnergyText(context, snapshot).let { full ->
+            if (measure(full, capacitySp, false) <= plan.ringDp * 0.74f) full else full.replace("кВт·год", "кВт·г")
+        }
+        views.setTextViewText(R.id.widget_capacity_text, ringText)
         views.setViewVisibility(R.id.widget_capacity_text, visibility(input.options.showCapacity))
         views.setContentDescription(
             R.id.widget_soc_ring_container,
@@ -492,7 +519,12 @@ object WidgetRenderer {
             }
             if (summary == null) add(SummaryLine(SummaryLineKind.LIGHT, noDataHint(context, input.state).orEmpty()))
         }.filter { it.text.isNotBlank() }
-        val count = lineCount(shape)
+        // 4×2 with the «Фактично» row: one state line less so the taller schedule bitmap is not cut off at the bottom.
+        val info = input.snapshot?.powerOutage
+        val actualShown = shape == WidgetShape.WIDE && shape.actualRowDp > 0f && input.snapshot?.insights?.lightTimeline != null &&
+            info != null && info.scheduleEnabled && !info.scheduleUnavailable
+        val count = lineCount(shape) - if (actualShown) 1 else 0
+        for (index in count until lineCount(shape)) views.setViewVisibility(LINE_IDS[index], View.GONE)
         for (index in 0 until count) {
             val id = LINE_IDS[index]
             val line = lines.getOrNull(index)
@@ -504,7 +536,7 @@ object WidgetRenderer {
         }
     }
 
-    /** «Температура 27,0 °C · вихід 0 W» — the backup output joins the temperature row outside an outage. */
+    /** «Температура 27,0 °C · вихід 0 Вт» — the backup output joins the temperature row outside an outage. */
     private fun withBackup(line: SummaryLine, summary: WidgetSummary, input: WidgetRenderInput): SummaryLine {
         if (summary.mode == SummaryMode.OUTAGE || !input.options.showBackupPower) return line
         input.snapshot?.let { it.insights?.backupOutputWatts ?: it.offgridPowerWatts } ?: return line

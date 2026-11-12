@@ -40,6 +40,9 @@ import java.time.format.DateTimeFormatter
  * `--ez journal true`: the journal screen with a demo journal.
  * `--es sched none|one_window|two_windows_now_inside|edge_00_24`: schedule rows (main-screen + «Графік відключень»
  *   sizes) and the 4×2 / 4×4 / 2×2 widgets for fixed windows at a fixed clock 10:42 Kyiv (time-label layout check).
+ * `--es showcase ups_trip [--ez main true] [--es sizes 4x2|4x4]`: assets/fixtures/ups_trip_status.json — the REAL fw148 UPS
+ *   evening (inverter AC, compressor pauses, overload trip at 22:08, Manual afterwards) replayed through the 1.3.7 server;
+ *   widgets are drawn at its own clock (22:13 Kyiv); for `main` set the device clock to 2026-11-11 22:13 Kyiv first.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -248,9 +251,16 @@ class WidgetPreviewActivity : Activity() {
         val kyiv = ZoneId.of("Europe/Kyiv")
         val realNow = ZonedDateTime.now(kyiv)
         val live = kind == "live"
-        val now = if (main || live) realNow else realNow.withHour(18).withMinute(30).withSecond(0).withNano(0)
+        val upsTrip = kind == "ups_trip"
+        val upsRoot = if (upsTrip) JSONObject(assets.open("fixtures/ups_trip_status.json").bufferedReader().readText()).getJSONObject("status") else null
+        val now = when {
+            upsTrip && !main -> java.time.OffsetDateTime.parse(upsRoot!!.getString("collected_at")).atZoneSameInstant(kyiv)
+            main || live -> realNow
+            else -> realNow.withHour(18).withMinute(30).withSecond(0).withNano(0)
+        }
         // `live`: clean render (no labels) of the last snapshot the app actually fetched — README screenshots.
         val snapshot = if (live) WidgetPreferences(this).snapshot() ?: run { finish(); return }
+            else if (upsRoot != null) BatterySnapshotParser.parse(upsRoot)
             else if (kind == "nolink") BatterySnapshotParser.parse(showcaseFixture("outage", now))
                 .copy(collectedAt = now.minusMinutes(12).toInstant().toString())
             else BatterySnapshotParser.parse(showcaseFixture(kind, now).also { root ->
@@ -267,7 +277,9 @@ class WidgetPreviewActivity : Activity() {
             WidgetPreferences(this).saveSnapshot(snapshot)
             // «nolink»: last data 12 min old and the latest poll failed → «Немає зв'язку з батареєю».
             if (kind == "nolink") WidgetPreferences(this).setError("Батарея не відповідає")
-            startActivity(Intent(this, MainActivity::class.java).putExtra("showcase", true))
+            val events = if (upsTrip) JSONObject(assets.open("fixtures/ups_trip_status.json").bufferedReader().readText())
+                .getJSONObject("events").getJSONArray("events").toString() else null
+            startActivity(Intent(this, MainActivity::class.java).putExtra("showcase", true).putExtra("showcase_events", events))
             finish()
             return
         }

@@ -8,6 +8,7 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.doloh.marstekwidget.data.TelemetryRepository
+import com.doloh.marstekwidget.domain.ActualDays
 import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
 import com.doloh.marstekwidget.domain.OutageSourceLinks
@@ -66,11 +67,18 @@ class ScheduleActivity : Activity() {
         val now = ZonedDateTime.now(KYIV)
 
         val head = ui.card()
+        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, now.toInstant().toEpochMilli())
         if (info == null || !info.scheduleEnabled) {
             head.addView(ui.label("Графік не налаштовано", 15f, Ui.TEXT, true))
             head.addView(ui.hint("Оберіть область і чергу в Налаштуваннях → «Графік відключень». Світло є чи ні застосунок все одно визначає за резервним виходом батареї."))
             head.addView(ui.button("Відкрити налаштування") { startActivity(Intent(this, SettingsActivity::class.java)) }, ui.matchWrap(8))
             content.addView(head, ui.matchWrap(8))
+            if (actual != null) {
+                val card = ui.card()
+                card.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(emptyList(), actual) })
+                card.addView(legend(), ui.matchWrap(10))
+                content.addView(card, ui.matchWrap(8))
+            }
             return
         }
         val region = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
@@ -104,7 +112,7 @@ class ScheduleActivity : Activity() {
 
         val days = ui.card()
         days.addView(ui.title("Сьогодні і завтра"))
-        days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows) })
+        days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows, actual, ActualDays.scheduleNowText(info, now)) })
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
 
@@ -124,10 +132,24 @@ class ScheduleActivity : Activity() {
         addView(swatch(Ui.AMBER)); addView(ui.label("відключення", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, ui.dp(12), 0) })
         addView(swatch(android.graphics.Color.argb(150, 245, 183, 46))); addView(ui.label("можливе", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, ui.dp(12), 0) })
         addView(swatch(android.graphics.Color.WHITE)); addView(ui.label("зараз", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, 0, 0) })
+    }.let { schedule ->
+        // second line: the «Фактично» row colours
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(schedule)
+            addView(LinearLayout(this@ScheduleActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, ui.dp(6), 0, 0)
+                addView(swatch(ChartColors.ACTUAL_ON)); addView(ui.label("світло було", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, ui.dp(12), 0) })
+                addView(swatch(ChartColors.ACTUAL_OFF)); addView(ui.label("не було", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, ui.dp(12), 0) })
+                addView(swatch(ChartColors.ACTUAL_NO_DATA, ChartColors.LABEL)); addView(ui.label("немає даних", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, ui.dp(12), 0) })
+                addView(swatch(ChartColors.ACTUAL_FUTURE)); addView(ui.label("ще буде", 10f, Ui.MUTED).apply { setPadding(ui.dp(4), 0, 0, 0) })
+            })
+        }
     }
 
-    private fun swatch(color: Int) = View(this).apply {
-        background = ui.rounded(color, ui.dp(2), color)
+    private fun swatch(color: Int, stroke: Int = color) = View(this).apply {
+        background = ui.rounded(color, ui.dp(2), stroke)
         layoutParams = LinearLayout.LayoutParams(ui.dp(12), ui.dp(8)).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
     }
 

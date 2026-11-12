@@ -11,7 +11,9 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.Shader
 import android.view.View
+import com.doloh.marstekwidget.domain.ActualDay
 import com.doloh.marstekwidget.domain.ChartEvent
+import com.doloh.marstekwidget.domain.ChartEventClusters
 import com.doloh.marstekwidget.domain.DaySchedule
 import com.doloh.marstekwidget.domain.ScheduleTimeLabels
 import com.doloh.marstekwidget.domain.SocPoint
@@ -27,6 +29,76 @@ object ChartColors {
     val LABEL = Color.rgb(139, 155, 167)
     val POWER_ON = Color.rgb(127, 227, 178)
     val BLUE = Color.rgb(120, 184, 255)
+    /** «Фактично» row: light was on / off, no data, still to come. */
+    val ACTUAL_ON = Color.rgb(127, 227, 178)
+    val ACTUAL_OFF = Color.rgb(255, 128, 111)
+    val ACTUAL_NO_DATA = Color.rgb(11, 20, 29)
+    val ACTUAL_FUTURE = Color.rgb(52, 66, 80)
+}
+
+/**
+ * «Фактично» 0–24 h row: green = light was on, coral = none, dark = no data, grey = still to come, white now-marker.
+ * Same horizontal geometry as [DayScheduleBarPainter] for the same [width] / [labelsPx], so both rows line up.
+ */
+object ActualBarPainter {
+    fun draw(canvas: Canvas, width: Float, height: Float, day: ActualDay, density: Float, labelsPx: Float = 0f) {
+        val marker = 2.5f * density
+        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = labelsPx }
+        val tickZone = if (labelsPx > 0f) 6f * density + labelsPx + 2f * density else 0f
+        val inset = if (labelsPx > 0f) labelPaint.measureText("24") / 2f else 0f
+        val left = maxOf(inset, marker)
+        val right = width - maxOf(inset, marker)
+        val bar = RectF(left, marker, right, height - tickZone - marker)
+        val r = minOf(bar.height() / 2f, 4f * density)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = ChartColors.ACTUAL_FUTURE
+        canvas.drawRoundRect(bar, r, r, paint)
+        canvas.save()
+        canvas.clipPath(Path().apply { addRoundRect(bar, r, r, Path.Direction.CW) })
+        fun x(f: Float) = bar.left + f * bar.width()
+        paint.color = ChartColors.ACTUAL_NO_DATA
+        canvas.drawRect(bar.left, bar.top, x(day.nowFraction), bar.bottom, paint)
+        day.segments.forEach { s ->
+            paint.color = when (s.state) {
+                "on" -> ChartColors.ACTUAL_ON
+                "off" -> ChartColors.ACTUAL_OFF
+                else -> ChartColors.ACTUAL_NO_DATA
+            }
+            canvas.drawRect(x(s.start), bar.top, maxOf(x(s.end), x(s.start) + 0.8f * density), bar.bottom, paint)
+        }
+        paint.color = Color.argb(150, 7, 21, 34)
+        for (h in listOf(6, 12, 18)) canvas.drawRect(x(h / 24f) - 0.5f * density, bar.top, x(h / 24f) + 0.5f * density, bar.bottom, paint)
+        canvas.restore()
+        if (labelsPx > 0f) {
+            val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = density }
+            val top = bar.bottom + 2f * density
+            for (h in 0..24) {
+                val major = h % 6 == 0
+                tick.color = if (major) ChartColors.LABEL else Color.rgb(70, 88, 104)
+                canvas.drawLine(x(h / 24f), top, x(h / 24f), top + (if (major) 5f else 2.5f) * density, tick)
+            }
+            for (h in listOf(0, 6, 12, 18, 24)) {
+                val label = h.toString()
+                val w = labelPaint.measureText(label)
+                canvas.drawText(label, (x(h / 24f) - w / 2f).coerceIn(0f, width - w), height - 1f, labelPaint)
+            }
+        }
+        val nx = x(day.nowFraction)
+        paint.color = Color.BLACK
+        canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
+        paint.color = Color.WHITE
+        canvas.drawRoundRect(RectF(nx - 1.5f * density, 0f, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
+    }
+}
+
+class ActualDayView(context: Context) : View(context) {
+    private var day: ActualDay? = null
+    fun setDay(value: ActualDay) { day = value; contentDescription = "${value.text}; зелене — світло було, червоне — не було, темне — немає даних"; invalidate() }
+    override fun onDraw(canvas: Canvas) {
+        val d = day ?: return
+        val density = resources.displayMetrics.density
+        ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = 10f * density)
+    }
 }
 
 /** SOC bar like the web dashboard: dim track, filled part = red → amber → green → teal gradient spanning the full track. */
@@ -174,6 +246,7 @@ object SocChartPainter {
     )
 
     private fun eventColor(kind: String) = when (kind) {
+        "anomaly_overload_trip" -> ChartColors.CORAL
         "light_lost" -> ChartColors.AMBER
         "light_returned" -> ChartColors.POWER_ON
         "charging_started" -> ChartColors.LINE
@@ -184,8 +257,12 @@ object SocChartPainter {
         "light_lost" -> "●"
         "light_returned" -> "○"
         "charging_started" -> "⚡"
+        "anomaly_overload_trip" -> "!"
         else -> "✓"
     }
+
+    /** Marker diameter + gap on the app chart; markers closer than this (or 20 min) merge into one with a count. */
+    fun markerPx(density: Float) = 16f * density
 
     /** [labels]: y-axis 25/50/75/100 %, floor %, x «−24 год · −12 год · зараз» (app view); widgets pass false. */
     fun draw(canvas: Canvas, width: Float, height: Float, input: Input, density: Float, labels: Boolean) {
@@ -242,16 +319,17 @@ object SocChartPainter {
         canvas.drawCircle(x(last.epochMillis), y(last.soc.toDouble()), 3.5f * density, paint)
         fun socAt(t: Long) = pts.minBy { kotlin.math.abs(it.epochMillis - t) }.soc.toDouble()
         val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8f * density; color = Color.rgb(16, 20, 28); textAlign = Paint.Align.CENTER; isFakeBoldText = true }
-        input.events.filter { it.epochMillis in start..end }.forEach { e ->
-            val ex = x(e.epochMillis)
-            val color = eventColor(e.kind)
+        val clusters = ChartEventClusters.cluster(input.events.filter { it.epochMillis in start..end }, markerPx(density)) { x(it) }
+        clusters.forEach { c ->
+            val color = eventColor(c.kind)
             grid.color = Color.argb(140, Color.red(color), Color.green(color), Color.blue(color))
-            canvas.drawLine(ex, top, ex, bottom, grid)
+            c.events.forEach { e -> canvas.drawLine(x(e.epochMillis), top, x(e.epochMillis), bottom, grid) }
             if (!labels) return@forEach
-            val cy = maxOf(top + 7 * density, y(socAt(e.epochMillis)) - 10 * density)
+            val ex = x(c.epochMillis)
+            val cy = maxOf(top + 7 * density, y(socAt(c.epochMillis)) - 10 * density)
             paint.color = color
             canvas.drawCircle(ex, cy, 7 * density, paint)
-            canvas.drawText(eventGlyph(e.kind), ex, cy + 3 * density, glyph)
+            canvas.drawText(if (c.count > 1) c.count.toString() else eventGlyph(c.kind), ex, cy + 3 * density, glyph)
         }
         grid.color = ChartColors.GRID
     }

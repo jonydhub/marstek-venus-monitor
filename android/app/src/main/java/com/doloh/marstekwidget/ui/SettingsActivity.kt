@@ -200,11 +200,11 @@ class SettingsActivity : Activity() {
         // 3. Reserve
         val reserveCard = ui.card()
         reserveCard.addView(ui.title("3 · Запас і споживання"))
-        reserveCard.addView(ui.label("Поріг резервного виходу, W", 11f, Ui.MUTED, true))
+        reserveCard.addView(ui.label("Поріг резервного виходу, Вт", 11f, Ui.MUTED, true))
         thresholdEdit = ui.field("5", numeric = true)
         reserveCard.addView(thresholdEdit)
-        reserveCard.addView(ui.hint("Живлення резервного виходу вище порогу = світла немає. За замовчуванням 5 W."))
-        reserveCard.addView(ui.label("Середнє споживання на резерві, W (необов'язково)", 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
+        reserveCard.addView(ui.hint("Живлення резервного виходу вище порогу = світла немає. За замовчуванням 5 Вт."))
+        reserveCard.addView(ui.label("Середнє споживання на резерві, Вт (необов'язково)", 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
         loadEdit = ui.field("напр. 120", numeric = true)
         reserveCard.addView(loadEdit)
         reserveCard.addView(ui.hint("Для прогнозу запасу до першого відключення. Потім застосунок рахує сам: за фактичним розрядом або за середнім резервного виходу (≥ 30 хв вимірювань)."))
@@ -577,9 +577,9 @@ class SettingsActivity : Activity() {
         }
         if (next.outageRegionId != null && next.outageQueue == null) errors += "Оберіть чергу відключень або вимкніть графік."
         val threshold = thresholdEdit.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it in 0.5..500.0 }
-        if (threshold == null) errors += "Поріг резервного виходу: 0,5–500 W."
+        if (threshold == null) errors += "Поріг резервного виходу: 0,5–500 Вт."
         val load = loadEdit.text.toString().replace(',', '.').trim().let { if (it.isEmpty()) null else it.toDoubleOrNull() }
-        if (loadEdit.text.isNotBlank() && (load == null || load !in 1.0..20_000.0)) errors += "Середнє споживання: 1–20000 W або порожньо."
+        if (loadEdit.text.isNotBlank() && (load == null || load !in 1.0..20_000.0)) errors += "Середнє споживання: 1–20000 Вт або порожньо."
         val rated = ratedEdit.text.toString().replace(',', '.').toDoubleOrNull()?.takeIf { it in 100.0..100_000.0 }
         if (rated == null) errors += "Ємність батареї: 100–100000 Wh."
         val floor = floorEdit.text.toString().replace(',', '.').trim().ifEmpty { "11" }.toDoubleOrNull()?.takeIf { it in 0.0..50.0 }

@@ -33,13 +33,13 @@
     <string name="widget_backup_power">Резервний вихід: %1$s</string>
     <string name="widget_capacity_value">Запас: %1$s / %2$s</string>
     <string name="widget_capacity_unknown">Запас батареї: —</string>
-    <string name="widget_kwh_unknown">— kWh</string>
+    <string name="widget_kwh_unknown">— кВт·год</string>
     <string name="widget_power_status_unknown">Світло: —</string>
     <string name="widget_power_status_group">%1$s · черга %2$s · %3$s</string>
     <string name="widget_power_status_short">%1$s · %2$s</string>
     <string name="widget_power_reserve_measuring">Запас: оцінюю розряд…</string>
-    <string name="main_power_basis_measured">За фактичним розрядом ≈ %1$d W.</string>
-    <string name="main_power_basis_configured">За середнім споживанням %1$d W.</string>
+    <string name="main_power_basis_measured">За фактичним розрядом ≈ %1$d Вт.</string>
+    <string name="main_power_basis_configured">За середнім споживанням %1$d Вт.</string>
     <string name="main_power_basis_missing">Середнє споживання не задано — прогноз з’явиться під час відключення за фактичним розрядом.</string>
     <string name="main_power_source_error">Графік не оновився — показано збережений.</string>
     <string name="main_power_unavailable">Дані про світло ще не надійшли.</string>
@@ -47,7 +47,7 @@
     <string name="widget_energy_grid_out">Експорт у мережу: %1$s</string>
     <string name="widget_energy_load">Споживання: %1$s</string>
 
-    <string name="widget_section_energy">НАКОПИЧЕНО · kWh</string>
+    <string name="widget_section_energy">НАКОПИЧЕНО · кВт·год</string>
     <string name="widget_eta_value">%1$s %2$s</string>
     <string name="widget_eta_to_full">До повного:</string>
     <string name="widget_eta_to_empty">До нуля:</string>
@@ -64,11 +64,11 @@
     <string name="widget_warning_critical_temp">Критична температура батареї</string>
     <string name="widget_warning_high_temp">Висока температура батареї</string>
     <string name="widget_warning_low_soc" formatted="false">Заряд нижче 20%</string>
-    <string name="widget_warning_high_power">Потік батареї понад 500 W</string>
+    <string name="widget_warning_high_power">Потік батареї понад 500 Вт</string>
     <string name="widget_warning_critical_temp_short">Температура критична</string>
     <string name="widget_warning_high_temp_short">Температура висока</string>
     <string name="widget_warning_low_soc_short">Низький заряд</string>
-    <string name="widget_warning_high_power_short">Оцінка батареї понад 500 W</string>
+    <string name="widget_warning_high_power_short">Оцінка батареї понад 500 Вт</string>
     <string name="widget_state_charging">Заряджається</string>
     <string name="widget_state_discharging">Розряджається</string>
     <string name="widget_state_waiting">Очікування</string>
@@ -98,7 +98,7 @@
     <string name="widget_show_eta">Час до повного заряду / розряду</string>
     <string name="widget_show_temperature">Температура батареї</string>
     <string name="widget_show_power">Оцінка потужності батареї</string>
-    <string name="widget_show_capacity">Запас батареї в kWh</string>
+    <string name="widget_show_capacity">Запас батареї в кВт·год</string>
     <string name="widget_show_energy">Лічильники енергії</string>
     <string name="widget_show_battery_state">Стан батареї</string>
     <string name="widget_show_grid_power">Потужність мережі</string>
@@ -113,7 +113,7 @@
     <string name="main_intro">Моніторинг батареї Marstek · лише читання.</string>
     <string name="main_sign_in">Увійти через Cloudflare Access</string>
     <string name="main_refresh">Оновити показники</string>
-    <string name="main_refresh_note">На екрані — кожні 5 с напряму (30 с через сервер), ↻ — оновити зараз; віджети оновлюються приблизно кожні 15 хв і лише в домашній мережі в режимі «Напряму». Android може відкласти фонове оновлення.</string>
+    <string name="main_refresh_note">На екрані — кожні 15 с напряму (30 с через сервер; сервер опитує батарею кожні 15 с), ↻ — оновити зараз; віджети оновлюються приблизно кожні 15 хв і лише в домашній мережі в режимі «Напряму». Android може відкласти фонове оновлення.</string>
     <string name="main_open_web_dashboard">Відкрити веб-дашборд сервера</string>
     <string name="main_dashboard_loading">Оновлюю телеметрію…</string>
     <string name="main_dashboard_error">Не вдалося оновити · показано останні збережені дані</string>
@@ -126,7 +126,7 @@
     <string name="main_status_stale">ЗАСТАРІЛО</string>
     <string name="main_status_online">ОНЛАЙН</string>
     <string name="main_stored_energy">Venus E 3.0 · батарея</string>
-    <string name="main_capacity_caption">ЗАПАС · kWh</string>
+    <string name="main_capacity_caption">ЗАПАС · кВт·год</string>
     <string name="main_soc_caption">SOC</string>
     <string name="main_battery_capacity">Ємність</string>
     <string name="main_temperature">Температура</string>
@@ -140,7 +140,7 @@
     <string name="main_battery_flow">Потужність батареї · оцінка</string>
     <string name="main_backup">Резервний вихід</string>
     <string name="main_eta_title">Оцінка часу</string>
-    <string name="main_energy_title">Накопичені лічильники · kWh</string>
+    <string name="main_energy_title">Накопичені лічильники · кВт·год</string>
     <string name="main_energy_grid_in">Імпорт із мережі</string>
     <string name="main_energy_grid_out">Експорт у мережу</string>
     <string name="main_energy_load">Споживання</string>
@@ -182,8 +182,8 @@
     <string name="main_notify_group_consumption_hint">Велике навантаження під час відключення</string>
     <string name="main_notify_group_health">Стан батареї</string>
     <string name="main_notify_group_health_hint">Температура, немає свіжих даних</string>
-    <string name="main_notify_high_load_label">Поріг великого споживання, W</string>
-    <string name="main_notify_high_load_note">Сповіщення, якщо резервний вихід під час відключення перевищує більше з: цей поріг або 2× середнє за 24 год. Типово 200 W.</string>
+    <string name="main_notify_high_load_label">Поріг великого споживання, Вт</string>
+    <string name="main_notify_high_load_note">Сповіщення, якщо резервний вихід під час відключення перевищує більше з: цей поріг або 2× середнє реальне навантаження за 7 днів (без пауз 0 Вт; лише якщо назбиралось ≥ 30 хв). Типово 200 Вт.</string>
     <string name="main_alerts_title">На що звернути увагу</string>
     <string name="main_notify_permission">Сповіщення заборонені в системі — натисніть, щоб дозволити.</string>
     <string name="main_signin_banner">Увійдіть через Cloudflare Access, щоб оновлювати показники. Поки що показано збережені дані.</string>
@@ -191,9 +191,9 @@
     <string name="main_eta_none">ETA —</string>
     <string name="main_history_title">Заряд за 24 год</string>
     <string name="main_history_range">мін %1$d%% · макс %2$d%% · %3$d точок</string>
-    <string name="main_backup_avg">Резерв · середнє 24 год</string>
+    <string name="main_backup_avg">Резерв · середнє навантаження 7 дн</string>
     <string name="main_backup_today">Резерв · сьогодні</string>
-    <string name="main_power_basis_measured_24h">За середнім споживанням резервного виходу за 24 год ≈ %1$d W.</string>
+    <string name="main_power_basis_measured_24h">За середнім споживанням резервного виходу за 24 год ≈ %1$d Вт.</string>
     <string name="main_details_title">Батарея і потоки</string>
     <string name="main_schedule_title">Світло і графік</string>
     <string name="schedule_screen_title">Графік відключень</string>

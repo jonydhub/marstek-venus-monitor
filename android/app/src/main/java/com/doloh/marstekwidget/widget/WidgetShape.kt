@@ -53,6 +53,16 @@ enum class WidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
         else -> 0f
     }
 
+    /**
+     * Height of the «Фактично» row under today's half of the schedule bitmap (dp; 0 = none): 4×2 and 4×4 (+ tablet).
+     * Must match the ImageView heights in the layouts (schedule part + this).
+     */
+    val actualRowDp: Float get() = when (this) {
+        WIDE, LARGE -> 10f
+        XLARGE -> 14f
+        else -> 0f
+    }
+
     /** Height of the bar itself inside the schedule bitmap, dp. */
     val scheduleBarDp: Float get() = if (this == XLARGE) 12f else 8f
 }
