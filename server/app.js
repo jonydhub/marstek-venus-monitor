@@ -414,8 +414,9 @@ const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світ�
   anomaly_overload_trip: {label: '!', cls: 'ev-trip', title: 'Можливо, спрацював захист від перевантаження'}};
 const EVENT_PRIORITY = ['anomaly_overload_trip', 'light_lost', 'light_returned', 'charging_started', 'charged_full'];
 /**
- * Chart markers: events closer than `minGapMs` (~20 min) or whose marker boxes would overlap (`markerPx` at `x(t)`)
- * merge into one marker with a count. Same rules as the Android ChartEventClusters (keep in sync).
+ * Chart markers: an event closer than `minGapMs` (~20 min) to the first event of the current cluster, or whose marker box
+ * would overlap that cluster's marker (`markerPx` at `x(t)`), joins it; the marker sits at the cluster's first event
+ * and shows the count. Same rules as the Android ChartEventClusters (keep in sync).
  */
 function clusterChartEvents(events, x, markerPx = 14, minGapMs = 20 * 60e3) {
   const pts = (events || []).map(e => ({kind: e.kind, t: e.t, ms: Date.parse(e.t)})).filter(e => EVENT_MARK[e.kind] && Number.isFinite(e.ms))
@@ -423,12 +424,12 @@ function clusterChartEvents(events, x, markerPx = 14, minGapMs = 20 * 60e3) {
   const clusters = [];
   for (const e of pts) {
     const last = clusters[clusters.length - 1];
-    if (last && (e.ms - last.lastMs < minGapMs || x(e.ms) - x(last.lastMs) < markerPx)) { last.events.push(e); last.lastMs = e.ms; }
+    if (last && (e.ms - last.firstMs < minGapMs || x(e.ms) - x(last.firstMs) < markerPx)) { last.events.push(e); last.lastMs = e.ms; }
     else clusters.push({events: [e], firstMs: e.ms, lastMs: e.ms});
   }
   return clusters.map(c => {
     const kind = EVENT_PRIORITY.find(k => c.events.some(e => e.kind === k)) || c.events[0].kind;
-    return {ms: (c.firstMs + c.lastMs) / 2, firstMs: c.firstMs, lastMs: c.lastMs, count: c.events.length, kind, events: c.events};
+    return {ms: c.firstMs, firstMs: c.firstMs, lastMs: c.lastMs, count: c.events.length, kind, events: c.events};
   });
 }
 function renderSocChart(insights = {}, outage = {}) {
