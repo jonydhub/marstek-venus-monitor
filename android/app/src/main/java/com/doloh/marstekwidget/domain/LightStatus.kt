@@ -22,6 +22,8 @@ data class LightStatus(val kind: LightKind, val headline: String, val hint: Stri
 object LightStatusResolver {
     const val NO_LINK = "Немає зв'язку з батареєю"
     const val SCHEDULED_HINT = "за графіком зараз відключення"
+    /** UPS bypass: the backup output draws, but from the grid (grid_detail.bypass_now). */
+    const val BYPASS_HINT = "визначено: байпас"
     private val kyiv: ZoneId = ZoneId.of("Europe/Kyiv")
 
     fun resolve(snapshot: BatterySnapshot?, fetchFailed: Boolean, now: ZonedDateTime = ZonedDateTime.now(kyiv)): LightStatus {
@@ -31,7 +33,7 @@ object LightStatusResolver {
             return LightStatus(LightKind.NO_LINK, NO_LINK, hint)
         }
         return when (info?.gridState) {
-            GridState.ON -> LightStatus(LightKind.ON, "Світло є", null)
+            GridState.ON -> LightStatus(LightKind.ON, "Світло є", BYPASS_HINT.takeIf { info?.bypassNow == true })
             GridState.OFF -> LightStatus(LightKind.OFF, "Світла нема", null)
             else -> LightStatus(LightKind.UNKNOWN, "Світло: —", null)
         }

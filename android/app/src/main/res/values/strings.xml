@@ -201,4 +201,10 @@
     <string name="widget_schedule_tomorrow">Завтра</string>
     <string name="widget_schedule_description">Графік відключень: сьогодні і завтра, біла риска — зараз</string>
     <string name="widget_chart_description">Заряд за 24 год; жовтим — періоди без світла</string>
+    <string name="settings_bypass_title">Навантаження резервного виходу від мережі (байпас)</string>
+    <string name="settings_bypass_auto">Авто (визначити самостійно)</string>
+    <string name="settings_bypass_yes">Станція показує навантаження і від мережі (байпас)</string>
+    <string name="settings_bypass_no">Ні (будь-яке навантаження резервного виходу = світла нема)</string>
+    <string name="settings_bypass_hint">Деякі прошивки в режимі UPS показують навантаження резервного виходу і тоді, коли його живить мережа. Авто: якщо батарея заряджається від мережі або не розряджається під навантаженням (≥ 30 Wh), світло є; після цього нове навантаження означає «світла нема», лише коли батарея помітно розряджається (≈ 10 Wh, 1–3 хв). Лише для прямого підключення; у режимі сервера діє MARSTEK_BYPASS_LOAD на сервері.</string>
+    <string name="settings_bypass_learned">Визначено: ця батарея працює з байпасом.</string>
 </resources>

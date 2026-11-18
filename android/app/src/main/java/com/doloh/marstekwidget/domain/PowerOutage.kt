@@ -47,6 +47,8 @@ data class PowerOutageInfo(
     val regionId: String? = null,
     /** Light hysteresis: the light is still off but the backup output reads ~0 W now (a load pause, or a trip). */
     val pendingReturn: Boolean = false,
+    /** grid_detail.bypass_now: the backup output draws but the grid feeds it (UPS bypass). */
+    val bypassNow: Boolean = false,
     /** Suspected overload trip in this outage: last backup reading (W) and when it was detected (ISO). */
     val overloadTripWatts: Double? = null,
     val overloadTripAt: String? = null,
@@ -115,6 +117,7 @@ object PowerOutageParser {
             sourceId = block.optStringOrNull("source_id") ?: block.optStringOrNull("source"),
             regionId = block.optStringOrNull("region"),
             pendingReturn = block.optJSONObject("grid_detail")?.optBoolean("pending_return", false) == true,
+            bypassNow = block.optJSONObject("grid_detail")?.optBoolean("bypass_now", false) == true,
             overloadTripWatts = block.optJSONObject("grid_detail")?.optJSONObject("overload_trip")?.optDouble("last_w", Double.NaN)
                 ?.takeIf(Double::isFinite),
             overloadTripAt = block.optJSONObject("grid_detail")?.optJSONObject("overload_trip")?.optStringOrNull("at"),
