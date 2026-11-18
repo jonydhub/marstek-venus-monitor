@@ -11,13 +11,19 @@ def states(start, seconds, step, **fields):
     return [row(start + i, **fields) for i in range(0, seconds, step)]
 
 
+def drain(start, seconds, step, offgrid, wh=2560.0, **fields):
+    """A real outage: the battery pays for the backup load — bat_wh falls in ~5 Wh steps (not flat = bypass)."""
+    return [row(start + i, offgrid=offgrid, bat_wh=5.0 * round((wh - offgrid * i / 3600.0) / 5.0), **fields)
+            for i in range(0, seconds, step)]
+
+
 class TodayDurationTests(unittest.TestCase):
     def setUp(self):
         self.now = ts("2026-11-10T12:00:00")
 
     def test_counts_charge_discharge_and_outage_since_local_midnight(self):
         rows = (states(ts("2026-11-10T00:00:00"), 3600, 30, flow_dir="charging", offgrid=0.0)
-                + states(ts("2026-11-10T01:00:00"), 7200, 30, flow_dir="discharging", offgrid=121.0)
+                + drain(ts("2026-11-10T01:00:00"), 7200, 30, flow_dir="discharging", offgrid=121.0)
                 + states(ts("2026-11-10T03:00:00"), 1800, 30, flow_dir="idle", offgrid=0.0))
         today = today_durations(rows, now=self.now)
         self.assertAlmostEqual(today["charge_seconds"], 3600, delta=30)
@@ -55,7 +61,7 @@ class OutagePeriodTests(unittest.TestCase):
     def test_merges_samples_with_backup_draw_into_periods(self):
         now = ts("2026-11-10T12:00:00")
         rows = (states(ts("2026-11-10T08:00:00"), 600, 30, offgrid=0.0)
-                + states(ts("2026-11-10T08:10:00"), 3600, 30, offgrid=120.0)
+                + drain(ts("2026-11-10T08:10:00"), 3600, 30, offgrid=120.0)
                 + states(ts("2026-11-10T09:10:00"), 600, 30, offgrid=0.0))
         periods = outage_periods(rows, now=now)
         self.assertEqual(len(periods), 1)

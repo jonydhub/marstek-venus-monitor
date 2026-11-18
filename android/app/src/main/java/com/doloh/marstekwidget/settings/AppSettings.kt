@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import com.doloh.marstekwidget.direct.GridBypass
 import com.doloh.marstekwidget.direct.MarstekRpc
 import com.doloh.marstekwidget.outage.OutageConfig
 import com.doloh.marstekwidget.outage.OutageRegions
@@ -33,6 +34,8 @@ data class AppSettings(
     val detectedRatedWh: Double? = null,
     /** BMS discharge floor (% SOC); the reserve forecast counts only energy above it. No Get method exposes it. */
     val dischargeFloorPct: Double = DEFAULT_DISCHARGE_FLOOR_PCT,
+    /** UPS bypass handling for the light in direct mode: auto (learn) / yes / no — see GridHysteresis, GridBypass. */
+    val bypassLoadMode: String = GridBypass.AUTO,
 ) {
     val outageConfig: OutageConfig?
         get() = if (outageRegionId != null && !outageQueue.isNullOrBlank()) OutageConfig(outageRegionId, outageQueue) else null
@@ -64,6 +67,7 @@ class SettingsStore(context: Context) {
         ratedCapacityWh = prefs.getFloat("battery.rated_wh", AppSettings.DEFAULT_RATED_WH.toFloat()).toDouble(),
         detectedRatedWh = prefs.getFloat("battery.detected_rated_wh", -1f).toDouble().takeIf { it > 0 },
         dischargeFloorPct = prefs.getFloat("battery.floor_pct", AppSettings.DEFAULT_DISCHARGE_FLOOR_PCT.toFloat()).toDouble(),
+        bypassLoadMode = GridBypass.normalize(prefs.getString("light.bypass_load", null)),
     )
 
     fun save(s: AppSettings) {
@@ -82,6 +86,7 @@ class SettingsStore(context: Context) {
             .putFloat("battery.rated_wh", s.ratedCapacityWh.toFloat())
             .putFloat("battery.detected_rated_wh", (s.detectedRatedWh ?: -1.0).toFloat())
             .putFloat("battery.floor_pct", s.dischargeFloorPct.toFloat())
+            .putString("light.bypass_load", GridBypass.normalize(s.bypassLoadMode))
             .apply()
     }
 

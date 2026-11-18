@@ -28,6 +28,7 @@ import com.doloh.marstekwidget.data.OutageRepository
 import com.doloh.marstekwidget.data.TelemetryFetchResult
 import com.doloh.marstekwidget.data.TelemetryRepository
 import com.doloh.marstekwidget.direct.DeviceInfo
+import com.doloh.marstekwidget.direct.GridBypass
 import com.doloh.marstekwidget.direct.MarstekRpc
 import com.doloh.marstekwidget.direct.RpcResult
 import com.doloh.marstekwidget.direct.SubnetScanPlanner
@@ -204,6 +205,7 @@ class SettingsActivity : Activity() {
         thresholdEdit = ui.field("5", numeric = true)
         reserveCard.addView(thresholdEdit)
         reserveCard.addView(ui.hint("Живлення резервного виходу вище порогу = світла немає. За замовчуванням 5 Вт."))
+        reserveCard.addView(bypassChoice())
         reserveCard.addView(ui.label("Середнє споживання на резерві, Вт (необов'язково)", 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
         loadEdit = ui.field("напр. 120", numeric = true)
         reserveCard.addView(loadEdit)
@@ -375,6 +377,26 @@ class SettingsActivity : Activity() {
     }
 
     private fun trim(v: Double) = if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
+
+    /** UPS bypass: some stations report the backup load even while the grid feeds it (direct mode only). */
+    private fun bypassChoice() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(ui.label(getString(R.string.settings_bypass_title), 11f, Ui.MUTED, true).apply { setPadding(0, ui.dp(6), 0, 0) })
+        val group = RadioGroup(this@SettingsActivity).apply { orientation = RadioGroup.VERTICAL }
+        val options = listOf(
+            GridBypass.AUTO to ui.radio(getString(R.string.settings_bypass_auto)),
+            GridBypass.YES to ui.radio(getString(R.string.settings_bypass_yes)),
+            GridBypass.NO to ui.radio(getString(R.string.settings_bypass_no)),
+        )
+        options.forEach { (_, radio) -> group.addView(radio) }
+        group.check(options.first { it.first == GridBypass.normalize(draft.bypassLoadMode) }.second.id)
+        group.setOnCheckedChangeListener { _, id ->
+            draft = draft.copy(bypassLoadMode = options.firstOrNull { it.second.id == id }?.first ?: GridBypass.AUTO)
+        }
+        addView(group)
+        val learned = draft.deviceHost?.let { DirectEngine.bypassSeen(this@SettingsActivity, it, draft.devicePort) } == true
+        addView(ui.hint(getString(R.string.settings_bypass_hint) + if (learned) " " + getString(R.string.settings_bypass_learned) else ""))
+    }
 
     private fun updatePanels() {
         directPanel.visibility = if (draft.mode == ConnectionMode.DIRECT) View.VISIBLE else View.GONE

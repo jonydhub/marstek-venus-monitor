@@ -5,6 +5,7 @@ import com.doloh.marstekwidget.direct.BatteryFlowCalculator
 import com.doloh.marstekwidget.direct.CapacitySample
 import com.doloh.marstekwidget.direct.DeviceInfo
 import com.doloh.marstekwidget.direct.DirectStatusComposer
+import com.doloh.marstekwidget.direct.GridBypass
 import com.doloh.marstekwidget.direct.GridHysteresis
 import com.doloh.marstekwidget.direct.GridPoint
 import com.doloh.marstekwidget.direct.LoadStatsAccumulator
@@ -146,8 +147,14 @@ object DirectEngine {
         val measured = HistoryMath.measuredBackupLoad(rows, nowS, settings.backupThresholdW)
         // Light only from the backup output, through the hysteresis (GridHysteresis, same rules as the server):
         // lost at once, back only on grid charging or ≥ 5 min without load; no ES answer = unknown, never «off».
-        val points = HistoryMath.gridPoints(rows).let { if (it.lastOrNull()?.ts == nowS) it else it + GridPoint(nowS, sample.offgridW, sample.ongridW) }
-        val (tracker, signal) = GridHysteresis.replay(points, settings.backupThresholdW, HistoryMath.CONFIRM_GAP_SECONDS)
+        // UPS bypass (some firmwares report the backup load while the grid feeds it): setting + learned flag per device.
+        val bypassMode = GridBypass.normalize(settings.bypassLoadMode)
+        val bypass = GridBypass(bypassMode, bypassMode != GridBypass.NO && bypassSeen(context, host, settings.devicePort))
+        val points = HistoryMath.gridPoints(rows).let {
+            if (it.lastOrNull()?.ts == nowS) it else it + GridPoint(nowS, sample.offgridW, sample.ongridW, sample.batWh)
+        }
+        val (tracker, signal) = GridHysteresis.replay(points, settings.backupThresholdW, HistoryMath.CONFIRM_GAP_SECONDS, bypass)
+        if (bypassMode == GridBypass.AUTO && tracker.bypassLoadSeen && !bypass.seen) rememberBypassSeen(context, host, settings.devicePort)
         val grid = if (es == null) "unknown" else tracker.state ?: "unknown"
         val smoothed = if (grid == "off") HistoryMath.smoothedBackupLoad(rows, nowS, tracker.offSince) else null
         fun iso(t: Double?) = t?.let { Instant.ofEpochMilli((it * 1000).toLong()).atZone(KYIV).toOffsetDateTime().withNano(0).toString() }
@@ -158,6 +165,11 @@ object DirectEngine {
             .put("zero_load_since", iso(tracker.zeroSince) ?: JSONObject.NULL)
             .put("light_since", iso(tracker.onSince) ?: JSONObject.NULL)
             .put("confirmed_by", tracker.confirmedBy ?: JSONObject.NULL)
+            .put("lost_by", tracker.lostBy ?: JSONObject.NULL)
+            .put("pending_outage", signal.pendingLoss)
+            .put("bypass_mode", bypassMode)
+            .put("bypass_load_seen", tracker.bypassLoadSeen)
+            .put("bypass_now", tracker.bypassActive)
             .put("return_confirm_seconds", GridHysteresis.RETURN_CONFIRM_SECONDS.toInt())
             .put("overload_trip", if (tracker.tripped && tracker.tripW != null)
                 JSONObject().put("last_w", Math.round(tracker.tripW!!)).put("at", iso(tracker.tripAt) ?: JSONObject.NULL) else JSONObject.NULL)
@@ -202,7 +214,8 @@ object DirectEngine {
         val insights = HistoryMath.insights(rows, nowS, offgrid, bat.optDouble("bat_temp", Double.NaN).takeIf(Double::isFinite),
             settings.backupThresholdW, chart,
             loadStats = LoadStatsAccumulator.stats(prefs(context).getString("load_stats", null),
-                LoadStatsAccumulator.windowStart(java.time.LocalDate.now(KYIV))))
+                LoadStatsAccumulator.windowStart(java.time.LocalDate.now(KYIV))),
+            bypass = GridBypass(bypassMode, bypassMode != GridBypass.NO && (bypass.seen || tracker.bypassLoadSeen)))
         val root = DirectStatusComposer.compose(
             results, flow, outage, insights, Instant.ofEpochMilli(nowMs).toString(), settings.deviceModel,
             fallbackRatedWh = settings.ratedCapacityWh,
@@ -230,4 +243,13 @@ object DirectEngine {
     }
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("marstek_direct", Context.MODE_PRIVATE)
+
+    private fun bypassKey(host: String, port: Int) = "bypass_load_seen.$host:$port"
+
+    /** Learned per device: this station reports backup-output load while the grid is present (UPS bypass). */
+    fun bypassSeen(context: Context, host: String, port: Int): Boolean = prefs(context).getBoolean(bypassKey(host, port), false)
+
+    private fun rememberBypassSeen(context: Context, host: String, port: Int) {
+        prefs(context).edit().putBoolean(bypassKey(host, port), true).apply()
+    }
 }

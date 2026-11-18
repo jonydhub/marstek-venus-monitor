@@ -11,8 +11,11 @@ class HistoryTodayTest {
     private val midnight = ZonedDateTime.of(2026, 11, 10, 0, 0, 0, 0, kyiv).toEpochSecond().toDouble()
     private val now = midnight + 12 * 3600
 
+    /** A real outage drains the battery with the backup load (bat_wh in 5 Wh steps); a flat bat_wh would be a bypass. */
     private fun span(from: Double, seconds: Int, dir: String?, offgrid: Double, step: Int = 60) =
-        (0 until seconds step step).map { HistorySample(from + it, 80, 4000.0, null, dir, offgrid, 0.0, 24.0) }
+        (0 until seconds step step).map {
+            HistorySample(from + it, 80, 5.0 * Math.round((4000.0 - offgrid * it / 3600.0) / 5.0), null, dir, offgrid, 0.0, 24.0)
+        }
 
     @Test
     fun countsChargeDischargeAndNoLightSinceMidnight() {

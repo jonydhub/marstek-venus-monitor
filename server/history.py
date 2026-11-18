@@ -52,6 +52,17 @@ class HistoryStore:
             " kind TEXT NOT NULL, category TEXT NOT NULL, text TEXT NOT NULL, value REAL)"
         )
         self.conn.execute("CREATE INDEX IF NOT EXISTS events_ts ON events (ts)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID")
+
+    def get_meta(self, key, default=None):
+        """Small persisted per-install facts (e.g. the learned «bypass load seen» flag); never pruned."""
+        with self.lock:
+            row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else default
+
+    def set_meta(self, key, value):
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, str(value)))
 
     def record(self, sample: dict):
         values = tuple(sample.get(name) for name in COLUMNS)
@@ -193,10 +204,12 @@ def _measured_battery_w(row):
 
 
 def grid_timeline(rows, *, start, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
-                  confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
-    """Confirmed light on/off/unknown spans (epoch seconds) over [start, now] — see gridstate.timeline."""
+                  confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
+    """Confirmed light on/off/unknown spans (epoch seconds) over [start, now] — see gridstate.timeline.
+
+    ``bypass`` / ``bypass_seen``: MARSTEK_BYPASS_LOAD and the learned flag (see gridstate, «Bypass»)."""
     return gridstate.timeline(rows, start=start, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
-                              max_gap=MAX_GAP_SECONDS)
+                              max_gap=MAX_GAP_SECONDS, bypass=bypass, bypass_seen=bypass_seen)
 
 
 def _iso(t):
@@ -204,7 +217,7 @@ def _iso(t):
 
 
 def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
-                    confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
+                    confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
     """Since local midnight: seconds charging / discharging / without light, energy in/out of the battery (Wh).
 
     «Без світла» = confirmed OFF time of the light timeline (a compressor pause is still an outage). Energy comes from
@@ -228,7 +241,8 @@ def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
             energy[key] += wh
             if estimated:
                 energy[key + "_est"] += wh
-    timeline = grid_timeline(rows, start=midnight, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap)
+    timeline = grid_timeline(rows, start=midnight, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                             bypass=bypass, bypass_seen=bypass_seen)
     outage = sum(s["end"] - s["start"] for s in timeline if s["state"] == "off")
     return {"charge_seconds": round(charge), "discharge_seconds": round(discharge), "outage_seconds": round(outage),
             "charge_wh": round(energy["charge"], 1), "discharge_wh": round(energy["discharge"], 1),
@@ -237,9 +251,10 @@ def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
 
 
 def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
-                   confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS):
+                   confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
     """Confirmed no-light periods over the last 24 h as [{start, end}] (ISO, Kyiv); unknown gaps split periods."""
-    spans = grid_timeline(rows, start=now - WINDOW_SECONDS, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap)
+    spans = grid_timeline(rows, start=now - WINDOW_SECONDS, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                          bypass=bypass, bypass_seen=bypass_seen)
     return [{"start": _iso(s["start"]), "end": _iso(s["end"])} for s in spans
             if s["state"] == "off" and s["end"] - s["start"] >= 60]
 
@@ -322,7 +337,8 @@ def standby_consumption(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W):
 
 
 def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w=BACKUP_DRAW_THRESHOLD_W,
-                     chart_events=None, confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, load_stats=None):
+                     chart_events=None, confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, load_stats=None,
+                     bypass="auto", bypass_seen=False):
     """`rows`: the last 24 h. `load_stats`: (mean W, covered s) of the 7-day backup draw (see backup_load_stats)."""
     energy_ws, covered = _integral(_intervals(rows, now - WINDOW_SECONDS))
     average = round(energy_ws / covered, 1) if covered >= MIN_AVG_COVERAGE_SECONDS else None
@@ -337,8 +353,10 @@ def compute_insights(rows, *, now, current_offgrid_w, temperature_c, threshold_w
         "backup_energy_today_wh": round(today_ws / 3600.0, 1) if today else None,
         "temperature_c": None if temp is None else float(temp),
         "soc_history": _soc_history(rows, now),
-        "today": today_durations(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap),
-        "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap),
+        "today": today_durations(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap, bypass=bypass,
+                                 bypass_seen=bypass_seen),
+        "outage_periods": outage_periods(rows, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                                         bypass=bypass, bypass_seen=bypass_seen),
         "chart_events": list(chart_events or []),
         "standby_w": standby_consumption(rows, now=now, threshold_w=threshold_w),
         "last_grid_charge": last_grid_charge(rows, now=now, threshold_w=threshold_w),

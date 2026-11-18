@@ -9,6 +9,14 @@ package com.doloh.marstekwidget.direct
  * Overload trip: last backup ≥ 500 W (or ≥ 300 W and +150 W since the previous reading), then a poll without an
  * answer, then 0 W — reported once; after it only grid charging confirms the light.
  * [step] with `offgridW == null` = the battery did not answer ES.GetStatus.
+ *
+ * Bypass (UPS pass-through): some firmwares report the backup-port load even while the grid feeds it. (A) ongrid
+ * < −50 W wins over a backup draw → light ON. (B) during a draw, expected energy E = ∫backup W dt vs the observed
+ * drop D of bat_wh (~5 Wh steps): E ≥ 30 Wh and D < 0.25·E → grid-fed (`bypass_no_discharge`, back-dated). A or B
+ * learns `bypassLoadSeen` (persisted per device by the caller). Learned — or forced by [GridBypass.mode] "yes" — a
+ * new draw is only a *pending loss* (state kept) until the battery visibly discharges (D ≥ 10 Wh and D ≥ 0.4·E),
+ * then OFF back-dated to the window start. The window restarts after each decision, after 120 Wh without one, and
+ * when the draw stops, a poll fails, the gap exceeds confirmGap or bat_wh is missing. Mode "no" = legacy rules.
  */
 data class GridTracker(
     val state: String? = null,
@@ -23,19 +31,45 @@ data class GridTracker(
     val tripW: Double? = null,
     val tripAt: Double? = null,
     val confirmedBy: String? = null,
-)
+    val lostBy: String? = null,
+    val bypassLoadSeen: Boolean = false,
+    val bypassActive: Boolean = false,
+    val drawSince: Double? = null,
+    val drawStartWh: Double? = null,
+    val drawWh: Double = 0.0,
+) {
+    internal fun noWindow() = copy(drawSince = null, drawStartWh = null, drawWh = 0.0, bypassActive = false)
+}
 
 data class GridSignal(
     val lost: Boolean = false,
     val returnedAt: Double? = null,
     val tripW: Double? = null,
     val pending: Boolean = false,
+    val lostAt: Double? = null,
+    val pendingLoss: Boolean = false,
 )
 
 data class GridSpan(val start: Double, val end: Double, val state: String)
 
-/** One poll for the tracker: epoch seconds, backup-output and grid-port powers (null = no ES answer). */
-data class GridPoint(val ts: Double, val offgridW: Double?, val ongridW: Double?)
+/** One poll for the tracker: epoch seconds, backup-output and grid-port powers (null = no ES answer), bat_wh. */
+data class GridPoint(val ts: Double, val offgridW: Double?, val ongridW: Double?, val batWh: Double? = null)
+
+/** Bypass handling: [mode] auto / yes / no (setting), [seen] = the persisted learned flag of this device. */
+data class GridBypass(val mode: String = AUTO, val seen: Boolean = false) {
+    val normalized: String get() = normalize(mode)
+
+    companion object {
+        const val AUTO = "auto"
+        const val YES = "yes"
+        const val NO = "no"
+        fun normalize(value: String?): String = when (value?.trim()?.lowercase()) {
+            YES, "1", "true", "on" -> YES
+            NO, "0", "false", "off" -> NO
+            else -> AUTO
+        }
+    }
+}
 
 object GridHysteresis {
     const val RETURN_CONFIRM_SECONDS = 300.0
@@ -44,6 +78,11 @@ object GridHysteresis {
     const val TRIP_RISE_MIN_W = 300.0
     const val TRIP_RISE_STEP_W = 150.0
     const val DEFAULT_CONFIRM_GAP_SECONDS = 120.0
+    const val BYPASS_WINDOW_WH = 30.0
+    const val BYPASS_MAX_DROP_RATIO = 0.25
+    const val DISCHARGE_MIN_WH = 10.0
+    const val DISCHARGE_MIN_RATIO = 0.4
+    const val BYPASS_WINDOW_MAX_WH = 120.0
 
     /** Longest pause between two polls that still counts as consecutive: ≥ 120 s and 2.5 × the poll interval. */
     fun confirmGapSeconds(pollSeconds: Double): Double = maxOf(DEFAULT_CONFIRM_GAP_SECONDS, 2.5 * pollSeconds)
@@ -55,29 +94,41 @@ object GridHysteresis {
         ongridW: Double?,
         thresholdW: Double = GridStateDetector.DEFAULT_THRESHOLD_W,
         confirmGap: Double = DEFAULT_CONFIRM_GAP_SECONDS,
+        batWh: Double? = null,
+        bypass: String = GridBypass.AUTO,
     ): Pair<GridTracker, GridSignal> {
         var t = previous ?: GridTracker()
         val offgrid = offgridW?.takeIf(Double::isFinite)
         val ongrid = ongridW?.takeIf(Double::isFinite)
+        val wh = batWh?.takeIf(Double::isFinite)
+        val mode = GridBypass.normalize(bypass)
         if (offgrid == null) {
-            return t.copy(zeroSince = null, failedSinceBackup = true, lastTs = ts) to GridSignal(pending = t.state == "off")
+            return t.noWindow().copy(zeroSince = null, failedSinceBackup = true, lastTs = ts) to GridSignal(pending = t.state == "off")
         }
-        if (t.lastTs != null && ts - t.lastTs!! > confirmGap) t = t.copy(zeroSince = null)
-        val signal: GridSignal
-        if (offgrid >= thresholdW) {
+        if (t.lastTs != null && ts - t.lastTs!! > confirmGap) t = t.noWindow().copy(zeroSince = null)
+        var signal: GridSignal
+        val gridImport = ongrid != null && ongrid < GRID_CHARGE_W
+        if (offgrid >= thresholdW && mode != GridBypass.NO) {
+            val (nt, ns) = draw(t, ts, offgrid, wh, gridImport, mode)
+            t = nt
+            signal = ns
+        } else if (offgrid >= thresholdW) {
             val lost = t.state != "off"
             t = t.copy(state = "off", offSince = if (t.state == "off" && t.offSince != null) t.offSince else ts, onSince = null,
-                zeroSince = null, tripped = false, tripW = null, tripAt = null, confirmedBy = null)
-            signal = GridSignal(lost = lost)
-        } else if (ongrid != null && ongrid < GRID_CHARGE_W) {
+                zeroSince = null, tripped = false, tripW = null, tripAt = null, confirmedBy = null,
+                lostBy = if (lost) "backup_draw" else t.lostBy)
+            signal = GridSignal(lost = lost, lostAt = if (lost) ts else null)
+        } else if (gridImport) {
+            t = t.noWindow()
             val wasOff = t.state == "off"
             t = t.copy(state = "on", offSince = null, onSince = if (t.state != "on") ts else (t.onSince ?: ts), zeroSince = null,
                 tripped = false, confirmedBy = if (wasOff) "grid_charging" else t.confirmedBy)
             signal = GridSignal(returnedAt = if (wasOff) ts else null)
         } else if (t.state == "on") {
-            t = t.copy(zeroSince = null)
+            t = t.noWindow().copy(zeroSince = null)
             signal = GridSignal()
         } else {
+            t = t.noWindow()
             var tripNow: Double? = null
             val last = t.lastBackup
             val prev = t.prevBackup
@@ -102,16 +153,64 @@ object GridHysteresis {
         return t to signal
     }
 
+    /** The backup output draws and bypass handling is on (auto / yes): rules A and B, learned mode (gridstate._draw). */
+    private fun draw(start: GridTracker, ts: Double, offgrid: Double, wh: Double?, gridImport: Boolean, mode: String): Pair<GridTracker, GridSignal> {
+        var t = start
+        t = when {
+            wh == null -> t.copy(drawSince = null, drawStartWh = null, drawWh = 0.0)
+            t.drawSince == null || t.drawStartWh == null || t.lastBackup == null || t.lastTs == null ->
+                t.copy(drawSince = ts, drawStartWh = wh, drawWh = 0.0)
+            else -> t.copy(drawWh = t.drawWh + (t.lastBackup!! + offgrid) / 2.0 * maxOf(0.0, ts - t.lastTs!!) / 3600.0)
+        }
+        val window = t.drawSince != null && t.drawStartWh != null
+        val expected = if (window) t.drawWh else 0.0
+        val drop = if (window) t.drawStartWh!! - wh!! else 0.0
+        fun GridTracker.restart() = if (wh != null) copy(drawSince = ts, drawStartWh = wh, drawWh = 0.0) else this
+        val learned = t.bypassLoadSeen || mode == GridBypass.YES
+        val since = if (window) t.drawSince!! else ts
+        if (gridImport || (window && expected >= BYPASS_WINDOW_WH && drop < BYPASS_MAX_DROP_RATIO * expected)) {
+            val basis = if (gridImport) "grid_charging" else "bypass_no_discharge"
+            val wasOff = t.state == "off"
+            val back = if (gridImport) ts else since
+            t = t.copy(state = "on", offSince = null, onSince = if (t.state == "on" && t.onSince != null) t.onSince else back,
+                zeroSince = null, tripped = false, tripW = null, tripAt = null,
+                confirmedBy = if (t.state != "on") basis else t.confirmedBy,
+                bypassLoadSeen = mode == GridBypass.AUTO || t.bypassLoadSeen, bypassActive = true).restart()
+            return t to GridSignal(returnedAt = if (wasOff) back else null)
+        }
+        if (window && drop >= DISCHARGE_MIN_WH && drop >= DISCHARGE_MIN_RATIO * expected) {
+            val lost = t.state != "off"
+            val at = if (learned) since else ts
+            t = t.copy(state = "off", offSince = if (!lost && t.offSince != null) t.offSince else at, onSince = null,
+                zeroSince = null, tripped = false, tripW = null, tripAt = null, confirmedBy = null,
+                lostBy = if (lost) (if (learned) "battery_discharge" else "backup_draw") else t.lostBy,
+                bypassActive = false).restart()
+            return t to GridSignal(lost = lost, lostAt = if (lost) at else null)
+        }
+        if (window && expected >= BYPASS_WINDOW_MAX_WH) t = t.restart()
+        if (learned && t.state != "off" && !t.bypassActive) return t.copy(zeroSince = null) to GridSignal(pendingLoss = true)
+        if (learned && t.bypassActive) return t.copy(zeroSince = null) to GridSignal()
+        val lost = t.state != "off"
+        t = t.copy(state = "off", offSince = if (!lost && t.offSince != null) t.offSince else ts, onSince = null,
+            zeroSince = null, tripped = false, tripW = null, tripAt = null, confirmedBy = null,
+            lostBy = if (lost) "backup_draw" else t.lostBy, bypassActive = false)
+        return t to GridSignal(lost = lost, lostAt = if (lost) ts else null)
+    }
+
+    private fun seed(bypass: GridBypass): GridTracker? =
+        if (bypass.seen && bypass.normalized != GridBypass.NO) GridTracker(bypassLoadSeen = true) else null
+
     /** Replays [points] (any order) and returns the final tracker plus the signal of the last point. */
     fun replay(
         points: List<GridPoint>,
         thresholdW: Double = GridStateDetector.DEFAULT_THRESHOLD_W,
         confirmGap: Double = DEFAULT_CONFIRM_GAP_SECONDS,
+        bypass: GridBypass = GridBypass(),
     ): Pair<GridTracker, GridSignal> {
-        var tracker: GridTracker? = null
+        var tracker: GridTracker? = seed(bypass)
         var signal = GridSignal()
         points.sortedBy { it.ts }.forEach { p ->
-            val (t, s) = step(tracker, p.ts, p.offgridW, p.ongridW, thresholdW, confirmGap)
+            val (t, s) = step(tracker, p.ts, p.offgridW, p.ongridW, thresholdW, confirmGap, p.batWh, bypass.normalized)
             tracker = t
             signal = s
         }
@@ -120,8 +219,9 @@ object GridHysteresis {
 
     /**
      * Merged on/off/unknown spans over [start, now] — same rules as gridstate.timeline: a span takes the state after
-     * its earlier poll, a return confirmed by 5 min without load is back-dated to the start of that run, gaps longer
-     * than [maxGap], time before the first poll and an unconfirmed state are unknown; a stale last poll is not extended.
+     * its earlier poll, a return confirmed by 5 min without load (or «no discharge» in bypass) is back-dated to the
+     * start of that run, a battery-confirmed loss (learned bypass) to the start of its window; gaps longer than
+     * [maxGap], time before the first poll and an unconfirmed state are unknown; a stale last poll is not extended.
      */
     fun timeline(
         points: List<GridPoint>,
@@ -130,17 +230,20 @@ object GridHysteresis {
         thresholdW: Double = GridStateDetector.DEFAULT_THRESHOLD_W,
         confirmGap: Double = DEFAULT_CONFIRM_GAP_SECONDS,
         maxGap: Double = 300.0,
+        bypass: GridBypass = GridBypass(),
     ): List<GridSpan> {
         val sorted = points.filter { it.ts <= now }.sortedBy { it.ts }
         val states = mutableListOf<Pair<Double, String>>()
-        var tracker: GridTracker? = null
+        var tracker: GridTracker? = seed(bypass)
         sorted.forEach { p ->
-            val (t, signal) = step(tracker, p.ts, p.offgridW, p.ongridW, thresholdW, confirmGap)
+            val (t, signal) = step(tracker, p.ts, p.offgridW, p.ongridW, thresholdW, confirmGap, p.batWh, bypass.normalized)
             tracker = t
-            signal.returnedAt?.let { back ->
+            val backTo = signal.returnedAt ?: signal.lostAt?.takeIf { signal.lost }
+            val backState = if (signal.returnedAt != null) "on" else "off"
+            backTo?.let { back ->
                 for (i in states.indices.reversed()) {
                     if (states[i].first < back) break
-                    states[i] = states[i].first to "on"
+                    states[i] = states[i].first to backState
                 }
             }
             states += p.ts to (t.state ?: "unknown")
