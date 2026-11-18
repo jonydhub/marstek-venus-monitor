@@ -56,7 +56,7 @@ class Observation:
     soc: int | None = None
     temp_c: float | None = None
     returned_at: float | None = None  # grid-state hysteresis: when the confirmed return happened (≤ now)
-    return_basis: str | None = None   # "grid_charging" / "idle_5min"
+    return_basis: str | None = None   # "grid_charging" / "idle_5min" / "bypass_no_discharge"
     overload_trip_w: float | None = None  # suspected overload trip detected at this poll (last backup W)
     mode: str | None = None           # ES.GetMode `mode` (UPS / Manual / Auto / …), None = no answer
 
@@ -167,9 +167,12 @@ def step(state: DetectorState | None, obs: Observation, now: float,
             s = replace(s, outage_started_at=now)
         else:
             back = obs.returned_at if obs.returned_at is not None and obs.returned_at <= now else now
-            lasted = f" після {duration_text(back - s.outage_started_at)}" if s.outage_started_at else ""
+            # a bypass return is back-dated to the start of the draw — often the moment of the false loss itself
+            lasted = (f" після {duration_text(back - s.outage_started_at)}"
+                      if s.outage_started_at and back - s.outage_started_at >= 60 else "")
             basis = {"grid_charging": " (заряджання від мережі)",
-                     "idle_5min": f" (без навантаження з {_clock(back)})"}.get(obs.return_basis, "")
+                     "idle_5min": f" (без навантаження з {_clock(back)})",
+                     "bypass_no_discharge": " (байпас: резервний вихід живиться від мережі)"}.get(obs.return_basis, "")
             events.append(_event(now, "light_returned", f"Світло повернулось{lasted}{basis}{soc_text}"))
             s = replace(s, outage_started_at=None)
     if grid is not None:
