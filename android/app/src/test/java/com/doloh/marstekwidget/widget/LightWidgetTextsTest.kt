@@ -63,7 +63,7 @@ class LightWidgetTextsTest {
         assertEquals("Світла нема", c.headlines.first())
         assertEquals(listOf("вже 2${nb}год 15${nb}хв", "2${nb}год 15${nb}хв"), c.durations)
         // Same formatter as the app: a scheduled window that is really off.
-        assertEquals("Світло за графіком о 21:00", c.next.first())
+        assertEquals(listOf("Світло за графіком о 21:00", "За графіком о 21:00"), c.next)
         assertEquals("Запас ≈ 2 д 20 год · вистачить", c.reserve)
         assertEquals(true, c.reserveCovers)
         assertEquals("Черга 1.1", c.group.last())
@@ -73,7 +73,7 @@ class LightWidgetTextsTest {
     fun offWithoutScheduleSaysTheReturnIsUnknownNeverANextOutage() {
         val c = LightWidgetTexts.content(snapshot("off", next = nextTonight, outageSince = "2026-11-10T19:30:00+02:00"), false, now)
         assertEquals(listOf("вже 45${nb}хв", "45${nb}хв"), c.durations)
-        assertEquals(listOf("Час повернення невідомий"), c.next)
+        assertEquals(listOf("Час повернення невідомий", "Повернення невідоме"), c.next)
         assertFalse(c.next.any { it.startsWith("Відключення") })
     }
 
@@ -83,20 +83,20 @@ class LightWidgetTextsTest {
         assertEquals(LightKind.ON, c.kind)
         assertEquals("Світло є", c.headlines.first())
         assertEquals("вже 13${nb}год 10${nb}хв", c.durations.first())
-        assertEquals(listOf("Відключення о 22:00–24:00", "Відключення о 22:00"), c.next)
+        assertEquals(listOf("Відключення о 22:00–24:00", "Відкл. о 22:00–24:00", "Відключення о 22:00", "Відкл. о 22:00"), c.next)
     }
 
     @Test
     fun onDuringAScheduledWindowFollowsMeasuredLightAndDropsTheLightOnTail() {
         val c = LightWidgetTexts.content(snapshot("on", current = scheduleNow), false, now)
-        assertEquals(listOf("За графіком відключення до 21:00"), c.next)
+        assertEquals(listOf("За графіком відключення до 21:00", "Графік: відключення до 21:00", "Графік: відкл. до 21:00"), c.next)
         assertTrue(c.durations.isEmpty())
     }
 
     @Test
     fun onWithNoOutageToday() {
         val c = LightWidgetTexts.content(snapshot("on", lightSince = "2026-11-10T20:00:00+02:00"), false, now)
-        assertEquals(listOf("За графіком без відключень"), c.next)
+        assertEquals(listOf("За графіком без відключень", "Графік: без відключень"), c.next)
         assertEquals("вже 15${nb}хв", c.durations.first())
     }
 

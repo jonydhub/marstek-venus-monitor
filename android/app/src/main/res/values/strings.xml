@@ -20,6 +20,15 @@
     <string name="widget_compact_description">Заряд, стан світла та головний час.</string>
     <string name="widget_strip_description">Плаский рядок 4×1: заряд, світло, ETA або час повернення.</string>
     <string name="widget_energy_description">Заряд, світло, повернення/відключення, запас і потоки.</string>
+    <string name="widget_light_name">Світло</string>
+    <string name="widget_light_description">Чи є світло зараз і скільки його немає, повернення або наступне відключення за графіком.</string>
+    <string name="widget_light_preview_headline">Світла нема</string>
+    <string name="widget_light_preview_duration">вже 2&#160;год 15&#160;хв</string>
+    <string name="widget_light_preview_next">Світло за графіком о 21:00</string>
+    <string name="widget_light_open_schedule">Відкрити графік відключень</string>
+    <string name="widget_light_last_data">Останні дані о %1$s</string>
+    <string name="widget_light_waiting_short">Очікую дані</string>
+    <string name="widget_light_first_update">З\'явиться після першого оновлення</string>
     <string name="widget_settings_title">Налаштування віджета</string>
     <string name="widget_soc_compact">%1$d%%</string>
     <string name="widget_soc_compact_unknown">—%</string>

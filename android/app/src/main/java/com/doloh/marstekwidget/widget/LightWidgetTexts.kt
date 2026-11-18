@@ -85,6 +85,7 @@ object LightWidgetTexts {
                 PowerOutageFormatter.detailBesideHeadline(info, now, light.gridState),
             )
         }
+            .flatMap { listOf(it) + shorter(it) }.distinct()
         val group = info?.takeIf { it.scheduleEnabled }?.group?.let { g ->
             listOfNotNull(info.source?.let { "Черга $g$SEP$it" }, "Черга $g")
         }.orEmpty()
@@ -100,20 +101,47 @@ object LightWidgetTexts {
         )
     }
 
+    /** Shorter forms of a schedule sentence for narrow cells, longest first; same meaning, no single-letter abbreviations. */
+    private val SHORTER: List<Pair<Regex, String>> = listOf(
+        Regex("^Світло за графіком о (.+)$") to "За графіком о $1",
+        Regex("^Час повернення невідомий$") to "Повернення невідоме",
+        Regex("^За графіком відключення до (.+)$") to "Графік: відключення до $1",
+        Regex("^За графіком відключення до (.+)$") to "Графік: відкл. до $1",
+        Regex("^Відключення (.+)$") to "Відкл. $1",
+        Regex("^За графіком без відключень$") to "Графік: без відключень",
+        Regex("^За графіком зараз відключення$") to "Графік: зараз відключення",
+        Regex("^Аварійні відключення, графік не діє$") to "Аварійні відключення",
+        Regex("^Графік відключень не налаштовано$") to "Графік не налаштовано",
+        Regex("^Графік недоступний.*$") to "Графік недоступний",
+        Regex("^Можливе відключення (.+)$") to "Можливе відкл. $1",
+    )
+
+    fun shorter(text: String): List<String> =
+        SHORTER.mapNotNull { (re, to) -> if (re.matches(text)) text.replace(re, to) else null }.filter { it != text }
+
     /**
      * 4×1 / 2×1 strip: «Світла нема · вже 2 год 15 хв» on one line while it fits (dropping «вже» first), the schedule
      * sentence under it when [twoLines]. Too narrow for both: headline alone, the duration moves to line 2.
      */
-    fun strip(content: LightWidgetContent, widthDp: Float, twoLines: Boolean, measure: (String) -> Float): StripText {
+    fun strip(
+        content: LightWidgetContent,
+        widthDp: Float,
+        twoLines: Boolean,
+        measure: (String) -> Float,
+        /** Width of the (smaller) second line; defaults to [measure]. */
+        measureSecondary: (String) -> Float = measure,
+        secondaryWidthDp: Float = widthDp,
+    ): StripText {
         fun fit(candidates: List<String>) = candidates.firstOrNull { measure(it) <= widthDp }
+        fun fit2(candidates: List<String>) = candidates.firstOrNull { measureSecondary(it) <= secondaryWidthDp }
         val combined = content.headlines.flatMap { h -> content.durations.map { d -> "$h$SEP$d" } }
         val joined = fit(combined)
         if (joined != null || content.durations.isEmpty()) {
             val primary = joined ?: fit(content.headlines) ?: content.headlines.last()
-            return StripText(primary, if (twoLines) fit(content.next) else null)
+            return StripText(primary, if (twoLines) fit2(content.next) else null)
         }
         val primary = fit(content.headlines) ?: content.headlines.last()
-        return StripText(primary, if (twoLines) fit(content.durations) ?: content.durations.last() else null)
+        return StripText(primary, if (twoLines) fit2(content.durations) ?: content.durations.last() else null)
     }
 }
 

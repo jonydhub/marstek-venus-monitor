@@ -9,6 +9,9 @@ import android.os.Bundle
 abstract class BaseMarstekWidgetProvider : AppWidgetProvider() {
     protected abstract val variant: WidgetVariant
 
+    /** Draws one widget from the cached snapshot; the «Світло» widget has its own renderer. */
+    protected open fun render(context: Context, widgetId: Int) = WidgetRenderer.update(context, widgetId, variant)
+
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
         WidgetRefreshScheduler.ensurePeriodic(context)
@@ -17,14 +20,14 @@ abstract class BaseMarstekWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, appWidgetIds: IntArray) {
         WidgetRefreshScheduler.ensurePeriodic(context)
-        appWidgetIds.forEach { WidgetRenderer.update(context, it, variant) }
+        appWidgetIds.forEach { render(context, it) }
         WidgetRefreshScheduler.refreshNow(context)
     }
 
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, appWidgetId: Int, newOptions: Bundle) {
         super.onAppWidgetOptionsChanged(context, manager, appWidgetId, newOptions)
         // API < 31 has no sized RemoteViews: re-pick the layout for the new cell size.
-        WidgetRenderer.update(context, appWidgetId, variant)
+        render(context, appWidgetId)
     }
 
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
@@ -68,4 +71,10 @@ class MarstekStripWidgetProvider : BaseMarstekWidgetProvider() {
 
 class MarstekEnergyWidgetProvider : BaseMarstekWidgetProvider() {
     override val variant = WidgetVariant.LARGE
+}
+
+/** Standalone «Світло» widget: light on/off, for how long, return / next outage. Same snapshot and worker. */
+class MarstekLightWidgetProvider : BaseMarstekWidgetProvider() {
+    override val variant = WidgetVariant.MEDIUM
+    override fun render(context: Context, widgetId: Int) = LightWidgetRenderer.update(context, widgetId)
 }
