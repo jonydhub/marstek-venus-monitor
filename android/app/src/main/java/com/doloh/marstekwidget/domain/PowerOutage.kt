@@ -52,6 +52,8 @@ data class PowerOutageInfo(
     val overloadTripAt: String? = null,
     /** Start of the current outage (ISO) per the hysteresis. */
     val outageSince: String? = null,
+    /** Since when the light has been on (ISO) per the hysteresis; null when unknown (e.g. right after a restart). */
+    val lightSince: String? = null,
 )
 
 data class ScheduleWindow(val startMillis: Long, val endMillis: Long, val maybe: Boolean)
@@ -119,6 +121,7 @@ object PowerOutageParser {
                 ?.takeIf(Double::isFinite),
             overloadTripAt = block.optJSONObject("grid_detail")?.optJSONObject("overload_trip")?.optStringOrNull("at"),
             outageSince = block.optJSONObject("grid_detail")?.optStringOrNull("outage_since"),
+            lightSince = block.optJSONObject("grid_detail")?.optStringOrNull("light_since"),
         )
     }
 
@@ -175,6 +178,18 @@ object PowerOutageFormatter {
             today.plusDays(1) -> "завтра о $time"
             else -> "${value.format(dayMonth)} о $time"
         }
+    }
+
+    /**
+     * «Відключення о 22:00–24:00» — the longer form of [detail]'s «Відключення о 22:00» with the window end, only for a
+     * window that starts today and only where [detail] would name that next window; null otherwise.
+     */
+    fun nextWindowRange(info: PowerOutageInfo, now: ZonedDateTime = ZonedDateTime.now(kyiv), gridState: GridState = info.gridState): String? {
+        val start = info.nextStart?.let(::toKyiv) ?: return null
+        val end = info.nextEnd?.let(::toKyiv) ?: return null
+        if (start.toLocalDate() != now.withZoneSameInstant(kyiv).toLocalDate()) return null
+        if (detail(info, now, gridState) != "Відключення ${dayAt(start, now)}") return null
+        return "Відключення о ${start.format(clock)}–${stamp(end, now)}"
     }
 
     /** «Можливе відключення …» — kept apart from definite outages. */
