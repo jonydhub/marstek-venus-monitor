@@ -533,9 +533,13 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     const shownBelow = outage.available && !outage.schedule_unavailable && ['Графік не опубліковано', 'За графіком без відключень'].includes(detail);
     set('hero-sub', detail);
     const subNode = $('hero-sub'); if (subNode) subNode.dataset.redundant = shownBelow ? '1' : '';
+    // UPS bypass: the backup output draws but the grid feeds it (see server/gridstate.py «Bypass»)
+    const gd = outage.grid_detail || {};
+    const bypass = gd.bypass_now ? ' Визначено: байпас — резервний вихід живиться від мережі, батарея не розряджається.'
+      : gd.pending_outage ? ' Резервний вихід споживає — перевіряю, чи розряджається батарея (можливий байпас).' : '';
     set('hero-note', runtime === null
-      ? `Прогноз запасу з’явиться після першого відключення (навантаження міряється на резервному виході).${err}`
-      : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${err}`);
+      ? `Прогноз запасу з’явиться після першого відключення (навантаження міряється на резервному виході).${bypass}${err}`
+      : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${bypass}${err}`);
   }
   hero.dataset.state = light.state;
   const modeChip = $('mode-chip');

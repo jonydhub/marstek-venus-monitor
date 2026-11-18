@@ -258,6 +258,7 @@ class MarstekPoller:
         self.initial_journaled = False  # «Стан на старті» written once per process, at the first answered poll
         self.grid = None  # gridstate.GridTracker: confirmed light state with hysteresis (seeded from history)
         self.grid_seeded = False
+        self.bypass_seen_cache = None  # learned «bypass load seen» flag (history DB meta), read once
         self.load_stats = None  # (mean W, covered s) of the 7-day backup draw, refreshed every 10 min
         self.load_stats_at = None
 
@@ -357,17 +358,50 @@ class MarstekPoller:
     def grid_update(self, results: dict, rows: list, now: float):
         """Feed this poll into the light hysteresis (gridstate.py); the first poll replays the stored history."""
         energy = results.get("ES.GetStatus", {})
+        battery = results.get("Bat.GetStatus", {})
         es = (energy.get("data") or {}) if energy.get("ok") else {}
+        bat = (battery.get("data") or {}) if battery.get("ok") else {}
         offgrid = _optional_float(es.get("offgrid_power")) if energy.get("ok") else None
         gap = gridstate.confirm_gap_seconds(POLL_SECONDS)
+        mode = gridstate.normalize_bypass_mode(SETTINGS.bypass_load)
         if not self.grid_seeded:
             self.grid_seeded = True
             earlier = [r for r in rows if r.get("ts") is not None and r["ts"] < now]
-            if earlier:
-                self.grid = gridstate.replay(earlier, threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap)
+            self.grid = gridstate.replay(earlier, threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap, bypass=mode,
+                                         bypass_seen=self.bypass_seen())
         self.grid, signal = gridstate.step(self.grid, now, offgrid, es.get("ongrid_power"),
-                                           threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap)
+                                           _optional_float(bat.get("bat_capacity")),
+                                           threshold_w=BACKUP_THRESHOLD_W, confirm_gap=gap, bypass=mode)
+        if self.grid.bypass_load_seen and mode == "auto" and not self.bypass_seen():
+            self.remember_bypass_seen()
         return signal
+
+    def _bypass_key(self) -> str:
+        return f"bypass_load_seen:{HOST}:{PORT}"
+
+    def bypass_seen(self) -> bool:
+        """Learned (persisted in the history DB per device): this unit reports backup load while the grid is up."""
+        if gridstate.normalize_bypass_mode(SETTINGS.bypass_load) == "no":
+            return False
+        if self.bypass_seen_cache is None:
+            value = None
+            if self.history is not None:
+                try:
+                    value = self.history.get_meta(self._bypass_key())
+                except Exception as exc:
+                    logging.warning("history meta read failed: %s", exc)
+            self.bypass_seen_cache = value == "1"
+        return self.bypass_seen_cache
+
+    def remember_bypass_seen(self):
+        self.bypass_seen_cache = True
+        logging.info("backup load reported while the grid is present (UPS bypass): learned, light needs battery "
+                     "discharge to go off")
+        if self.history is not None:
+            try:
+                self.history.set_meta(self._bypass_key(), "1")
+            except Exception as exc:
+                logging.warning("history meta write failed: %s", exc)
 
     def grid_detail(self, signal) -> dict:
         g = self.grid or gridstate.GridTracker()
@@ -379,6 +413,11 @@ class MarstekPoller:
             "zero_load_since": iso(g.zero_since),
             "light_since": iso(g.on_since),
             "confirmed_by": g.confirmed_by,
+            "lost_by": g.lost_by,
+            "pending_outage": bool(getattr(signal, "pending_loss", False)),
+            "bypass_mode": gridstate.normalize_bypass_mode(SETTINGS.bypass_load),
+            "bypass_load_seen": bool(g.bypass_load_seen),
+            "bypass_now": bool(g.bypass_active),
             "return_confirm_seconds": int(gridstate.RETURN_CONFIRM_SECONDS),
             "overload_trip": {"last_w": round(g.trip_w), "at": iso(g.trip_at)} if g.tripped and g.trip_w is not None
             else None,
@@ -483,7 +522,8 @@ class MarstekPoller:
                                     temperature_c=bat.get("bat_temp"), threshold_w=BACKUP_THRESHOLD_W,
                                     chart_events=self.chart_events(now),
                                     confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
-                                    load_stats=self.backup_load_stats(now))
+                                    load_stats=self.backup_load_stats(now),
+                                    bypass=SETTINGS.bypass_load, bypass_seen=self.bypass_seen())
         detector = self.detector
         connection = {"ok": bool(bat or es), "consecutive_failures": detector.failures if detector else 0,
                       "lost": bool(detector and detector.connection_lost)}
@@ -611,6 +651,7 @@ def apply_settings(settings, poll_seconds=None):
     """Swap configuration at runtime (used by the embedded Windows app; the CLI server never calls it)."""
     global SETTINGS, HOST, PORT, HTTP_HOST, HTTP_PORT, API_TOKEN, EXPECTED_LOAD_W, BACKUP_THRESHOLD_W, POLL_SECONDS
     changed_device = (settings.host, settings.port) != (HOST, PORT)
+    changed_bypass = getattr(settings, "bypass_load", "auto") != getattr(SETTINGS, "bypass_load", "auto")
     SETTINGS = settings
     HOST, PORT = settings.host, settings.port
     HTTP_HOST, HTTP_PORT, API_TOKEN = settings.bind, settings.http_port, settings.api_token
@@ -618,6 +659,8 @@ def apply_settings(settings, poll_seconds=None):
     if poll_seconds is not None:
         POLL_SECONDS = max(MIN_POLL_SECONDS, int(poll_seconds))
     poller.outage = build_outage_service(settings, ua_client=UA_OUTAGES_CLIENT)
+    if changed_device or changed_bypass:  # the light tracker is re-seeded from history with the new device / mode
+        poller.grid, poller.grid_seeded, poller.bypass_seen_cache = None, False, None
     with poller.lock:
         if changed_device:
             poller.battery_samples.clear()

@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+BYPASS_LOAD_MODES = ("auto", "yes", "no")
 PROVIDERS = ("auto", "off", "ua-outages", "loe", "yasno", "kharkiv", "poltava", "zaporizhzhia", "chernivtsi")
 _LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 
@@ -65,6 +66,7 @@ class Settings:
     history_db: str
     discharge_floor_pct: float = 11.0
     anomaly_discharge_w: float = 2000.0
+    bypass_load: str = "auto"  # auto (learn) / yes (backup load may come from the grid) / no (legacy)
 
 
 def _text(env, key, default=""):
@@ -116,6 +118,7 @@ def load_settings(env, default_history_db="data/history.db") -> Settings:
         history_db=_text(env, "MARSTEK_HISTORY_DB") or default_history_db,
         discharge_floor_pct=_float(env, "MARSTEK_DISCHARGE_FLOOR_PCT", 11.0),
         anomaly_discharge_w=_float(env, "MARSTEK_ANOMALY_DISCHARGE_W", 2000.0),
+        bypass_load=_text(env, "MARSTEK_BYPASS_LOAD").lower() or "auto",
     )
 
 
@@ -133,6 +136,8 @@ def validate(settings: Settings) -> list[str]:
         errors.append("MARSTEK_DISCHARGE_FLOOR_PCT must be 0..50 (Venus E stops discharging at ~11-12 %)")
     if not 200 <= settings.anomaly_discharge_w <= 10000:
         errors.append("MARSTEK_ANOMALY_DISCHARGE_W must be 200..10000")
+    if settings.bypass_load not in BYPASS_LOAD_MODES:
+        errors.append("MARSTEK_BYPASS_LOAD must be auto, yes or no")
     if settings.rate_limit_per_minute < 1:
         errors.append("MARSTEK_RATE_LIMIT_PER_MIN must be >= 1")
     if settings.outage_provider not in PROVIDERS:
