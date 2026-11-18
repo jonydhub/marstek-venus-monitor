@@ -9,17 +9,20 @@ enum class LightWidgetShape(val minWidthDp: Float, val minHeightDp: Float) {
     STRIP(220f, 40f),
 
     /** 2×2: header, big duration, schedule line (+ queue when there is room). */
-    SQUARE(100f, 100f),
+    SQUARE(100f, 120f),
 
     /** 4×2 and up: everything + reserve verdict + freshness. */
-    WIDE(250f, 100f);
+    WIDE(250f, 120f);
 
     val isStrip: Boolean get() = this == STRIP || this == STRIP_NARROW
 }
 
 object LightWidgetShapeSelector {
+    /** One launcher row is ≈ 84 dp (Samsung) to ≈ 104 dp (Pixel): both are strips, never a squeezed 4-row card. */
+    const val STRIP_MAX_HEIGHT_DP = 120f
+
     fun select(widthDp: Float, heightDp: Float): LightWidgetShape = when {
-        heightDp < 100f -> if (widthDp >= LightWidgetShape.STRIP.minWidthDp) LightWidgetShape.STRIP else LightWidgetShape.STRIP_NARROW
+        heightDp < STRIP_MAX_HEIGHT_DP -> if (widthDp >= LightWidgetShape.STRIP.minWidthDp) LightWidgetShape.STRIP else LightWidgetShape.STRIP_NARROW
         widthDp >= LightWidgetShape.WIDE.minWidthDp -> LightWidgetShape.WIDE
         else -> LightWidgetShape.SQUARE
     }

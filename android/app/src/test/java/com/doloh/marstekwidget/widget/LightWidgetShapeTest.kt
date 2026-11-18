@@ -12,13 +12,16 @@ class LightWidgetShapeTest {
         assertEquals(LightWidgetShape.STRIP, LightWidgetShapeSelector.select(350f, 84f))
         assertEquals(LightWidgetShape.STRIP_NARROW, LightWidgetShapeSelector.select(160f, 72f))
         assertEquals(LightWidgetShape.STRIP_NARROW, LightWidgetShapeSelector.select(110f, 40f))
+        // Pixel launcher: one row ≈ 104 dp is still a strip
+        assertEquals(LightWidgetShape.STRIP, LightWidgetShapeSelector.select(374f, 104f))
+        assertEquals(LightWidgetShape.STRIP_NARROW, LightWidgetShapeSelector.select(110f, 110f))
     }
 
     @Test
     fun twoByTwoAndWiderCells() {
         assertEquals(LightWidgetShape.SQUARE, LightWidgetShapeSelector.select(160f, 160f))
         assertEquals(LightWidgetShape.SQUARE, LightWidgetShapeSelector.select(170f, 200f))
-        assertEquals(LightWidgetShape.SQUARE, LightWidgetShapeSelector.select(110f, 110f))
+        assertEquals(LightWidgetShape.SQUARE, LightWidgetShapeSelector.select(110f, 125f))
         assertEquals(LightWidgetShape.WIDE, LightWidgetShapeSelector.select(340f, 160f))
         assertEquals(LightWidgetShape.WIDE, LightWidgetShapeSelector.select(350f, 200f))
         assertEquals(LightWidgetShape.WIDE, LightWidgetShapeSelector.select(350f, 420f))
@@ -33,7 +36,7 @@ class LightWidgetShapeTest {
     @Test
     fun planNeverOverflowsTheCard() {
         for (w in listOf(100f, 110f, 140f, 160f, 170f, 200f, 250f, 340f, 350f, 420f))
-            for (h in listOf(100f, 110f, 130f, 160f, 200f, 230f, 300f, 420f))
+            for (h in listOf(120f, 130f, 160f, 200f, 230f, 300f, 420f))
                 for (scale in listOf(1f, 1.3f)) {
                     val shape = LightWidgetShapeSelector.select(w, h)
                     val plan = LightBlockPlanner.plan(w, h, shape, hasGroup = true, hasReserve = true, fontScale = scale)
@@ -65,6 +68,7 @@ class LightWidgetShapeTest {
     fun tinyCellDropsOptionalRowsBeforeTheDuration() {
         val plan = LightBlockPlanner.plan(250f, 100f, LightWidgetShape.WIDE, hasGroup = true, hasReserve = true)
         assertTrue(plan.contentDp <= 100f - LightBlockPlanner.PAD_V)
+        assertTrue(LightBlockPlanner.plan(250f, 120f, LightWidgetShape.WIDE, hasGroup = true, hasReserve = true, fontScale = 1.3f).contentDp <= 120f - LightBlockPlanner.PAD_V)
         assertTrue(plan.durationSp >= 18f)
         assertFalse(plan.showGroup)
     }

@@ -45,7 +45,8 @@ import java.time.format.DateTimeFormatter
  *   widgets are drawn at its own clock (22:13 Kyiv); for `main` set the device clock to 2026-11-11 22:13 Kyiv first.
  * `--es light off_return|off_noschedule|on_next|on_none|nolink|nodata --es lpage strips|blocks`: the standalone «Світло»
  *   widget at 4×1 / 2×1 (strips) or 2×2 / 4×2 (blocks) cell sizes, FIXTURE at a fixed clock 20:15 Kyiv;
- *   `--ez clean true` draws one unlabelled 2×2 card (picker preview image).
+ *   `--ez clean true` draws one unlabelled 2×2 card (picker preview image); `--ez save true` stores that FIXTURE
+ *   (real clock) as the cached snapshot and redraws the placed launcher widgets.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -466,28 +467,31 @@ class WidgetPreviewActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(column) })
     }
 
-    /** FIXTURE snapshot for the «Світло» widget states at [now] (synthetic queue/source, no real installation data). */
+    /**
+     * FIXTURE snapshot for the «Світло» widget states, relative to [now] (at 20:15: off since 18:00, back 21:00, next
+     * window 22:00–24:00); synthetic queue/source, no real installation data.
+     */
     private fun lightFixture(case: String, now: ZonedDateTime): JSONObject {
         val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-        fun at(h: Int, m: Int = 0) = now.withHour(h).withMinute(m).withSecond(0).withNano(0).format(iso)
-        val midnight = now.toLocalDate().plusDays(1).atStartOfDay(now.zone).format(iso)
+        val base = now.withSecond(0).withNano(0)
+        fun at(minutes: Long) = base.plusMinutes(minutes).format(iso)
         val off = case.startsWith("off") || case == "nolink"
         val current = when (case) {
-            "off_return", "nolink" -> """{"kind":"schedule","start":"${at(18)}","end":"${at(21)}","duration_seconds":10800}"""
+            "off_return", "nolink" -> """{"kind":"schedule","start":"${at(-135)}","end":"${at(45)}","duration_seconds":10800}"""
             else -> "null"
         }
         val next = when (case) {
-            "on_next" -> """{"kind":"schedule","start":"${at(22)}","end":"$midnight","duration_seconds":7200}"""
+            "on_next" -> """{"kind":"schedule","start":"${at(105)}","end":"${at(225)}","duration_seconds":7200}"""
             else -> "null"
         }
         val scheduled = case != "off_noschedule"
         val windows = JSONArray().apply {
-            if (case == "off_return" || case == "nolink") put(JSONObject().put("start", at(18)).put("end", at(21)).put("kind", "off"))
-            if (case == "on_next") put(JSONObject().put("start", at(22)).put("end", midnight).put("kind", "off"))
+            if (case == "off_return" || case == "nolink") put(JSONObject().put("start", at(-135)).put("end", at(45)).put("kind", "off"))
+            if (case == "on_next") put(JSONObject().put("start", at(105)).put("end", at(225)).put("kind", "off"))
         }
         val gridDetail = JSONObject().put("basis", "backup_output_hysteresis").put("pending_return", false)
-            .put("outage_since", if (off) at(18, 0) else JSONObject.NULL)
-            .put("light_since", if (!off) now.minusHours(13).minusMinutes(10).withSecond(0).withNano(0).format(iso) else JSONObject.NULL)
+            .put("outage_since", if (off) at(-135) else JSONObject.NULL)
+            .put("light_since", if (!off) at(-790) else JSONObject.NULL)
         val outage = JSONObject("""{"available":true,"group":${if (scheduled) "\"1.1\"" else "null"},"grid_state":"${if (off) "off" else "on"}",
             "source_name":${if (scheduled) "\"Львівобленерго\"" else "null"},"schedule_enabled":$scheduled,
             "current_outage":$current,"next_outage":$next,"schedule_published":$scheduled,
@@ -506,6 +510,15 @@ class WidgetPreviewActivity : Activity() {
     private fun lightPreview(case: String, page: String, clean: Boolean) {
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Kyiv"))
         val kyiv = ZoneId.of("Europe/Kyiv")
+        if (intent.getBooleanExtra("save", false)) {
+            // Launcher check: store the FIXTURE (real clock) as the cached snapshot and redraw every placed widget.
+            val preferences = WidgetPreferences(this)
+            preferences.saveSnapshot(BatterySnapshotParser.parse(lightFixture(case, ZonedDateTime.now(kyiv))))
+            if (case == "nolink") preferences.setError("FIXTURE: батарея не відповідає")
+            WidgetRenderer.updateAll(this)
+            finish()
+            return
+        }
         val now = ZonedDateTime.now(kyiv).withHour(20).withMinute(15).withSecond(0).withNano(0)
         val snapshot = if (case == "nodata") null else BatterySnapshotParser.parse(lightFixture(case, now))
         val state = when (case) { "nolink" -> WidgetFetchState.ERROR; "nodata" -> WidgetFetchState.NEVER; else -> WidgetFetchState.OK }
@@ -532,7 +545,7 @@ class WidgetPreviewActivity : Activity() {
         })
         caption("FIXTURE · Світло · $case · 20:15 Kyiv · $page")
         if (page == "strips") {
-            listOf("4×1 min" to (340 to 44), "4×1" to (350 to 84), "2×1" to (160 to 72), "2×1 min" to (110 to 44)).forEach { (name, size) ->
+            listOf("4×1 min" to (340 to 44), "4×1 Samsung" to (350 to 84), "4×1 Pixel" to (374 to 104), "2×1" to (160 to 72), "2×1 min" to (110 to 44)).forEach { (name, size) ->
                 val (w, h) = size
                 caption("$name · ${w}×${h} dp → ${com.doloh.marstekwidget.widget.LightWidgetShapeSelector.select(w.toFloat(), h.toFloat())}")
                 column.addView(card(w, h), LinearLayout.LayoutParams(px(w), px(h)))

@@ -109,10 +109,11 @@ object LightWidgetRenderer {
         val room = if (showIcon) withIcon else withIcon + 30f
         views.setViewVisibility(R.id.light_icon, visibility(showIcon))
         val plain = LightWidgetTexts.strip(content, room, twoLines, fitPrimary, fitSecondary)
-        // The freshness time joins a 4×1 only while it costs no text.
-        val timeDp = measure(updated, 10f, false) + 6f
-        val withTime = LightWidgetTexts.strip(content, room - timeDp, twoLines, fitPrimary, fitSecondary)
-        val showTime = !narrow && wantsTime(input) && withTime == plain
+        // The freshness time («Застаріло 09:55», else the bare «09:55») joins a 4×1 only while it costs no text.
+        val time = if (narrow || !wantsTime(input)) null else listOfNotNull(updated, WidgetRenderer.timestampText(input.snapshot, input)).firstOrNull {
+            LightWidgetTexts.strip(content, room - measure(it, 10f, false) - 6f, twoLines, fitPrimary, fitSecondary) == plain
+        }
+        val showTime = time != null
         val strip = plain
         // Still too wide (very narrow cell, large font): shrink the type rather than cut the word.
         val primaryFit = LightWidgetFit.fit(listOf(strip.primary), room, primarySp, 9f) { t, sp -> measure(t, sp, true) }!!
@@ -123,7 +124,7 @@ object LightWidgetRenderer {
         views.setViewVisibility(R.id.light_secondary, visibility(!strip.secondary.isNullOrBlank()))
         views.setTextColor(R.id.light_secondary, NEUTRAL)
         views.setViewVisibility(R.id.light_updated, visibility(showTime))
-        views.setTextViewText(R.id.light_updated, updated)
+        views.setTextViewText(R.id.light_updated, time.orEmpty())
         views.setTextColor(R.id.light_updated, if (input.state == WidgetFetchState.OK) MUTED else Color.rgb(255, 196, 107))
         views.setViewVisibility(R.id.light_refresh, visibility(!narrow))
     }
@@ -131,7 +132,9 @@ object LightWidgetRenderer {
     private fun renderBlock(views: RemoteViews, context: Context, shape: LightWidgetShape, content: LightWidgetContent, updated: String,
                             input: WidgetRenderInput, w: Float, h: Float) {
         val measure = WidgetRenderer.measurer(context)
-        val plan = LightBlockPlanner.plan(w, h, shape, hasGroup = content.group.isNotEmpty(), hasReserve = content.reserve != null, fontScale = fontScale(context))
+        val wantTime = wantsTime(input)
+        // 2×2: the freshness time moves to the footer («Черга 1.1 · 20:13») when the header has no room for it.
+        val plan = LightBlockPlanner.plan(w, h, shape, hasGroup = content.group.isNotEmpty() || wantTime, hasReserve = content.reserve != null, fontScale = fontScale(context))
         val textW = w - LightBlockPlanner.PAD_H
         val iconDp = plan.iconDp
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -142,7 +145,6 @@ object LightWidgetRenderer {
         // Header: icon, headline, then the freshness time and ↻ while they fit beside the headline.
         val updatedSp = (plan.smallSp * 0.92f).coerceIn(9.5f, 13f)
         val headRoom = textW - iconDp - 6f
-        val wantTime = wantsTime(input)
         val timeDp = measure(updated, updatedSp, false) + 6f
         val buttonDp = 24f
         val headline = { extra: Float -> content.headlines.firstOrNull { measure(it, plan.headerSp, true) <= headRoom - extra } }
@@ -212,7 +214,10 @@ object LightWidgetRenderer {
             })
         }
 
-        val group = if (plan.showGroup && groupFits) content.group.firstOrNull { measure(it, plan.smallSp, false) <= textW } else null
+        // No-link cards already say «Останні дані о 20:01» — the footer does not repeat the time.
+        val footer = if (wantTime && !showTime && lastDataFit == null) content.group.map { "$it · $updated" } + updated +
+            listOfNotNull(WidgetRenderer.timestampText(input.snapshot, input)) else content.group
+        val group = if (plan.showGroup && groupFits) footer.firstOrNull { measure(it, plan.smallSp, false) <= textW } else null
         views.setViewVisibility(R.id.light_group, visibility(group != null))
         group?.let {
             views.setTextViewText(R.id.light_group, it)
