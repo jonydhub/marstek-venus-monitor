@@ -50,7 +50,7 @@ data class JournalObservation(
     val backupWatts: Double? = null,
     val soc: Int? = null,
     val temperatureC: Double? = null,
-    /** Light-return hysteresis: when the confirmed return happened (epoch ms, ≤ now) and why («grid_charging» / «idle_5min»). */
+    /** Light-return hysteresis: when the confirmed return happened (epoch ms, ≤ now) and why («grid_charging» / «idle_5min» / «bypass_no_discharge»). */
     val returnedAtMillis: Long? = null,
     val returnBasis: String? = null,
     /** Suspected overload trip detected at this poll: the last backup-output reading (W). */
@@ -177,9 +177,11 @@ object JournalDetector {
                 m = m.copy(outageStartedAtMillis = nowMillis)
             } else {
                 val back = obs.returnedAtMillis?.takeIf { it <= nowMillis } ?: nowMillis
-                val lasted = m.outageStartedAtMillis?.let { " після ${durationText((back - it) / 1000)}" }.orEmpty()
+                // a bypass return is back-dated to the start of the draw — often the moment of the false loss itself
+                val lasted = m.outageStartedAtMillis?.takeIf { back - it >= 60_000 }?.let { " після ${durationText((back - it) / 1000)}" }.orEmpty()
                 val basis = when (obs.returnBasis) {
                     "grid_charging" -> " (заряджання від мережі)"
+                    "bypass_no_discharge" -> " (байпас: резервний вихід живиться від мережі)"
                     "idle_5min" -> " (без навантаження з ${JournalExport.time(back).substring(11, 16)})"
                     else -> ""
                 }

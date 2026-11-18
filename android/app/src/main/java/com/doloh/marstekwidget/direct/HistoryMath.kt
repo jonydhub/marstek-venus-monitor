@@ -128,12 +128,12 @@ object HistoryMath {
     fun localMidnight(now: Double): Double = ZonedDateTime.ofInstant(Instant.ofEpochMilli((now * 1000).toLong()), kyiv)
         .toLocalDate().atStartOfDay(kyiv).toEpochSecond().toDouble()
 
-    fun gridPoints(rows: List<HistorySample>): List<GridPoint> = rows.map { GridPoint(it.ts, it.offgridW, it.ongridW) }
+    fun gridPoints(rows: List<HistorySample>): List<GridPoint> = rows.map { GridPoint(it.ts, it.offgridW, it.ongridW, it.batWh) }
 
     /** Confirmed light on/off/unknown spans over [start, now] (the «Фактично» row; same rules as the server). */
     fun gridTimeline(rows: List<HistorySample>, start: Double, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W,
-                     confirmGap: Double = CONFIRM_GAP_SECONDS): List<GridSpan> =
-        GridHysteresis.timeline(gridPoints(rows), start, now, thresholdW, confirmGap, MAX_GAP_SECONDS)
+                     confirmGap: Double = CONFIRM_GAP_SECONDS, bypass: GridBypass = GridBypass()): List<GridSpan> =
+        GridHysteresis.timeline(gridPoints(rows), start, now, thresholdW, confirmGap, MAX_GAP_SECONDS, bypass)
 
     /** Battery power from the AC ports (+ charging, − discharging), or null when both read ~0 (no measured flow). */
     private fun measuredBatteryW(row: HistorySample): Double? {
@@ -145,7 +145,7 @@ object HistoryMath {
 
     /** Since local midnight: charging / discharging / no-light seconds, energy in/out and the light timeline. */
     fun todayStats(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W,
-                   confirmGap: Double = CONFIRM_GAP_SECONDS): TodayStats {
+                   confirmGap: Double = CONFIRM_GAP_SECONDS, bypass: GridBypass = GridBypass()): TodayStats {
         var charge = 0.0
         var discharge = 0.0
         var inWh = 0.0
@@ -170,7 +170,7 @@ object HistoryMath {
                 if (power > 0) { inWh += wh; if (estimated) inEst += wh } else { outWh += wh; if (estimated) outEst += wh }
             }
         }
-        val timeline = gridTimeline(rows, midnight, now, thresholdW, confirmGap)
+        val timeline = gridTimeline(rows, midnight, now, thresholdW, confirmGap, bypass)
         val off = timeline.filter { it.state == "off" }.sumOf { it.end - it.start }
         return TodayStats(Math.round(charge), Math.round(discharge), Math.round(off), Math.round(inWh * 10.0) / 10.0,
             Math.round(outWh * 10.0) / 10.0, inEst > 1.0, outEst > 1.0, timeline)
@@ -181,8 +181,9 @@ object HistoryMath {
         todayStats(rows, now, thresholdW).let { Triple(it.chargeSeconds, it.dischargeSeconds, it.outageSeconds) }
 
     /** Confirmed no-light periods in the last 24 h as (startEpochS, endEpochS); unknown gaps split periods. */
-    fun outagePeriods(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W): List<Pair<Long, Long>> =
-        gridTimeline(rows, now - WINDOW_SECONDS, now, thresholdW).filter { it.state == "off" && it.end - it.start >= 60 }
+    fun outagePeriods(rows: List<HistorySample>, now: Double, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W,
+                      bypass: GridBypass = GridBypass()): List<Pair<Long, Long>> =
+        gridTimeline(rows, now - WINDOW_SECONDS, now, thresholdW, bypass = bypass).filter { it.state == "off" && it.end - it.start >= 60 }
             .map { Math.round(it.start) to Math.round(it.end) }
 
     /** Energy-weighted mean backup draw (W) over the last 10 min of the outage that began at [since]; ≥ 2 samples. */
@@ -265,6 +266,8 @@ object HistoryMath {
         chartEvents: List<Pair<Long, String>> = emptyList(),
         /** 7-day backup draw (mean W, covered s), see [LoadStatsAccumulator]. */
         loadStats: Pair<Double?, Double> = null to 0.0,
+        /** Bypass setting + learned flag for the light timeline (see [GridHysteresis]). */
+        bypass: GridBypass = GridBypass(),
     ): JSONObject {
         val (energy, covered) = integral(intervals(rows, now - WINDOW_SECONDS))
         val average = if (covered >= MIN_AVG_COVERAGE_SECONDS) Math.round(energy / covered * 10.0) / 10.0 else null
@@ -283,7 +286,7 @@ object HistoryMath {
             .put("backup_energy_today_wh", if (today.isNotEmpty()) Math.round(todayWs / 3600.0 * 10.0) / 10.0 else JSONObject.NULL)
             .put("temperature_c", temperatureC?.takeIf(Double::isFinite) ?: JSONObject.NULL)
             .put("soc_history", history)
-            .put("today", todayStats(rows, now, thresholdW).let { t ->
+            .put("today", todayStats(rows, now, thresholdW, bypass = bypass).let { t ->
                 JSONObject().put("charge_seconds", t.chargeSeconds).put("discharge_seconds", t.dischargeSeconds)
                     .put("outage_seconds", t.outageSeconds).put("charge_wh", t.chargeWh).put("discharge_wh", t.dischargeWh)
                     .put("charge_estimated", t.chargeEstimated).put("discharge_estimated", t.dischargeEstimated)
@@ -294,7 +297,7 @@ object HistoryMath {
                     })
             })
             .put("outage_periods", JSONArray().apply {
-                outagePeriods(rows, now, thresholdW).forEach { (a, b) -> put(JSONObject().put("start", isoAt(a)).put("end", isoAt(b))) }
+                outagePeriods(rows, now, thresholdW, bypass).forEach { (a, b) -> put(JSONObject().put("start", isoAt(a)).put("end", isoAt(b))) }
             })
             .put("chart_events", JSONArray().apply {
                 chartEvents.forEach { (millis, kind) -> put(JSONObject().put("t", isoAt(millis / 1000)).put("kind", kind)) }
