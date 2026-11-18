@@ -43,6 +43,10 @@ import java.time.format.DateTimeFormatter
  * `--es showcase ups_trip [--ez main true] [--es sizes 4x2|4x4]`: assets/fixtures/ups_trip_status.json — the REAL fw148 UPS
  *   evening (inverter AC, compressor pauses, overload trip at 22:08, Manual afterwards) replayed through the 1.3.7 server;
  *   widgets are drawn at its own clock (22:13 Kyiv); for `main` set the device clock to 2026-11-11 22:13 Kyiv first.
+ * `--es light off_return|off_noschedule|on_next|on_none|nolink|nodata --es lpage strips|blocks`: the standalone «Світло»
+ *   widget at 4×1 / 2×1 (strips) or 2×2 / 4×2 (blocks) cell sizes, FIXTURE at a fixed clock 20:15 Kyiv;
+ *   `--ez clean true` draws one unlabelled 2×2 card (picker preview image); `--ez save true` stores that FIXTURE
+ *   (real clock) as the cached snapshot and redraws the placed launcher widgets.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -75,6 +79,10 @@ class WidgetPreviewActivity : Activity() {
         if (intent.getBooleanExtra("journal", false)) {
             startActivity(Intent(this, com.doloh.marstekwidget.ui.JournalActivity::class.java).putExtra("showcase", true))
             finish()
+            return
+        }
+        intent.getStringExtra("light")?.let { case ->
+            lightPreview(case, intent.getStringExtra("lpage") ?: "blocks", intent.getBooleanExtra("clean", false))
             return
         }
         intent.getStringExtra("sched")?.let { case ->
@@ -456,6 +464,103 @@ class WidgetPreviewActivity : Activity() {
         big.addView(WidgetRenderer.build(this, WidgetShapeSelector.select(350f, 420f), WidgetVariant.MEDIUM, input, 0, 350f to 420f).apply(this, big),
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         column.addView(big, LinearLayout.LayoutParams(px(350), px(420)))
+        setContentView(ScrollView(this).apply { addView(column) })
+    }
+
+    /**
+     * FIXTURE snapshot for the «Світло» widget states, relative to [now] (at 20:15: off since 18:00, back 21:00, next
+     * window 22:00–24:00); synthetic queue/source, no real installation data.
+     */
+    private fun lightFixture(case: String, now: ZonedDateTime): JSONObject {
+        val iso = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        val base = now.withSecond(0).withNano(0)
+        fun at(minutes: Long) = base.plusMinutes(minutes).format(iso)
+        val off = case.startsWith("off") || case == "nolink"
+        val current = when (case) {
+            "off_return", "nolink" -> """{"kind":"schedule","start":"${at(-135)}","end":"${at(45)}","duration_seconds":10800}"""
+            else -> "null"
+        }
+        val next = when (case) {
+            "on_next" -> """{"kind":"schedule","start":"${at(105)}","end":"${at(225)}","duration_seconds":7200}"""
+            else -> "null"
+        }
+        val scheduled = case != "off_noschedule"
+        val windows = JSONArray().apply {
+            if (case == "off_return" || case == "nolink") put(JSONObject().put("start", at(-135)).put("end", at(45)).put("kind", "off"))
+            if (case == "on_next") put(JSONObject().put("start", at(105)).put("end", at(225)).put("kind", "off"))
+        }
+        val gridDetail = JSONObject().put("basis", "backup_output_hysteresis").put("pending_return", false)
+            .put("outage_since", if (off) at(-135) else JSONObject.NULL)
+            .put("light_since", if (!off) at(-790) else JSONObject.NULL)
+        val outage = JSONObject("""{"available":true,"group":${if (scheduled) "\"1.1\"" else "null"},"grid_state":"${if (off) "off" else "on"}",
+            "source_name":${if (scheduled) "\"Львівобленерго\"" else "null"},"schedule_enabled":$scheduled,
+            "current_outage":$current,"next_outage":$next,"schedule_published":$scheduled,
+            "schedule_dates":${if (scheduled) "[\"${now.toLocalDate()}\"]" else "[]"},
+            "autonomy":{"load_w":${if (off) 121.0 else 52.0},"load_basis":"measured_backup_avg_10min","stored_wh":4100,"usable_wh":3537,
+              "floor_pct":11,"runtime_seconds":${if (off) 105_230 else 244_870},"covers_next_outage":true}}""")
+            .put("windows", windows).put("grid_detail", gridDetail)
+        val offgrid = if (off) 121.0 else 0.0
+        return JSONObject("""{"collected_at":"${now.minusMinutes(if (case == "nolink") 14 else 2).toInstant()}",
+            "methods":{"Bat.GetStatus":{"data":{"soc":80,"bat_capacity":4100,"rated_capacity":5120,"bat_temp":24.0}},
+              "ES.GetStatus":{"data":{"ongrid_power":0,"offgrid_power":$offgrid}}},
+            "battery_flow":{"available":true,"power_w":${if (off) -130.0 else 0.0},"direction":"${if (off) "discharging" else "idle"}"}}""")
+            .put("power_outage", outage)
+    }
+
+    private fun lightPreview(case: String, page: String, clean: Boolean) {
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Europe/Kyiv"))
+        val kyiv = ZoneId.of("Europe/Kyiv")
+        if (intent.getBooleanExtra("save", false)) {
+            // Launcher check: store the FIXTURE (real clock) as the cached snapshot and redraw every placed widget.
+            val preferences = WidgetPreferences(this)
+            preferences.saveSnapshot(BatterySnapshotParser.parse(lightFixture(case, ZonedDateTime.now(kyiv))))
+            if (case == "nolink") preferences.setError("FIXTURE: батарея не відповідає")
+            WidgetRenderer.updateAll(this)
+            finish()
+            return
+        }
+        val now = ZonedDateTime.now(kyiv).withHour(20).withMinute(15).withSecond(0).withNano(0)
+        val snapshot = if (case == "nodata") null else BatterySnapshotParser.parse(lightFixture(case, now))
+        val state = when (case) { "nolink" -> WidgetFetchState.ERROR; "nodata" -> WidgetFetchState.NEVER; else -> WidgetFetchState.OK }
+        val input = WidgetRenderInput(snapshot, state, WidgetDisplayOptions(), now.minusMinutes(2).toInstant().toEpochMilli(), now = now)
+        val density = resources.displayMetrics.density
+        fun px(dp: Int) = (dp * density).toInt()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(12, 24, 36))
+            setPadding(px(16), px(40), px(16), px(16))
+        }
+        fun card(w: Int, h: Int): FrameLayout = FrameLayout(this).apply {
+            addView(com.doloh.marstekwidget.widget.LightWidgetRenderer.build(this@WidgetPreviewActivity, input, 0, w.toFloat() to h.toFloat()).apply(context, this),
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        if (clean) {
+            column.gravity = android.view.Gravity.CENTER_HORIZONTAL
+            column.addView(card(180, 180), LinearLayout.LayoutParams(px(180), px(180)).apply { topMargin = px(60) })
+            setContentView(column)
+            return
+        }
+        fun caption(text: String) = column.addView(TextView(this).apply {
+            this.text = text; setTextColor(Color.rgb(160, 173, 184)); textSize = 10f; setPadding(0, px(10), 0, px(4))
+        })
+        caption("FIXTURE · Світло · $case · 20:15 Kyiv · $page")
+        if (page == "strips") {
+            listOf("4×1 min" to (340 to 44), "4×1 Samsung" to (350 to 84), "4×1 Pixel" to (374 to 104), "2×1" to (160 to 72), "2×1 min" to (110 to 44)).forEach { (name, size) ->
+                val (w, h) = size
+                caption("$name · ${w}×${h} dp → ${com.doloh.marstekwidget.widget.LightWidgetShapeSelector.select(w.toFloat(), h.toFloat())}")
+                column.addView(card(w, h), LinearLayout.LayoutParams(px(w), px(h)))
+            }
+        } else {
+            caption("2×2 · 160×160 dp | 2×2 Samsung · 170×200 dp")
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(card(160, 160), LinearLayout.LayoutParams(px(160), px(160)))
+            row.addView(card(170, 200), LinearLayout.LayoutParams(px(170), px(200)).apply { marginStart = px(12) })
+            column.addView(row)
+            listOf("4×2 · 340×160 dp" to (340 to 160), "4×2 Samsung · 350×200 dp" to (350 to 200)).forEach { (name, size) ->
+                caption(name)
+                column.addView(card(size.first, size.second), LinearLayout.LayoutParams(px(size.first), px(size.second)))
+            }
+        }
         setContentView(ScrollView(this).apply { addView(column) })
     }
 }

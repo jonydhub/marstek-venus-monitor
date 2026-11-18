@@ -122,7 +122,7 @@ object WidgetRenderer {
      * Cell sizes in dp from AppWidgetManager options: OPTION_APPWIDGET_SIZES (API 31+) when present, else
      * portrait (minWidth × maxHeight) and landscape (maxWidth × minHeight). Empty when the launcher reports nothing.
      */
-    private fun reportedSizes(manager: AppWidgetManager, widgetId: Int): List<Pair<Float, Float>> {
+    internal fun reportedSizes(manager: AppWidgetManager, widgetId: Int): List<Pair<Float, Float>> {
         val options = runCatching { manager.getAppWidgetOptions(widgetId) }.getOrNull() ?: return emptyList()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             @Suppress("DEPRECATION")
@@ -466,7 +466,7 @@ object WidgetRenderer {
      * Width of [text] in dp at [sp] (user font scale included), padded 5 % because launchers such as One UI draw
      * RemoteViews text in their own, slightly wider system font.
      */
-    private fun measurer(context: Context): (String, Float, Boolean) -> Float {
+    internal fun measurer(context: Context): (String, Float, Boolean) -> Float {
         val metrics = context.resources.displayMetrics
         val fontScale = context.resources.configuration.fontScale.takeIf { it > 0f } ?: 1f
         val regular = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -587,11 +587,14 @@ object WidgetRenderer {
         widgetProviders().forEach { (provider, variant) ->
             manager.getAppWidgetIds(ComponentName(context, provider)).forEach { id -> update(context, id, variant) }
         }
+        // The standalone «Світло» widget renders the same cached snapshot.
+        LightWidgetRenderer.updateAll(context)
     }
 
     fun allWidgetIds(context: Context): IntArray {
         val manager = AppWidgetManager.getInstance(context)
-        return widgetProviders().flatMap { (provider, _) -> manager.getAppWidgetIds(ComponentName(context, provider)).toList() }.toIntArray()
+        return (widgetProviders().flatMap { (provider, _) -> manager.getAppWidgetIds(ComponentName(context, provider)).toList() } +
+            LightWidgetRenderer.widgetIds(context).toList()).toIntArray()
     }
 
     fun hasWidgets(context: Context): Boolean = allWidgetIds(context).isNotEmpty()
@@ -603,23 +606,32 @@ object WidgetRenderer {
         MarstekEnergyWidgetProvider::class.java to WidgetVariant.LARGE,
     )
 
-    private fun bindActions(context: Context, views: RemoteViews, widgetId: Int, shape: WidgetShape) {
+    /** Refresh broadcast (same worker for every widget). */
+    internal fun refreshPendingIntent(context: Context, widgetId: Int): PendingIntent {
         val refreshIntent = Intent(context, MarstekWidgetProvider::class.java).apply {
             action = BaseMarstekWidgetProvider.ACTION_REFRESH
             putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
         }
-        val refresh = PendingIntent.getBroadcast(context, widgetId * 10 + 1, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return PendingIntent.getBroadcast(context, widgetId * 10 + 1, refreshIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    internal fun openAppPendingIntent(context: Context, widgetId: Int): PendingIntent =
+        PendingIntent.getActivity(context, widgetId * 10 + 2, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    /** «Графік відключень» screen. */
+    internal fun schedulePendingIntent(context: Context, widgetId: Int): PendingIntent =
+        PendingIntent.getActivity(context, widgetId * 10 + 4,
+            Intent(context, ScheduleActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+
+    private fun bindActions(context: Context, views: RemoteViews, widgetId: Int, shape: WidgetShape) {
+        val refresh = refreshPendingIntent(context, widgetId)
         views.setOnClickPendingIntent(R.id.widget_refresh, refresh)
         // 2×2: the freshness time doubles as the refresh control when the header has no room for the button.
         if (shape.isCompact) views.setOnClickPendingIntent(R.id.widget_updated, refresh)
-        views.setOnClickPendingIntent(
-            R.id.widget_root,
-            PendingIntent.getActivity(context, widgetId * 10 + 2, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE),
-        )
+        views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent(context, widgetId))
         // Light state (dot + headline, the 4×4 light block) and the schedule bar → «Графік відключень».
-        val schedule = PendingIntent.getActivity(context, widgetId * 10 + 4,
-            Intent(context, ScheduleActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val schedule = schedulePendingIntent(context, widgetId)
         views.setOnClickPendingIntent(R.id.widget_light_dot, schedule)
         if (shape.isBlock) views.setOnClickPendingIntent(R.id.widget_power_group, schedule)
         else views.setOnClickPendingIntent(R.id.widget_primary, schedule)
@@ -636,14 +648,14 @@ object WidgetRenderer {
     private fun reserveTone(summary: WidgetSummary): SummaryTone =
         summary.lines.firstOrNull { it.kind == SummaryLineKind.RESERVE }?.tone ?: SummaryTone.NEUTRAL
 
-    private fun noDataText(context: Context, state: WidgetFetchState): String = when (state) {
+    internal fun noDataText(context: Context, state: WidgetFetchState): String = when (state) {
         WidgetFetchState.NEEDS_SIGN_IN -> context.getString(R.string.widget_state_sign_in)
         WidgetFetchState.ERROR, WidgetFetchState.STALE -> context.getString(R.string.widget_state_offline)
         WidgetFetchState.NEVER -> context.getString(R.string.widget_state_waiting_data)
         WidgetFetchState.OK -> context.getString(R.string.widget_state_unknown)
     }
 
-    private fun noDataHint(context: Context, state: WidgetFetchState): String? = when (state) {
+    internal fun noDataHint(context: Context, state: WidgetFetchState): String? = when (state) {
         WidgetFetchState.NEEDS_SIGN_IN -> context.getString(R.string.widget_hint_sign_in)
         WidgetFetchState.ERROR, WidgetFetchState.STALE -> context.getString(R.string.widget_update_problem)
         WidgetFetchState.NEVER, WidgetFetchState.OK -> null
@@ -718,9 +730,13 @@ object WidgetRenderer {
         snapshot?.collectedAt?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
             ?: input.lastFetchedAtMillis
 
+    /** «20:01» of the shown data (collected_at, else the last fetch); null when there is none. */
+    internal fun timestampText(snapshot: BatterySnapshot?, input: WidgetRenderInput): String? =
+        timestamp(snapshot, input).takeIf { it > 0L }?.let(::clock)
+
     private fun clock(millis: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
 
-    private fun compactUpdatedText(context: Context, snapshot: BatterySnapshot?, input: WidgetRenderInput): String {
+    internal fun compactUpdatedText(context: Context, snapshot: BatterySnapshot?, input: WidgetRenderInput): String {
         val ts = timestamp(snapshot, input)
         val time = if (ts > 0L) clock(ts) else "—"
         return when (input.state) {
@@ -730,7 +746,7 @@ object WidgetRenderer {
         }
     }
 
-    private fun fullUpdatedText(context: Context, snapshot: BatterySnapshot?, input: WidgetRenderInput, variant: WidgetVariant): String {
+    internal fun fullUpdatedText(context: Context, snapshot: BatterySnapshot?, input: WidgetRenderInput, variant: WidgetVariant): String {
         val ts = timestamp(snapshot, input)
         val base = if (ts <= 0L) context.getString(R.string.widget_not_updated) else when (input.state) {
             WidgetFetchState.STALE -> context.getString(R.string.widget_stale_at, clock(ts))
