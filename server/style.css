@@ -182,3 +182,4 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .week-days{display:grid;gap:12px;margin-top:10px}
 .week-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px;font-size:12px}
 .week-head b{font-weight:620}.week-head span{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}.week-head span.off{color:#ff9d8f}
+.sched-text[hidden]{display:none}

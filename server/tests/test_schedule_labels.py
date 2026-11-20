@@ -31,6 +31,14 @@ process.stdout.write(JSON.stringify(out));"""
     return json.loads(result.stdout)
 
 
+def unlabeled(segments, now=None, now_text="10:42", width=240):
+    code = source() + f"""
+const out = scheduleTimeLabels({json.dumps(segments)}, {json.dumps(now)}, {json.dumps(now_text)}, {width}, t => t.length * 6, 4);
+process.stdout.write(JSON.stringify(out.unlabeled.map(s => s.from + '–' + s.to)));"""
+    return json.loads(subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20,
+                                      check=True).stdout)
+
+
 def texts(labels):
     return [label["text"] for label in labels]
 
@@ -78,6 +86,13 @@ class ScheduleTimeLabelTests(unittest.TestCase):
         labels = layout([seg(7, 13), seg(14, 21), seg(22, 24, True)], now=0.3)
         for a, b in zip(labels, labels[1:]):
             self.assertLessEqual(a["left"] + a["w"] + 4, b["left"] + 0.01)
+
+    def test_unlabeled_lists_only_windows_without_labels(self):
+        # every window labelled above the bar → nothing left for the text line under it
+        self.assertEqual(unlabeled([seg(7, 13), seg(15, 21)]), [])
+        self.assertEqual(unlabeled([seg(16, 20, True)], width=480), [])
+        # a dropped window (no room) stays in the text line
+        self.assertEqual(unlabeled([seg(7, 13), seg(14, 15)]), ["14:00–15:00"])
 
     def test_maybe_kind(self):
         self.assertEqual([l["kind"] for l in layout([seg(16, 20, True)], width=480)], ["maybe", "maybe"])

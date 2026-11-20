@@ -36,12 +36,29 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
             }
             addView(text(day.title, 12f, TEXT, true), params(top))
             if (day.isToday) scheduleNow?.let { addView(text(it, 10.5f, MUTED, false), params(dp(1))) }
+            val offLine = text(day.windowsText, 12f, if (day.definite.isNotEmpty()) AMBER else MUTED, day.definite.isNotEmpty())
+            val maybeLine = day.maybeText?.let { text(it, 11f, AMBER_SOFT, false) }
             addView(DayScheduleView(context).apply {
                 setDay(day)
                 contentDescription = "${day.title}: ${day.windowsText}" + (day.maybeText?.let { "; $it" } ?: "")
+                // The bar already shows each window's times above it: the lines below list only windows without a
+                // label there (same rule as the web renderScheduleTimes), so nothing is said twice.
+                onUnlabeled = { rest ->
+                    fun list(maybe: Boolean) = rest.filter { it.maybe == maybe }.map { "${it.from}–${it.to}" }
+                    if (day.definite.isNotEmpty()) {
+                        val r = list(false)
+                        offLine.visibility = if (r.isEmpty()) GONE else VISIBLE
+                        offLine.text = "Відключення ${r.joinToString(", ")}"
+                    }
+                    maybeLine?.let { line ->
+                        val r = list(true)
+                        line.visibility = if (r.isEmpty()) GONE else VISIBLE
+                        line.text = "Можливе ${r.joinToString(", ")}"
+                    }
+                }
             }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(barHeightDp) + timeLabelZonePx()).apply { topMargin = dp(3) })
-            addView(text(day.windowsText, 12f, if (day.definite.isNotEmpty()) AMBER else MUTED, day.definite.isNotEmpty()), params(dp(2)))
-            day.maybeText?.let { addView(text(it, 11f, AMBER_SOFT, false), params(dp(1))) }
+            addView(offLine, params(dp(2)))
+            maybeLine?.let { addView(it, params(dp(1))) }
             day.totalsText?.let { addView(text(it, 10.5f, MUTED, false), params(dp(2))) }
             if (day.isToday && actual != null) addActual(actual)
         }

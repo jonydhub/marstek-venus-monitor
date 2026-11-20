@@ -33,7 +33,33 @@ object ScheduleTimeLabels {
         totalWidth: Float,
         gap: Float,
         measure: (String) -> Float,
-    ): List<Label> {
+    ): List<Label> = place(segments, nowFraction, nowText, barLeft, barWidth, totalWidth, gap, measure).first
+
+    /**
+     * Windows that get no time label above the bar (port of the web `unlabeled`, keep in sync): the text line under the
+     * bar lists only these, so a fully labelled bar has no repeated «Відключення …» line.
+     */
+    fun unlabeled(
+        segments: List<ScheduleBarModel.Segment>,
+        nowFraction: Float?,
+        nowText: String?,
+        barLeft: Float,
+        barWidth: Float,
+        totalWidth: Float,
+        gap: Float,
+        measure: (String) -> Float,
+    ): List<ScheduleBarModel.Segment> = place(segments, nowFraction, nowText, barLeft, barWidth, totalWidth, gap, measure).second
+
+    private fun place(
+        segments: List<ScheduleBarModel.Segment>,
+        nowFraction: Float?,
+        nowText: String?,
+        barLeft: Float,
+        barWidth: Float,
+        totalWidth: Float,
+        gap: Float,
+        measure: (String) -> Float,
+    ): Pair<List<Label>, List<ScheduleBarModel.Segment>> {
         val placed = mutableListOf<Label>()
         fun x(f: Float) = barLeft + f.coerceIn(0f, 1f) * barWidth
         fun at(text: String, kind: Kind, leftOf: (Float) -> Float): Label {
@@ -67,6 +93,6 @@ object ScheduleTimeLabels {
             val now = label(nowText, x(nowFraction), Kind.NOW)
             if (!inside && free(now)) placed += now
         }
-        return placed.sortedBy { it.left }
+        return placed.sortedBy { it.left } to ordered.filter { it !in shown }
     }
 }

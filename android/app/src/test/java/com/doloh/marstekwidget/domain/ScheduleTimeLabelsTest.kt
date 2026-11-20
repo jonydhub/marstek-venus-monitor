@@ -76,6 +76,15 @@ class ScheduleTimeLabelsTest {
     }
 
     @Test
+    fun unlabeledListsOnlyWindowsWithoutLabels() {
+        fun rest(vararg segments: ScheduleBarModel.Segment, width: Float = 240f) =
+            ScheduleTimeLabels.unlabeled(segments.toList(), null, null, 0f, width, width, 4f) { it.length * 6f }.map { "${it.from}–${it.to}" }
+        assertEquals(emptyList<String>(), rest(seg(7, 13), seg(15, 21)))
+        assertEquals(emptyList<String>(), rest(seg(16, 20, true), width = 480f))
+        assertEquals(listOf("14:00–15:00"), rest(seg(7, 13), seg(14, 15)))
+    }
+
+    @Test
     fun maybeWindowsAreMarkedForTheLighterColour() {
         val labels = run(seg(16, 20, maybe = true), width = 480f)
         assertEquals(listOf(Kind.MAYBE, Kind.MAYBE), labels.map { it.kind })

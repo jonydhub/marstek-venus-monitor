@@ -304,7 +304,9 @@ function scheduleTimeLabels(segments, now, nowText, width, measure, gap = 4) {
     const label = at(nowText, 'now', w => x(now) - w / 2);
     if (!inside && free(label)) placed.push(label);
   }
-  return placed.sort((p, q) => p.left - q.left);
+  const out = placed.sort((p, q) => p.left - q.left);
+  out.unlabeled = ordered.filter(seg => !shown.includes(seg));  // windows whose times are not above the bar
+  return out;
 }
 // end scheduleTimeLabels
 /** Schedule sentence that never contradicts the measured light (backup output). */
@@ -364,12 +366,20 @@ function labelWidth(text) {
   labelCtx.font = `700 10px ${getComputedStyle(document.body).fontFamily || 'system-ui'}`;
   return Math.ceil(labelCtx.measureText(text).width);
 }
-function renderScheduleTimes(host, day, width) {
+/**
+ * Times above the bar; the text lines under it list only windows that got no label there (same rule as Android
+ * ScheduleDaysView): all labelled → the «Відключення …» / «Можливе …» lines are removed, the bar already says it.
+ */
+function renderScheduleTimes(host, day, width, offLine = null, maybeLine = null) {
   host.replaceChildren();
   if (!width) return;
-  for (const l of scheduleTimeLabels(day.segments, day.now, day.nowText, width, labelWidth)) {
+  const labels = scheduleTimeLabels(day.segments, day.now, day.nowText, width, labelWidth);
+  for (const l of labels) {
     const span = el('span', l.kind, l.text); span.style.left = `${l.left.toFixed(1)}px`; host.append(span);
   }
+  const rest = kind => (labels.unlabeled || []).filter(seg => seg.maybe === (kind === 'maybe')).map(seg => `${seg.from}–${seg.to}`);
+  if (offLine && day.definite.length) { const r = rest('off'); offLine.hidden = !r.length; offLine.textContent = `Відключення ${r.join(', ')}`; }
+  if (maybeLine) { const r = rest('maybe'); maybeLine.hidden = !r.length; maybeLine.textContent = `Можливе ${r.join(', ')}`; }
 }
 window.addEventListener('resize', () => {
   if (lastScheduleOutage) renderScheduleDays(lastScheduleOutage);
@@ -431,12 +441,14 @@ function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
     const times = el('div', 'sched-times'); times.setAttribute('aria-hidden', 'true');
     box.append(times, track);
     scaleRows(box);
-    box.append(el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
-    if (day.maybe.length) box.append(el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`));
+    const offLine = el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text);
+    const maybeLine = day.maybe.length ? el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`) : null;
+    box.append(offLine);
+    if (maybeLine) box.append(maybeLine);
     if (day.totals) box.append(el('p', 'sched-total', day.totals));
     if (day.isToday) renderActualRow(box, actualDay(insights.today));
     host.append(box);
-    if (day.published || day.nowText) renderScheduleTimes(times, day, track.getBoundingClientRect().width);
+    if (day.published || day.nowText) renderScheduleTimes(times, day, track.getBoundingClientRect().width, offLine, maybeLine);
   }
   lastScheduleOutage = outage;
   set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
