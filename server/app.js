@@ -230,6 +230,33 @@ function kyivMidnight(now = new Date()) {
   return now.getTime() - sinceMidnight - now.getMilliseconds();
 }
 function kyivHm(ms) { return new Date(ms).toLocaleTimeString('uk-UA', {hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv'}); }
+/** «6 год 30 хв», «17 год», «45 хв», «0 хв» (rounded to the minute). */
+function spanText(ms) {
+  const m = Math.max(0, Math.round(ms / 60000)), h = Math.floor(m / 60), r = m % 60;
+  return h ? (r ? `${h} год ${r} хв` : `${h} год`) : `${r} хв`;
+}
+/** Total length of [{a, b}] after merging overlaps (ms). */
+function unionMs(spans) {
+  let total = 0, curA = null, curB = null;
+  for (const s of spans.slice().sort((p, q) => p.a - q.a)) {
+    if (curB === null || s.a > curB) { if (curB !== null) total += curB - curA; curA = s.a; curB = s.b; } else curB = Math.max(curB, s.b);
+  }
+  return curB === null ? total : total + curB - curA;
+}
+/**
+ * Day totals under a schedule row — same rules as Android ScheduleDays.totals (keep in sync): definite windows merged,
+ * «можливе» counted only where it does not overlap a definite window, «зі світлом» = the rest of the day.
+ * «Без світла 6 год 30 хв · зі світлом 17 год 30 хв · ще можливе 2 год»; null for a day without any window.
+ */
+function scheduleTotals(clipped, dayMs) {
+  if (!clipped.length) return null;
+  const definite = clipped.filter(w => !w.maybe);
+  const offMs = unionMs(definite);
+  const maybeMs = unionMs(clipped) - offMs;
+  const parts = [`Без світла ${spanText(offMs)}`, `зі світлом ${spanText(Math.max(0, dayMs - offMs - maybeMs))}`];
+  if (maybeMs > 0) parts.push(`ще можливе ${spanText(maybeMs)}`);
+  return parts.join(' · ');
+}
 /** Today / tomorrow (Kyiv) with windows clipped to each day; same rules as the Android ScheduleDays. */
 function scheduleDays(outage = {}, nowMs = Date.now()) {
   const todayStart = kyivMidnight(new Date(nowMs));
@@ -244,7 +271,8 @@ function scheduleDays(outage = {}, nowMs = Date.now()) {
     const published = Boolean(outage.available) && (dates.includes(isoDay(start)) || clipped.length > 0 || (!dates.length && outage.schedule_published && isToday));
     const definite = clipped.filter(w => !w.maybe).map(label), maybe = clipped.filter(w => w.maybe).map(label);
     const text = definite.length ? `Відключення ${definite.join(', ')}` : !published ? (isToday ? 'Графік не опубліковано' : 'Графік ще не опубліковано') : maybe.length ? 'Без точних відключень' : 'Без відключень';
-    return {isToday, title: isToday ? 'Сьогодні' : 'Завтра', start, end, published, definite, maybe, text,
+    const totals = published ? scheduleTotals(clipped, end - start) : null;
+    return {isToday, title: isToday ? 'Сьогодні' : 'Завтра', start, end, published, definite, maybe, text, totals,
       segments: clipped.map(w => ({a: (w.a - start) / (end - start), b: (w.b - start) / (end - start), maybe: w.maybe,
         from: kyivHm(w.a), to: w.b >= end ? '24:00' : kyivHm(w.b)})),
       now: isToday ? Math.max(0, Math.min(1, (nowMs - start) / (end - start))) : null, nowText: isToday ? kyivHm(nowMs) : null};
@@ -405,6 +433,7 @@ function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
     scaleRows(box);
     box.append(el('p', `sched-text${day.definite.length ? ' off' : ''}`, day.text));
     if (day.maybe.length) box.append(el('p', 'sched-text maybe', `Можливе ${day.maybe.join(', ')}`));
+    if (day.totals) box.append(el('p', 'sched-total', day.totals));
     if (day.isToday) renderActualRow(box, actualDay(insights.today));
     host.append(box);
     if (day.published || day.nowText) renderScheduleTimes(times, day, track.getBoundingClientRect().width);

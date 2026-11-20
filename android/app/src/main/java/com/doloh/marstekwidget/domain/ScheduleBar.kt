@@ -43,6 +43,8 @@ data class DaySchedule(
     val maybe: List<String>,
     /** «10:42» for the now marker (today only). */
     val nowText: String? = null,
+    /** «Без світла 6 год 30 хв · зі світлом 17 год 30 хв» (published days with windows only), see [ScheduleDays.totals]. */
+    val totalsText: String? = null,
 ) {
     val title: String get() = if (isToday) "Сьогодні" else "Завтра"
 
@@ -97,6 +99,40 @@ object ScheduleDays {
             definite = clipped.filter { !it.third }.sortedBy { it.first }.map { label(it.first, it.second) },
             maybe = clipped.filter { it.third }.sortedBy { it.first }.map { label(it.first, it.second) },
             nowText = if (isToday) hm(nowMillis) else null,
+            totalsText = if (published) totals(clipped.map { Triple(it.first, it.second, it.third) }, end - start) else null,
         )
+    }
+
+    /** Merged length of [a, b) spans (ms). */
+    private fun unionMillis(spans: List<Pair<Long, Long>>): Long {
+        var total = 0L
+        var curA = -1L
+        var curB = -1L
+        for ((a, b) in spans.sortedBy { it.first }) {
+            if (curB < 0 || a > curB) { if (curB >= 0) total += curB - curA; curA = a; curB = b } else curB = maxOf(curB, b)
+        }
+        return if (curB < 0) total else total + curB - curA
+    }
+
+    /** «6 год 30 хв», «17 год», «45 хв», «0 хв». */
+    private fun span(ms: Long): String {
+        val m = ((ms + 30_000) / 60_000).coerceAtLeast(0)
+        val h = m / 60
+        val r = m % 60
+        val nb = '\u00A0' // value and unit never split across lines
+        return if (h > 0) (if (r > 0) "$h${nb}год $r${nb}хв" else "$h${nb}год") else "$r${nb}хв"
+    }
+
+    /**
+     * Day totals under a schedule row (port of the web `scheduleTotals`, keep in sync): definite windows merged,
+     * «можливе» counted only outside definite ones, «зі світлом» = the rest of the day; null for a day without windows.
+     */
+    fun totals(clipped: List<Triple<Long, Long, Boolean>>, dayMillis: Long): String? {
+        if (clipped.isEmpty()) return null
+        val off = unionMillis(clipped.filter { !it.third }.map { it.first to it.second })
+        val maybe = unionMillis(clipped.map { it.first to it.second }) - off
+        val parts = mutableListOf("Без світла ${span(off)}", "зі світлом ${span((dayMillis - off - maybe).coerceAtLeast(0))}")
+        if (maybe > 0) parts += "ще можливе ${span(maybe)}"
+        return parts.joinToString(" · ")
     }
 }

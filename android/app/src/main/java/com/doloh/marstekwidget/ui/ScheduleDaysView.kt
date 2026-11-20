@@ -42,6 +42,7 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
             }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(barHeightDp) + timeLabelZonePx()).apply { topMargin = dp(3) })
             addView(text(day.windowsText, 12f, if (day.definite.isNotEmpty()) AMBER else MUTED, day.definite.isNotEmpty()), params(dp(2)))
             day.maybeText?.let { addView(text(it, 11f, AMBER_SOFT, false), params(dp(1))) }
+            day.totalsText?.let { addView(text(it, 10.5f, MUTED, false), params(dp(2))) }
             if (day.isToday && actual != null) addActual(actual)
         }
     }

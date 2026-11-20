@@ -171,3 +171,4 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .official-shell>.status-strip{max-width:none}
 .journal-list{max-height:360px}
 }
+.sched-total{margin:2px 0 0;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}

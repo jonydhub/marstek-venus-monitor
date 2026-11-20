@@ -103,7 +103,7 @@ class WebScheduleTextTests(unittest.TestCase):
 
     def run_js(self, body):
         script = (ROOT / "app.js").read_text(encoding="utf-8")
-        funcs = "\n".join(_extract(script, n) for n in ("formatClock", "kyivMidnight", "kyivHm", "scheduleDetail", "scheduleDays"))
+        funcs = "\n".join(_extract(script, n) for n in ("formatClock", "kyivMidnight", "kyivHm", "scheduleDetail", "spanText", "unionMs", "scheduleTotals", "scheduleDays"))
         code = funcs + "\n" + body
         return subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=20, check=True).stdout.strip()
 
