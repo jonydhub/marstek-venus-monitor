@@ -41,11 +41,12 @@ object ChartColors {
  * Same horizontal geometry as [DayScheduleBarPainter] for the same [width] / [labelsPx], so both rows line up.
  */
 object ActualBarPainter {
-    fun draw(canvas: Canvas, width: Float, height: Float, day: ActualDay, density: Float, labelsPx: Float = 0f) {
+    /** [alignPx] > 0 without labels: the same side inset as a row with labels of that size (stacked rows line up). */
+    fun draw(canvas: Canvas, width: Float, height: Float, day: ActualDay, density: Float, labelsPx: Float = 0f, alignPx: Float = 0f) {
         val marker = 2.5f * density
-        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = labelsPx }
+        val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = maxOf(labelsPx, alignPx) }
         val tickZone = if (labelsPx > 0f) 6f * density + labelsPx + 2f * density else 0f
-        val inset = if (labelsPx > 0f) labelPaint.measureText("24") / 2f else 0f
+        val inset = if (labelsPx > 0f || alignPx > 0f) labelPaint.measureText("24") / 2f else 0f
         val left = maxOf(inset, marker)
         val right = width - maxOf(inset, marker)
         val bar = RectF(left, marker, right, height - tickZone - marker)
@@ -83,6 +84,7 @@ object ActualBarPainter {
                 canvas.drawText(label, (x(h / 24f) - w / 2f).coerceIn(0f, width - w), height - 1f, labelPaint)
             }
         }
+        if (day.nowFraction >= 1f) return  // a finished day («Світло за 7 днів»): no now-marker
         val nx = x(day.nowFraction)
         paint.color = Color.BLACK
         canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
@@ -97,7 +99,8 @@ class ActualDayView(context: Context, private val labels: Boolean = true) : View
     override fun onDraw(canvas: Canvas) {
         val d = day ?: return
         val density = resources.displayMetrics.density
-        ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = if (labels) 10f * density else 0f)
+        ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = if (labels) 10f * density else 0f,
+            alignPx = 10f * density)
     }
 }
 
