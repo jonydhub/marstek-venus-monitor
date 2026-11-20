@@ -7,7 +7,7 @@ package com.doloh.marstekwidget.domain
  * Rules: the start label is left-aligned to the block's left edge and the end label right-aligned to its right edge
  * (so neighbouring windows' labels sit inside their own blocks); the now label is centred on the marker; every label
  * is clamped inside [0, totalWidth]. If a window's two labels would touch,
- * they merge into one «07:00–13:00» centred over the block; if that still collides with labels already placed, the
+ * they merge into one «07:00–13:00» centred over the block (else flush with its left / right edge); if that still collides with labels already placed, the
  * window gets no labels (the text line under the bar still lists it). Definite windows are placed before «можливе»
  * ones. The now label comes last: hidden when the marker is inside a window whose labels are shown (the window
  * labels win) or when it would collide with any label.
@@ -82,9 +82,13 @@ object ScheduleTimeLabels {
                 shown += s
                 continue
             }
-            val merged = label("${s.from}–${s.to}", (x(s.start) + x(s.end)) / 2f, kind)
-            if (free(merged)) {
-                placed += merged
+            // one «07:00–13:00» label: centred over the block, else flush with its left or right edge (same as web)
+            // a window from midnight continues yesterday's outage: «до 00:30» is shorter and says the same
+            val text = if (s.from == "00:00" && s.to != "24:00") "до ${s.to}" else "${s.from}–${s.to}"
+            val pick = listOf(label(text, (x(s.start) + x(s.end)) / 2f, kind), at(text, kind) { x(s.start) }, at(text, kind) { x(s.end) - it })
+                .firstOrNull { free(it) }
+            if (pick != null) {
+                placed += pick
                 shown += s
             }
         }

@@ -71,8 +71,10 @@ class ScheduleTimeLabelsTest {
     fun crowdedWindowsMergeOrDropButNeverOverlap() {
         // 120 px per 12 h: 07–13 fits both labels only on 480 px; on 240 px it merges, 15–21 too.
         assertEquals(listOf("07:00–13:00", "15:00–21:00"), texts(run(seg(7, 13), seg(15, 21), now = null)))
-        // a range label that would still collide is dropped (the text line under the bar lists every window)
-        assertEquals(listOf("07:00–13:00"), texts(run(seg(7, 13), seg(14, 15), now = null)))
+        // no room centred → flush with the block's left edge
+        assertEquals(listOf("07:00–13:00", "14:00–15:00"), texts(run(seg(7, 13), seg(14, 15), now = null)))
+        // no room anywhere over the block → dropped (the text line under the bar lists it)
+        assertEquals(listOf("07:00–13:00"), texts(run(seg(7, 13), seg(13, 14), now = null)))
     }
 
     @Test
@@ -81,7 +83,18 @@ class ScheduleTimeLabelsTest {
             ScheduleTimeLabels.unlabeled(segments.toList(), null, null, 0f, width, width, 4f) { it.length * 6f }.map { "${it.from}–${it.to}" }
         assertEquals(emptyList<String>(), rest(seg(7, 13), seg(15, 21)))
         assertEquals(emptyList<String>(), rest(seg(16, 20, true), width = 480f))
-        assertEquals(listOf("14:00–15:00"), rest(seg(7, 13), seg(14, 15)))
+        assertEquals(listOf("13:00–14:00"), rest(seg(7, 13), seg(13, 14)))
+    }
+
+    @Test
+    fun shortSliverDoesNotPushALongWindowOff() {
+        // «Завтра» 00:00–00:30, 04:00–07:30, 14:30–18:00, 21:30–24:00 on a phone-wide bar (same case as the web test)
+        fun s(a: Float, b: Float, f: String, t: String) = ScheduleBarModel.Segment(a / 24f, b / 24f, false, f, t)
+        val segs = listOf(s(0f, 0.5f, "00:00", "00:30"), s(4f, 7.5f, "04:00", "07:30"), s(14.5f, 18f, "14:30", "18:00"), s(21.5f, 24f, "21:30", "24:00"))
+        val rest = ScheduleTimeLabels.unlabeled(segs, null, null, 0f, 360f, 360f, 4f) { it.length * 6f }
+        assertEquals(emptyList<ScheduleBarModel.Segment>(), rest)
+        assertEquals(listOf("до 00:30", "04:00–07:30", "14:30–18:00", "21:30–24:00"),
+            texts(ScheduleTimeLabels.layout(segs, null, null, 0f, 360f, 360f, 4f) { it.length * 6f }))
     }
 
     @Test

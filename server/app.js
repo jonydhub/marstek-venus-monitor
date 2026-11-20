@@ -296,8 +296,12 @@ function scheduleTimeLabels(segments, now, nowText, width, measure, gap = 4) {
     const kind = s.maybe ? 'maybe' : 'off';
     const from = at(s.from, kind, () => x(s.a)), to = at(s.to, kind, w => x(s.b) - w);
     if (!touches(from, to) && free(from) && free(to)) { placed.push(from, to); shown.push(s); continue; }
-    const merged = at(`${s.from}–${s.to}`, kind, w => (x(s.a) + x(s.b)) / 2 - w / 2);
-    if (free(merged)) { placed.push(merged); shown.push(s); }
+    // one «07:00–13:00» label: centred over the block, else flush with its left or right edge (a short neighbour's
+    // label next to it must not push a long window's times off the bar)
+    // a window from midnight continues yesterday's outage: «до 00:30» is shorter and says the same
+    const text = s.from === '00:00' && s.to !== '24:00' ? `до ${s.to}` : `${s.from}–${s.to}`;
+    const pick = [at(text, kind, w => (x(s.a) + x(s.b)) / 2 - w / 2), at(text, kind, () => x(s.a)), at(text, kind, w => x(s.b) - w)].find(free);
+    if (pick) { placed.push(pick); shown.push(s); }
   }
   if (now !== null && now !== undefined && nowText) {
     const inside = shown.some(s => now >= s.a && now <= s.b);

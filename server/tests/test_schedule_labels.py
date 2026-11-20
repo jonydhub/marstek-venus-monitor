@@ -82,7 +82,10 @@ class ScheduleTimeLabelTests(unittest.TestCase):
 
     def test_crowded_merge_or_drop_never_overlap(self):
         self.assertEqual(texts(layout([seg(7, 13), seg(15, 21)])), ["07:00–13:00", "15:00–21:00"])
-        self.assertEqual(texts(layout([seg(7, 13), seg(14, 15)])), ["07:00–13:00"])
+        # no room centred → flush with the block's left edge
+        self.assertEqual(texts(layout([seg(7, 13), seg(14, 15)])), ["07:00–13:00", "14:00–15:00"])
+        # no room anywhere over the block → dropped (the text line under the bar lists it)
+        self.assertEqual(texts(layout([seg(7, 13), seg(13, 14)])), ["07:00–13:00"])
         labels = layout([seg(7, 13), seg(14, 21), seg(22, 24, True)], now=0.3)
         for a, b in zip(labels, labels[1:]):
             self.assertLessEqual(a["left"] + a["w"] + 4, b["left"] + 0.01)
@@ -92,7 +95,15 @@ class ScheduleTimeLabelTests(unittest.TestCase):
         self.assertEqual(unlabeled([seg(7, 13), seg(15, 21)]), [])
         self.assertEqual(unlabeled([seg(16, 20, True)], width=480), [])
         # a dropped window (no room) stays in the text line
-        self.assertEqual(unlabeled([seg(7, 13), seg(14, 15)]), ["14:00–15:00"])
+        self.assertEqual(unlabeled([seg(7, 13), seg(13, 14)]), ["13:00–14:00"])
+
+    def test_short_sliver_does_not_push_a_long_window_off(self):
+        # «Завтра» 00:00–00:30, 04:00–07:30, 14:30–18:00, 21:30–24:00 on a phone-wide bar (≈ 360 px, 11 chars ≈ 66 px)
+        segs = [{"a": a / 24, "b": b / 24, "maybe": False, "from": f, "to": t}
+                for a, b, f, t in ((0, 0.5, "00:00", "00:30"), (4, 7.5, "04:00", "07:30"),
+                                   (14.5, 18, "14:30", "18:00"), (21.5, 24, "21:30", "24:00"))]
+        self.assertEqual(unlabeled(segs, width=360), [])
+        self.assertEqual(texts(layout(segs, width=360)), ["до 00:30", "04:00–07:30", "14:30–18:00", "21:30–24:00"])
 
     def test_maybe_kind(self):
         self.assertEqual([l["kind"] for l in layout([seg(16, 20, True)], width=480)], ["maybe", "maybe"])
