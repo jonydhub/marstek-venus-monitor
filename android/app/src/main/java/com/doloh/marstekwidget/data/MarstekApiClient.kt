@@ -76,6 +76,22 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
         }
     }
 
+    /** «Світло за 7 днів» (GET /api/light-week); NotSupported for an older server without it (HTTP 404). */
+    suspend fun fetchLightWeek(): LightWeekFetch {
+        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return LightWeekFetch.Failed("Сервер не налаштовано")
+        return when (val raw = fetchJson("${base.trimEnd('/')}/api/light-week")) {
+            is Raw.Ok -> LightWeekFetch.Ok(com.doloh.marstekwidget.domain.LightWeek.fromJson(raw.root))
+            is Raw.Failed -> if (raw.message == "HTTP 404") LightWeekFetch.NotSupported else LightWeekFetch.Failed(raw.message)
+            Raw.NeedsSignIn -> LightWeekFetch.Failed("Потрібен вхід")
+        }
+    }
+
+    sealed class LightWeekFetch {
+        data class Ok(val days: List<com.doloh.marstekwidget.domain.WeekDay>) : LightWeekFetch()
+        object NotSupported : LightWeekFetch()
+        data class Failed(val message: String) : LightWeekFetch()
+    }
+
     sealed class JournalFetch {
         data class Ok(val events: List<JournalEvent>, val startedAtMillis: Long?) : JournalFetch()
         object NotSupported : JournalFetch()

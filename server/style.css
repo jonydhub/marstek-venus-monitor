@@ -172,3 +172,13 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .journal-list{max-height:360px}
 }
 .sched-total{margin:2px 0 0;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* v18: «Світло за 7 днів» dialog (measured light per day, opened from the schedule caption) */
+.week-open{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer;text-align:left}
+.week-open:hover,.week-open:focus-visible{color:var(--text)}.week-open:focus-visible{outline:2px solid var(--mint);outline-offset:3px;border-radius:4px}
+.week-dialog{width:min(560px,calc(100% - 24px));max-height:calc(100% - 32px);padding:16px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(155deg,#1a212d,#151b25);color:var(--text)}
+.week-dialog::backdrop{background:rgba(4,8,13,.7)}
+.week-dialog h2{margin:0;font-size:17px;font-weight:600}
+.week-summary{margin:10px 0 4px;font-size:13px;font-weight:600;color:#ff806f}
+.week-days{display:grid;gap:12px;margin-top:10px}
+.week-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px;font-size:12px}
+.week-head b{font-weight:620}.week-head span{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}.week-head span.off{color:#ff9d8f}

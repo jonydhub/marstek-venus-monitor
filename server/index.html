@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=17">
+  <link rel="stylesheet" href="/style.css?v=18">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -45,7 +45,7 @@
       </div>
       <p class="today-note" id="today-note" hidden>Тривалості за сьогодні з'являться, коли збереться історія.</p>
       <div class="schedule-block">
-        <div class="spark-head"><span id="schedule-caption">Графік відключень</span><span id="schedule-legend"><i class="lg-off"></i>відключення <i class="lg-maybe"></i>можливе</span></div>
+        <div class="spark-head"><button type="button" class="week-open" id="week-open" aria-haspopup="dialog" title="Світло за 7 днів"><span id="schedule-caption">Графік відключень</span> <span aria-hidden="true">›</span></button><span id="schedule-legend"><i class="lg-off"></i>відключення <i class="lg-maybe"></i>можливе</span></div>
         <div id="schedule-days" class="schedule-days" aria-label="Графік відключень на сьогодні і завтра"></div>
       </div>
       <div class="hero-spark">
@@ -56,6 +56,13 @@
       <div class="hero-foot"><span>Резервний вихід сьогодні</span><b id="backup-today">—</b></div>
       <p class="flow-footnote" id="hero-note">Світло є / нема визначається лише за потужністю на резервному виході Venus.</p>
     </section>
+
+    <dialog class="week-dialog" id="week-dialog" aria-labelledby="week-title">
+      <div class="flow-heading"><div><p class="eyebrow">ФАКТИЧНО · ЗА РЕЗЕРВНИМ ВИХОДОМ</p><h2 id="week-title">Світло за 7 днів</h2></div><button type="button" class="install-button" id="week-close">Закрити</button></div>
+      <p class="week-summary" id="week-summary">Завантажую…</p>
+      <div class="week-days" id="week-days"></div>
+      <p class="flow-footnote">Графіки відключень публікують лише на сьогодні й завтра, тому тут — як було насправді: зелене — світло було, червоне — не було, темне — немає даних (сервер чи батарея не відповідали). Сервер зберігає виміри 8 днів.</p>
+    </dialog>
 
     <section class="battery-summary" aria-label="Заряд і запас енергії батареї">
       <div class="battery-headline">

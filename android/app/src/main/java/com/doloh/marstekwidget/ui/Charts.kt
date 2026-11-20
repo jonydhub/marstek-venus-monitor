@@ -91,13 +91,13 @@ object ActualBarPainter {
     }
 }
 
-class ActualDayView(context: Context) : View(context) {
+class ActualDayView(context: Context, private val labels: Boolean = true) : View(context) {
     private var day: ActualDay? = null
     fun setDay(value: ActualDay) { day = value; contentDescription = "${value.text}; зелене — світло було, червоне — не було, темне — немає даних"; invalidate() }
     override fun onDraw(canvas: Canvas) {
         val d = day ?: return
         val density = resources.displayMetrics.density
-        ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = 10f * density)
+        ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = if (labels) 10f * density else 0f)
     }
 }
 

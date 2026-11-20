@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
 import gridstate
-from history import (LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
+from history import (day_starts, week_light, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
                      measured_backup_load, smoothed_backup_load)
 from outage import build_outage_service
 from netcache import CachedJsonClient
@@ -600,6 +600,31 @@ def events_payload(query: str) -> dict:
             "journal_started_at": event_time(first) if first is not None else None}
 
 
+LIGHT_WEEK_CACHE_SECONDS = 60
+_light_week_cache = {"at": 0.0, "payload": None}
+_light_week_lock = threading.Lock()
+
+
+def light_week_payload(now=None) -> dict:
+    """GET /api/light-week: the measured light timeline («Фактично») for today and the 6 previous days.
+
+    Computed from the stored samples (8-day retention) with the same rules as today's row; cached for a minute."""
+    now = time.time() if now is None else now
+    with _light_week_lock:
+        if _light_week_cache["payload"] is not None and now - _light_week_cache["at"] < LIGHT_WEEK_CACHE_SECONDS:
+            return _light_week_cache["payload"]
+        days = []
+        if poller.history is not None:
+            first = day_starts(now)[-1]
+            rows = poller.history.since(first - 3600)  # an hour before the window seeds the light state
+            days = week_light(rows, now=now, threshold_w=BACKUP_THRESHOLD_W,
+                              confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
+                              bypass=SETTINGS.bypass_load, bypass_seen=poller.bypass_seen())
+        payload = {"days": days, "generated_at": datetime.now(timezone.utc).isoformat()}
+        _light_week_cache.update(at=now, payload=payload)
+        return payload
+
+
 def regions_catalog():
     """Canonical regions; live queue lists from ua-outages when reachable, else the static table."""
     try:
@@ -712,6 +737,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logging.warning("events read failed: %s", exc)
                 return self.send_json(500, {"error": "events_unavailable"})
+        if path == "/api/light-week":
+            try:
+                return self.send_json(200, light_week_payload())
+            except Exception as exc:
+                logging.warning("light week failed: %s", exc)
+                return self.send_json(500, {"error": "light_week_unavailable"})
         if path == "/api/regions":
             try:
                 regions = regions_catalog()

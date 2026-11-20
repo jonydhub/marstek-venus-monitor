@@ -250,6 +250,44 @@ def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
             "grid_timeline": [{"start": _iso(s["start"]), "end": _iso(s["end"]), "state": s["state"]} for s in timeline]}
 
 
+WEEK_DAYS = 7
+
+
+def day_starts(now, days=WEEK_DAYS):
+    """Kyiv midnights of today and the previous days, newest first (DST-safe: 23/25 h days)."""
+    from datetime import timedelta
+    today = datetime.fromtimestamp(now, KYIV).date()
+    return [datetime.combine(today - timedelta(days=k), datetime.min.time(), KYIV).timestamp() for k in range(days)]
+
+
+def week_light(rows, *, now, days=WEEK_DAYS, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+               confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
+    """The «Фактично» light timeline for today and the previous days (newest first), one entry per Kyiv day.
+
+    Same rules as today's row (one timeline over the whole window, so a state crossing midnight is not reset), then
+    split at midnights. ``unknown_seconds`` = no data (server down, battery silent, before the first sample); today
+    ends at ``now``."""
+    starts = day_starts(now, days)
+    timeline = grid_timeline(rows, start=starts[-1], now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                             bypass=bypass, bypass_seen=bypass_seen)
+    out = []
+    for i, a in enumerate(starts):
+        b = now if i == 0 else starts[i - 1]
+        spans, totals = [], {"on": 0.0, "off": 0.0, "unknown": 0.0}
+        for s in timeline:
+            x, y = max(s["start"], a), min(s["end"], b)
+            if y > x:
+                spans.append({"start": _iso(x), "end": _iso(y), "state": s["state"]})
+                totals[s["state"] if s["state"] in totals else "unknown"] += y - x
+        day_end = starts[i - 1] if i else datetime.fromtimestamp(a + 30 * 3600, KYIV).replace(
+            hour=0, minute=0, second=0, microsecond=0).timestamp()
+        out.append({"date": datetime.fromtimestamp(a, KYIV).date().isoformat(), "is_today": i == 0,
+                    "start": _iso(a), "end": _iso(day_end),
+                    "off_seconds": round(totals["off"]), "on_seconds": round(totals["on"]),
+                    "unknown_seconds": round(totals["unknown"]), "timeline": spans})
+    return out
+
+
 def outage_periods(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
                    confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
     """Confirmed no-light periods over the last 24 h as [{start, end}] (ISO, Kyiv); unknown gaps split periods."""

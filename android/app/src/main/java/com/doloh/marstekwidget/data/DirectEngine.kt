@@ -22,6 +22,9 @@ import com.doloh.marstekwidget.domain.BatteryDirection
 import com.doloh.marstekwidget.domain.GridState
 import com.doloh.marstekwidget.domain.JournalDetector
 import com.doloh.marstekwidget.domain.JournalObservation
+import com.doloh.marstekwidget.domain.LightSpan
+import com.doloh.marstekwidget.domain.LightWeek
+import com.doloh.marstekwidget.domain.WeekDay
 import com.doloh.marstekwidget.domain.PowerFields
 import com.doloh.marstekwidget.notify.AlertNotifier
 import com.doloh.marstekwidget.widget.WidgetPreferences
@@ -247,6 +250,19 @@ object DirectEngine {
     private fun bypassKey(host: String, port: Int) = "bypass_load_seen.$host:$port"
 
     /** Learned per device: this station reports backup-output load while the grid is present (UPS bypass). */
+    /** «Світло за 7 днів» in direct mode: the phone's own history (48 h) split into Kyiv days (newest first). */
+    fun lightWeek(context: Context, settings: AppSettings, nowMillis: Long = System.currentTimeMillis()): List<WeekDay> {
+        val nowS = nowMillis / 1000.0
+        val rows = HistoryStore(context).rows(nowS)
+        val host = settings.deviceHost.orEmpty()
+        val bypassMode = GridBypass.normalize(settings.bypassLoadMode)
+        val bypass = GridBypass(bypassMode, bypassMode != GridBypass.NO && bypassSeen(context, host, settings.devicePort))
+        val first = java.time.LocalDate.now(KYIV).minusDays((LightWeek.DAYS - 1).toLong()).atStartOfDay(KYIV).toEpochSecond().toDouble()
+        val spans = HistoryMath.gridTimeline(rows, first, nowS, settings.backupThresholdW, HistoryMath.CONFIRM_GAP_SECONDS, bypass)
+            .map { LightSpan((it.start * 1000).toLong(), (it.end * 1000).toLong(), it.state) }
+        return LightWeek.fromTimeline(spans, nowMillis)
+    }
+
     fun bypassSeen(context: Context, host: String, port: Int): Boolean = prefs(context).getBoolean(bypassKey(host, port), false)
 
     private fun rememberBypassSeen(context: Context, host: String, port: Int) {

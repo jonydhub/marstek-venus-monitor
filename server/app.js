@@ -441,6 +441,69 @@ function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
   lastScheduleOutage = outage;
   set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
 }
+/** «Сьогодні», «Вчора», «Пн, 16.11» for a Kyiv ISO date. */
+function weekDayTitle(day) {
+  if (day.is_today) return 'Сьогодні';
+  const d = new Date(`${day.date}T12:00:00Z`);
+  const y = new Date(Date.parse(`${day.date}T12:00:00Z`) + 86400e3).toISOString().slice(0, 10);
+  const today = new Date().toLocaleDateString('en-CA', {timeZone: 'Europe/Kyiv'});
+  if (y === today) return 'Вчора';
+  const wd = d.toLocaleDateString('uk-UA', {weekday: 'short', timeZone: 'UTC'});
+  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)}, ${d.toLocaleDateString('uk-UA', {day: '2-digit', month: '2-digit', timeZone: 'UTC'})}`;
+}
+/** Totals line of a measured day — same rules as Android LightWeek.totalsText (keep in sync). */
+function weekDayTotals(day) {
+  const off = (day.off_seconds || 0) * 1000, on = (day.on_seconds || 0) * 1000, unknown = (day.unknown_seconds || 0) * 1000;
+  if (!off && !on) return day.is_today ? 'Ще немає даних' : 'Немає даних';
+  const parts = off >= 60000 ? [`Без світла ${spanText(off)}`, `зі світлом ${spanText(on)}`] : ['Без відключень'];
+  if (unknown >= 30 * 60000) parts.push(`без даних ${spanText(unknown)}`);
+  return parts.join(' · ');
+}
+function renderWeek(payload) {
+  const host = $('week-days'); if (!host) return;
+  host.replaceChildren();
+  const days = payload?.days || [];
+  let off = 0, known = 0;
+  for (const day of days) {
+    off += day.off_seconds || 0; known += (day.off_seconds || 0) + (day.on_seconds || 0);
+    const start = Date.parse(day.start), end = Date.parse(day.end), span = end - start;
+    const box = el('div', 'week-day');
+    const head = el('div', 'week-head');
+    head.append(el('b', '', weekDayTitle(day)), el('span', day.off_seconds >= 60 ? 'off' : '', weekDayTotals(day)));
+    box.append(head);
+    const track = el('div', 'sched-track actual');
+    track.setAttribute('role', 'img');
+    track.setAttribute('aria-label', `${weekDayTitle(day)}: ${weekDayTotals(day)}`);
+    for (const seg of day.timeline || []) {
+      const a = (Date.parse(seg.start) - start) / span, b = (Date.parse(seg.end) - start) / span;
+      const i = el('i', `seg ${seg.state === 'on' ? 'on' : seg.state === 'off' ? 'lightoff' : 'nodata'}`);
+      i.style.left = `${(a * 100).toFixed(2)}%`; i.style.width = `${((b - a) * 100).toFixed(2)}%`;
+      track.append(i);
+    }
+    for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
+    if (day.is_today) { const now = el('i', 'now'); now.style.left = `${(Math.min(1, (Date.now() - start) / span) * 100).toFixed(2)}%`; track.append(now); }
+    box.append(track);
+    host.append(box);
+  }
+  if (host.lastChild) scaleRows(host.lastChild);
+  set('week-summary', known ? `За 7 днів без світла ${spanText(off * 1000)}${days.some(d => d.off_seconds) ? ` · днів з відключеннями: ${days.filter(d => d.off_seconds >= 60).length}` : ''}` : 'Ще немає вимірів за ці дні');
+}
+async function openWeek() {
+  const dialog = $('week-dialog'); if (!dialog) return;
+  set('week-summary', 'Завантажую…');
+  if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
+  try {
+    const response = await apiFetch('/api/light-week');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderWeek(await response.json());
+  } catch (err) {
+    $('week-days')?.replaceChildren();
+    set('week-summary', `Не вдалося завантажити (${err.message || err})`);
+  }
+}
+$('week-open')?.addEventListener('click', openWeek);
+$('week-close')?.addEventListener('click', () => $('week-dialog')?.close());
+$('week-dialog')?.addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
 const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світло зникло'}, light_returned: {label: '○', cls: 'ev-back', title: 'Світло повернулось'},
   charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'},
   anomaly_overload_trip: {label: '!', cls: 'ev-trip', title: 'Можливо, спрацював захист від перевантаження'}};

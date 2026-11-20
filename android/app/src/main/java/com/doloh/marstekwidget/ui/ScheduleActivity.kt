@@ -5,16 +5,22 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.doloh.marstekwidget.data.DirectEngine
+import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.data.TelemetryRepository
 import com.doloh.marstekwidget.domain.ActualDays
 import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
+import com.doloh.marstekwidget.domain.LightWeek
+import com.doloh.marstekwidget.domain.WeekDay
 import com.doloh.marstekwidget.domain.OutageSourceLinks
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
 import com.doloh.marstekwidget.domain.ScheduleDays
 import com.doloh.marstekwidget.outage.OutageRegions
+import com.doloh.marstekwidget.settings.ConnectionMode
 import com.doloh.marstekwidget.settings.SettingsStore
 import com.doloh.marstekwidget.widget.WidgetFetchState
 import com.doloh.marstekwidget.widget.WidgetPreferences
@@ -23,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -79,6 +86,7 @@ class ScheduleActivity : Activity() {
                 card.addView(legend(), ui.matchWrap(10))
                 content.addView(card, ui.matchWrap(8))
             }
+            content.addView(weekCard(), ui.matchWrap(8))
             return
         }
         val region = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
@@ -115,6 +123,7 @@ class ScheduleActivity : Activity() {
         days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows, actual, ActualDays.scheduleNowText(info, now)) })
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
+        content.addView(weekCard(), ui.matchWrap(8))
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         refreshButton = ui.button("Оновити графік", filled = true) { refresh() }
@@ -125,6 +134,57 @@ class ScheduleActivity : Activity() {
         }
         content.addView(actions, ui.matchWrap(10))
         content.addView(ui.hint("Графік — лише прогноз джерела. Світло є чи нема застосунок визначає за резервним виходом батареї."), ui.matchWrap(6))
+    }
+
+    /**
+     * «Світло за 7 днів»: measured light per day (schedules exist only for today/tomorrow). Server mode reads
+     * GET /api/light-week (8 days of samples on the server); direct mode — the phone's own 48 h history.
+     */
+    private fun weekCard(): LinearLayout {
+        val card = ui.card()
+        card.addView(ui.title("Світло за 7 днів · фактично"))
+        val summary = ui.label("Завантажую…", 12f, Ui.MUTED, true)
+        card.addView(summary)
+        val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        card.addView(rows, ui.matchWrap(4))
+        val settings = SettingsStore(this).load()
+        val direct = settings.mode != ConnectionMode.SERVER
+        val note = ui.hint(if (direct) "Напряму телефон зберігає виміри лише 48 год — повний тиждень видно в режимі сервера."
+            else "Графіки публікують лише на сьогодні й завтра, тож тут — як було насправді, за резервним виходом.")
+        card.addView(note, ui.matchWrap(6))
+        if (showcase) { summary.text = "Демо-режим"; return card }
+        scope.launch {
+            val now = System.currentTimeMillis()
+            val days: List<WeekDay>? = if (direct) {
+                runCatching { withContext(Dispatchers.IO) { DirectEngine.lightWeek(this@ScheduleActivity, settings, now) } }.getOrNull()
+                    ?.filter { it.isToday || it.offSeconds + it.onSeconds > 0 }
+            } else when (val r = MarstekApiClient(this@ScheduleActivity, settings, SettingsStore(this@ScheduleActivity).token()).fetchLightWeek()) {
+                is MarstekApiClient.LightWeekFetch.Ok -> r.days
+                MarstekApiClient.LightWeekFetch.NotSupported -> { summary.text = "Оновіть сервер до 1.3.9, щоб бачити тиждень"; return@launch }
+                is MarstekApiClient.LightWeekFetch.Failed -> { summary.text = "Не вдалося завантажити (${r.message})"; return@launch }
+            }
+            if (days.isNullOrEmpty()) { summary.text = "Ще немає вимірів"; return@launch }
+            summary.text = LightWeek.summary(days) ?: "Ще немає вимірів"
+            summary.setTextColor(if (days.any { it.offSeconds >= 60 }) ChartColors.ACTUAL_OFF else Ui.MUTED)
+            val today = java.time.LocalDate.now(KYIV)
+            rows.removeAllViews()
+            days.forEachIndexed { i, day ->
+                val head = LinearLayout(this@ScheduleActivity).apply { orientation = LinearLayout.HORIZONTAL }
+                head.addView(ui.label(LightWeek.title(day, today), 12f, Ui.TEXT, true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                head.addView(ui.label(LightWeek.totalsText(day), 11f, if (day.offSeconds >= 60) ChartColors.ACTUAL_OFF else Ui.MUTED).apply {
+                    gravity = android.view.Gravity.END
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = ui.dp(8) })
+                rows.addView(head, ui.matchWrap(if (i == 0) 6 else 10))
+                val last = i == days.lastIndex
+                val density = resources.displayMetrics.density
+                val tickZone = if (last) kotlin.math.ceil(density * (6f + 10f + 2f)).toInt() else 0
+                rows.addView(ActualDayView(this@ScheduleActivity, labels = last).apply {
+                    setDay(LightWeek.bar(day, now))
+                    contentDescription = "${LightWeek.title(day, today)}: ${LightWeek.totalsText(day)}"
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(16) + tickZone).apply { topMargin = ui.dp(3) })
+            }
+        }
+        return card
     }
 
     private fun legend() = LinearLayout(this).apply {
