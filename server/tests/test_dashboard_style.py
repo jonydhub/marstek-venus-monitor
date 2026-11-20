@@ -105,7 +105,7 @@ class WebScheduleTextTests(unittest.TestCase):
         script = (ROOT / "app.js").read_text(encoding="utf-8")
         funcs = "\n".join(_extract(script, n) for n in ("formatClock", "kyivMidnight", "kyivHm", "scheduleDetail", "spanText", "unionMs", "scheduleTotals", "scheduleDays"))
         code = funcs + "\n" + body
-        return subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=20, check=True).stdout.strip()
+        return subprocess.run(["node", "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout.strip()
 
     def test_grid_on_during_window_and_return_only_when_off(self):
         out = self.run_js("""
@@ -125,7 +125,7 @@ class WebScheduleTextTests(unittest.TestCase):
             "\n".join(_extract(script, n) for n in ("shortDuration", "formatDuration"))
         out = subprocess.run(["node", "-e", funcs + """
             console.log(JSON.stringify([shortDuration(3600), shortDuration(7500), shortDuration(60), shortDuration(0),
-              formatDuration(3600), formatDuration(12120)]));"""], capture_output=True, text=True, timeout=20, check=True).stdout
+              formatDuration(3600), formatDuration(12120)]));"""], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout
         self.assertEqual(json.loads(out), ["1\u00a0год", "2\u00a0год 5\u00a0хв", "1\u00a0хв", "0\u00a0хв", "1 год", "3 год 22 хв"])
 
     def test_days_split_windows_and_mark_tomorrow_unpublished(self):

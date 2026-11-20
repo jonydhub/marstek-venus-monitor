@@ -23,7 +23,7 @@ def source():
 def totals(windows, day_hours=24):
     clipped = [{"a": a * H, "b": b * H, "maybe": maybe} for a, b, maybe in windows]
     code = source() + f"process.stdout.write(JSON.stringify(scheduleTotals({json.dumps(clipped)}, {day_hours * H})));"
-    result = subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=20, check=True)
+    result = subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True)
     return json.loads(result.stdout)
 
 

@@ -23,7 +23,7 @@ def source():
 def totals(off, on, unknown, today=False):
     day = {"off_seconds": off, "on_seconds": on, "unknown_seconds": unknown, "is_today": today}
     code = source() + f"process.stdout.write(JSON.stringify(weekDayTotals({json.dumps(day)})));"
-    return json.loads(subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=20, check=True).stdout)
+    return json.loads(subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout)
 
 
 @unittest.skipUnless(shutil.which("node"), "node not installed")

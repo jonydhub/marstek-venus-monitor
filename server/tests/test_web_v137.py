@@ -20,7 +20,7 @@ class WebV137Tests(unittest.TestCase):
         prelude = ("const finiteOrNull = v => v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);\n"
                    + consts)
         code = prelude + "\n".join(_extract(script, n) for n in HELPERS) + "\n" + body
-        return json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, timeout=20, check=True).stdout)
+        return json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout)
 
     def test_events_within_twenty_minutes_merge_into_one_counted_marker(self):
         out = self.run_js("""

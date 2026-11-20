@@ -27,7 +27,7 @@ def layout(segments, now=None, now_text="10:42", width=240):
     code = source() + f"""
 const out = scheduleTimeLabels({json.dumps(segments)}, {json.dumps(now)}, {json.dumps(now_text)}, {width}, t => t.length * 6, 4);
 process.stdout.write(JSON.stringify(out));"""
-    result = subprocess.run([NODE, "-e", code], capture_output=True, text=True, timeout=20, check=True)
+    result = subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True)
     return json.loads(result.stdout)
 
 
