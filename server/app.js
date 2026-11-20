@@ -343,7 +343,10 @@ function renderScheduleTimes(host, day, width) {
     const span = el('span', l.kind, l.text); span.style.left = `${l.left.toFixed(1)}px`; host.append(span);
   }
 }
-window.addEventListener('resize', () => { if (lastScheduleOutage) renderScheduleDays(lastScheduleOutage); });
+window.addEventListener('resize', () => {
+  if (lastScheduleOutage) renderScheduleDays(lastScheduleOutage);
+  if (lastSocChart) renderSocChart(lastSocChart.insights, lastSocChart.outage);
+});
 function scaleRows(box) {
   const ticks = el('div', 'sched-ticks');
   for (let h = 0; h <= 24; h++) { const i = el('i', h % 6 === 0 ? 'major' : ''); i.style.left = `calc(${(h / 24 * 100).toFixed(3)}% - ${h === 24 ? 1 : 0}px)`; ticks.append(i); }
@@ -432,10 +435,23 @@ function clusterChartEvents(events, x, markerPx = 14, minGapMs = 20 * 60e3) {
     return {ms: c.firstMs, firstMs: c.firstMs, lastMs: c.lastMs, count: c.events.length, kind, events: c.events};
   });
 }
+let lastSocChart = null;
+// Phone widths keep the 320×150 drawing scaled to fit; wider screens draw in real pixels
+// at a fixed height, so labels and markers stay their designed size instead of growing with the page.
+function socChartBox(svg) {
+  const cw = Math.round(svg.clientWidth || 0);
+  if (cw <= 520) return {W: 320, H: 150};
+  return {W: cw, H: cw >= 900 ? 230 : 190};
+}
 function renderSocChart(insights = {}, outage = {}) {
   const svg = $('soc-chart'); if (!svg) return;
+  lastSocChart = {insights, outage};
   svg.replaceChildren();
-  const W = 320, H = 150, L = 4, R = 286, T = 10, B = 132;
+  const {W, H} = socChartBox(svg);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.aspectRatio = `${W}/${H}`;
+  svg.classList.toggle('wide', W !== 320);
+  const L = 4, R = W - 34, T = 10, B = H - 18;
   const end = Date.now(), start = end - 24 * 3600 * 1000;
   const x = t => L + Math.max(0, Math.min(1, (t - start) / (end - start))) * (R - L);
   const y = soc => B - Math.max(0, Math.min(100, soc)) / 100 * (B - T);

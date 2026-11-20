@@ -160,3 +160,14 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .actual-head{margin:8px 0 3px;font-size:11px;font-weight:620;color:var(--muted)}.actual-head.on{color:#7fe3b2}.actual-head.off{color:#ff806f}
 .sched-track.actual .seg.on{background:#7fe3b2}.sched-track.actual .seg.lightoff{background:#ff806f}.sched-track.actual .seg.nodata{background:#0b141d}
 .chart-event.cluster text{font-size:8.5px}.ev-trip circle{fill:#ff806f}.ev-trip line{stroke:#ff806f}
+/* v16: desktop — the SOC chart draws in real pixels (renderSocChart), flows/counters fit their three cards, two-column layout from 1100px */
+.soc-chart.wide .chart-label{font-size:11px}.soc-chart.wide .chart-event text{font-size:9px}
+@media(min-width:760px){.energy-flow-panel .flow-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.energy-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(min-width:1100px){
+.official-shell{width:min(100%,1360px);padding:22px 28px 28px;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);column-gap:18px;align-items:start}
+.official-shell>*{grid-column:2;min-width:0}
+.official-shell>.topbar,.official-shell>.journal,.official-shell>.diagnostics,.official-shell>footer{grid-column:1/-1}
+.official-shell>.hero{grid-column:1;grid-row:2/span 6;margin:4px 0 14px}
+.official-shell>.status-strip{max-width:none}
+.journal-list{max-height:360px}
+}
