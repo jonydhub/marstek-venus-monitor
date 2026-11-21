@@ -293,7 +293,12 @@ function scheduleTimeLabels(segments, now, nowText, width, measure, gap = 4) {
   const free = l => placed.every(p => !touches(p, l));
   const ordered = (segments || []).filter(s => s.from && s.to && s.b > s.a).slice().sort((p, q) => (p.maybe - q.maybe) || (p.a - q.a));
   for (const s of ordered) {
-    const kind = s.maybe ? 'maybe' : 'off';
+    const kind = s.kind || (s.maybe ? 'maybe' : 'off');
+    if (s.label) {  // one fixed label («з 15:58», «до 00:15»): centred, else flush left / right over the block
+      const pick = [at(s.label, kind, w => (x(s.a) + x(s.b)) / 2 - w / 2), at(s.label, kind, () => x(s.a)), at(s.label, kind, w => x(s.b) - w)].find(free);
+      if (pick) { placed.push(pick); shown.push(s); }
+      continue;
+    }
     const from = at(s.from, kind, () => x(s.a)), to = at(s.to, kind, w => x(s.b) - w);
     if (!touches(from, to) && free(from) && free(to)) { placed.push(from, to); shown.push(s); continue; }
     // one «07:00–13:00» label: centred over the block, else flush with its left or right edge (a short neighbour's
@@ -349,6 +354,12 @@ function scheduleNowText(outage = {}, nowMs = Date.now()) {
  * «Фактично» row: today's confirmed light timeline (insights.today.grid_timeline) as fractions of the day —
  * on = green, off = coral, unknown/no data = dark, after now = grey (track). Same rules as the Android ActualDay.
  */
+/** «Без світла 37 хв · зі станції 0,35 кВт·год» under the «Фактично» row; '' without outages (same as Android). */
+function actualTotals(outages) {
+  if (!outages || !outages.length) return '';
+  const seconds = outages.reduce((t, o) => t + (o.seconds || 0), 0), wh = outages.reduce((t, o) => t + (o.energy || 0), 0);
+  return `Без світла ${spanText(seconds * 1000)}${wh > 0 ? ` · зі станції ${formatKwh(wh)}` : ''}`;
+}
 function actualDay(today, nowMs = Date.now()) {
   const timeline = today?.grid_timeline;
   if (!Array.isArray(timeline)) return null;
@@ -360,8 +371,17 @@ function actualDay(today, nowMs = Date.now()) {
   const known = last && last.state !== 'unknown' && nowMs - last.b < 10 * 60e3 ? last : null;
   const word = known ? (known.state === 'on' ? 'Світло є' : 'Світла нема') : 'немає даних';
   const since = known && known.a > start ? ` (з ${kyivHm(known.a)})` : '';
+  // today's measured outages (server insights.today.outages) as label segments: «до 00:15» for the tail of yesterday's,
+  // «з 15:58» for the running one, else «15:58–16:35» — same rules as Android ActualDays (keep in sync)
+  const outages = (Array.isArray(today.outages) ? today.outages : []).map(o => {
+    const a = Math.max(Date.parse(o.start), start), b = Math.min(Date.parse(o.end), nowMs, end);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+    const label = o.ongoing ? `з ${kyivHm(a)}` : Date.parse(o.start) <= start ? `до ${kyivHm(b)}` : '';
+    return {a: (a - start) / span, b: (b - start) / span, maybe: false, kind: 'lightoff', from: kyivHm(a), to: kyivHm(b), label,
+      seconds: o.seconds || 0, energy: Number(o.energy_wh) || 0};
+  }).filter(Boolean);
   return {segments, now: Math.max(0, Math.min(1, (nowMs - start) / span)), state: known ? known.state : 'unknown',
-    text: `Фактично: ${word}${since}`};
+    text: `Фактично: ${word}${since}`, outages, totals: actualTotals(outages)};
 }
 function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
 let lastScheduleOutage = null, labelCtx = null;
@@ -399,6 +419,8 @@ function scaleRows(box) {
 function renderActualRow(box, actual) {
   if (!actual) return;
   box.append(el('p', `actual-head ${actual.state}`, actual.text));
+  const times = el('div', 'sched-times'); times.setAttribute('aria-hidden', 'true');
+  if (actual.outages?.length) box.append(times);
   const track = el('div', 'sched-track actual');
   track.setAttribute('role', 'img');
   track.setAttribute('aria-label', `${actual.text}; зелене — світло було, червоне — не було, темне — немає даних`);
@@ -412,6 +434,15 @@ function renderActualRow(box, actual) {
   const now = el('i', 'now'); now.style.left = `${(actual.now * 100).toFixed(2)}%`; track.append(now);
   box.append(track);
   scaleRows(box);
+  if (actual.totals) box.append(el('p', 'sched-total actual-total', actual.totals));
+  if (actual.outages?.length) requestAnimationFrame(() => {  // laid out once the row is in the document
+    times.replaceChildren();
+    const width = track.getBoundingClientRect().width;
+    if (!width) return;
+    for (const l of scheduleTimeLabels(actual.outages, null, null, width, labelWidth)) {
+      const sp = el('span', l.kind, l.text); sp.style.left = `${l.left.toFixed(1)}px`; times.append(sp);
+    }
+  });
 }
 function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
   const host = $('schedule-days'); if (!host) return;
@@ -520,6 +551,77 @@ async function openWeek() {
 $('week-open')?.addEventListener('click', openWeek);
 $('week-close')?.addEventListener('click', () => $('week-dialog')?.close());
 $('week-dialog')?.addEventListener('click', e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+/** «Пт 20.11» for an ISO instant (Kyiv). */
+function shortDay(iso) {
+  const d = new Date(iso);
+  const wd = d.toLocaleDateString('uk-UA', {weekday: 'short', timeZone: 'Europe/Kyiv'});
+  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)} ${d.toLocaleDateString('uk-UA', {day: '2-digit', month: '2-digit', timeZone: 'Europe/Kyiv'})}`;
+}
+function kwhNumber(wh) { return (Number(wh || 0) / 1000).toLocaleString('uk-UA', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function outagesWord(n) { return n % 10 >= 1 && n % 10 <= 4 && !(n % 100 >= 11 && n % 100 <= 14) ? 'відключення' : 'відключень'; }
+/** Lines of one outage / charge in «Статистика» — same texts as Android StatsTexts (keep in sync). */
+function statsOutageLines(o) {
+  const hm = t => kyivHm(Date.parse(t));
+  const head = o.ongoing ? `${shortDay(o.start)} · з ${hm(o.start)} · ${spanText(o.seconds * 1000)} · триває`
+    : `${shortDay(o.start)} · ${hm(o.start)}–${hm(o.end)} · ${spanText(o.seconds * 1000)}`;
+  const parts = [];
+  if (o.energy_wh > 0) parts.push(`${formatKwh(o.energy_wh)} зі станції`);
+  if (o.avg_w) parts.push(`≈${o.avg_w} Вт`);
+  if (o.soc_start !== null && o.soc_start !== undefined && o.soc_end !== null && o.soc_end !== undefined) parts.push(`заряд ${o.soc_start} → ${o.soc_end} %`);
+  return [head, parts.join(' · ')];
+}
+function statsChargeLines(c) {
+  const hm = t => kyivHm(Date.parse(t));
+  const head = c.ongoing ? `${shortDay(c.start)} · з ${hm(c.start)} · ${spanText(c.seconds * 1000)} · триває`
+    : `${shortDay(c.start)} · ${hm(c.start)}–${hm(c.end)} · ${spanText(c.seconds * 1000)}`;
+  const parts = [`${c.estimated ? '≈ ' : ''}+${formatKwh(c.energy_wh)}`];
+  if (c.avg_w) parts.push(`≈${c.avg_w} Вт`);
+  if (c.soc_start !== null && c.soc_start !== undefined && c.soc_end !== null && c.soc_end !== undefined) parts.push(`${c.soc_start} → ${c.soc_end} %`);
+  return [head, parts.join(' · ')];
+}
+function statsDayText(d) {
+  const charge = `заряд ${formatKwh(d.charge_wh)}`;
+  return d.off_seconds > 0 ? `без світла ${spanText(d.off_seconds * 1000)} · зі станції ${kwhNumber(d.outage_energy_wh)} · ${charge}` : `без відключень · ${charge}`;
+}
+function renderStats(body) {
+  const days = body?.days || [], outages = body?.outages || [], charges = body?.charges || [];
+  const off = days.reduce((t, d) => t + (d.off_seconds || 0), 0);
+  const count = days.reduce((t, d) => t + (d.outages || 0), 0);
+  const fromStation = days.reduce((t, d) => t + (d.outage_energy_wh || 0), 0);
+  const charged = days.reduce((t, d) => t + (d.charge_wh || 0), 0);
+  const longest = outages.reduce((m, o) => (!m || o.seconds > m.seconds ? o : m), null);
+  const tiles = $('stats-tiles'); if (!tiles) return;
+  tiles.replaceChildren();
+  for (const [label, value, sub, cls] of [
+    ['Без світла', spanText(off * 1000), `${count} ${outagesWord(count)}`, 'off'],
+    ['Зі станції', formatKwh(fromStation), 'за відключення', ''],
+    ['Заряджено', formatKwh(charged), 'у батарею', ''],
+    ['Найдовше', longest ? spanText(longest.seconds * 1000) : '—', longest ? `${shortDay(longest.start)}, ${kyivHm(Date.parse(longest.start))}` : '—', ''],
+  ]) {
+    const t = el('div', `stats-tile ${cls}`); t.append(el('span', '', label), el('b', '', value), el('small', '', sub)); tiles.append(t);
+  }
+  const dayList = $('stats-days'); dayList.replaceChildren();
+  for (const d of days.filter(d => d.is_today || d.off_seconds || d.charge_wh || d.discharge_wh)) {
+    const li = el('li', d.off_seconds ? 'off' : ''); li.append(el('b', '', weekDayTitle(d)), el('span', '', statsDayText(d))); dayList.append(li);
+  }
+  for (const [id, items, lines, empty] of [['stats-outages', outages, statsOutageLines, 'Відключень не було'], ['stats-charges', charges, statsChargeLines, 'Заряджань не було']]) {
+    const host = $(id); host.replaceChildren();
+    if (!items.length) { host.append(el('li', 'stats-empty', empty)); continue; }
+    for (const item of items) { const [a, b] = lines(item); const li = el('li'); li.append(el('b', '', a), el('span', '', b)); host.append(li); }
+  }
+}
+async function loadStats() {
+  const section = $('stats'); if (!section) return;
+  try {
+    const response = await apiFetch('/api/stats');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    renderStats(await response.json());
+    section.hidden = false;
+  } catch (err) {
+    const tiles = $('stats-tiles');
+    if (tiles) tiles.replaceChildren(el('p', 'stats-empty', `Не вдалося завантажити статистику (${err.message || err})`));
+  }
+}
 const EVENT_MARK = {light_lost: {label: '●', cls: 'ev-lost', title: 'Світло зникло'}, light_returned: {label: '○', cls: 'ev-back', title: 'Світло повернулось'},
   charging_started: {label: '⚡', cls: 'ev-charge', title: 'Почалось заряджання'}, charged_full: {label: '✓', cls: 'ev-full', title: 'Заряджено'},
   anomaly_overload_trip: {label: '!', cls: 'ev-trip', title: 'Можливо, спрацював захист від перевантаження'}};
@@ -803,4 +905,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(error => console.warn('PWA offline shell registration failed', error));
 }
 document.querySelector('.diagnostics')?.addEventListener('toggle', drawChart);
-refresh(); loadJournal(); setInterval(refresh,15000); setInterval(loadJournal,60000); window.addEventListener('resize',drawChart);
+refresh(); loadJournal(); loadStats(); setInterval(refresh,15000); setInterval(loadJournal,60000); setInterval(loadStats,300000); window.addEventListener('resize',drawChart);

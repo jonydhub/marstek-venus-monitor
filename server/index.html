@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=20">
+  <link rel="stylesheet" href="/style.css?v=21">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -119,6 +119,18 @@
     <section class="status-strip" aria-label="Додатковий стан">
       <div><span>CT лічильник</span><b id="ct-state">—</b></div>
       <div><span>Режим роботи</span><b id="mode">—</b></div>
+    </section>
+
+    <section class="stats" id="stats" aria-label="Статистика за 7 днів">
+      <div class="flow-heading"><div><p class="eyebrow">СТАТИСТИКА · 7 ДНІВ</p><h2>Світло, станція, заряд</h2></div></div>
+      <div class="stats-tiles" id="stats-tiles"><p class="stats-empty">Завантажую…</p></div>
+      <h3 class="stats-sub">По днях</h3>
+      <ol class="stats-list stats-days" id="stats-days"></ol>
+      <h3 class="stats-sub">Відключення</h3>
+      <ol class="stats-list" id="stats-outages"></ol>
+      <h3 class="stats-sub">Заряджання</h3>
+      <ol class="stats-list" id="stats-charges"></ol>
+      <p class="flow-footnote">Зі станції — енергія на резервному виході, поки світла не було. Заряджання — коли батарея набирала заряд (дрібні підзаряди 99 → 100 % не показано). Сервер зберігає виміри 8 днів.</p>
     </section>
 
     <section class="journal" id="journal" aria-label="Журнал подій">

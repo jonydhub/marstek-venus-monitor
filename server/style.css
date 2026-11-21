@@ -183,3 +183,20 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .week-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:4px;font-size:12px}
 .week-head b{font-weight:620}.week-head span{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}.week-head span.off{color:#ff9d8f}
 .sched-text[hidden]{display:none}
+/* v21: outage times above the «Фактично» row, energy line under it, «Статистика» section */
+.sched-times .lightoff{color:#ff806f}.actual-total{color:#ff9d8f}
+.stats{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(155deg,rgba(26,33,45,.98),rgba(21,27,37,.96))}
+.stats h2{margin:0;font-size:17px;font-weight:600}
+.stats-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}
+.stats-tile{display:flex;flex-direction:column;gap:2px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:rgba(0,0,0,.18)}
+.stats-tile span{color:var(--muted);font-size:11px}.stats-tile b{font-size:17px;font-weight:620;font-variant-numeric:tabular-nums}
+.stats-tile small{color:var(--dim);font-size:10px}.stats-tile.off b{color:#ff9d8f}
+.stats-sub{margin:14px 0 4px;font-size:12px;font-weight:620;color:var(--muted)}
+.stats-list{list-style:none;margin:0;padding:0}
+.stats-list li{display:grid;gap:1px;padding:7px 0;border-top:1px solid var(--line);font-size:12px;line-height:1.4}
+.stats-list li b{font-weight:600}.stats-list li span{color:var(--muted);font-variant-numeric:tabular-nums}
+.stats-days li{grid-template-columns:auto 1fr;gap:10px;align-items:baseline}.stats-days li span{text-align:right}.stats-days li.off span{color:#ff9d8f}
+.stats-empty{color:var(--dim);font-size:12px;margin:0}
+@media(min-width:760px){.stats-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(min-width:1100px){.official-shell>.stats{grid-column:1/-1}.stats-lists{display:grid}}
+@media(max-width:520px){.stats-days li{grid-template-columns:1fr;gap:1px}.stats-days li span{text-align:left}}

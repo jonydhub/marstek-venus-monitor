@@ -8,7 +8,7 @@ from pathlib import Path
 from tests.test_dashboard_style import _extract
 
 ROOT = Path(__file__).resolve().parents[1]
-HELPERS = ("formatClock", "kyivMidnight", "kyivHm", "clusterChartEvents", "actualDay", "scheduleNowText", "todayKwh")
+HELPERS = ("formatClock", "kyivMidnight", "kyivHm", "clusterChartEvents", "formatKwh", "spanText", "actualTotals", "actualDay", "scheduleNowText", "todayKwh")
 
 
 @unittest.skipUnless(shutil.which("node"), "node not installed")

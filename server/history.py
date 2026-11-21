@@ -255,7 +255,7 @@ def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
 WEEK_DAYS = 7
 CHARGE_JOIN_SECONDS = 600.0   # charging runs closer than this are one charge session
 CHARGE_MIN_WH = 100.0         # a recharge: ≥ this much energy or ≥ CHARGE_MIN_SOC % — not a standby top-up 99→100 %
-CHARGE_MIN_SOC = 2
+CHARGE_MIN_SOC = 3
 OUTAGE_MIN_SECONDS = 60.0
 
 

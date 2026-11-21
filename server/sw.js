@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marstek-shell-v20';
+const CACHE_NAME = 'marstek-shell-v21';
 const SHELL = [
   '/',
   '/app.js',
