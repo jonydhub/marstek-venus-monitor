@@ -259,18 +259,30 @@ CHARGE_MIN_SOC = 3
 OUTAGE_MIN_SECONDS = 60.0
 
 
-def _soc_near(rows, t, after=True):
+class _SocIndex:
+    """Sorted (ts, soc) of the samples with a SOC, for O(log n) lookups (stats run over ~40 000 samples)."""
+
+    def __init__(self, rows):
+        pts = sorted((r["ts"], soc) for r in rows
+                     if r.get("ts") is not None and (soc := _finite(r.get("soc"))) is not None)
+        self.ts = [p[0] for p in pts]
+        self.soc = [p[1] for p in pts]
+
+    def near(self, t, after=True):
+        """SOC of the first sample at/after `t` (or the last one at/before it), within MAX_GAP_SECONDS."""
+        import bisect
+        if after:
+            i = bisect.bisect_left(self.ts, t)
+            ok = i < len(self.ts) and self.ts[i] <= t + MAX_GAP_SECONDS
+        else:
+            i = bisect.bisect_right(self.ts, t) - 1
+            ok = i >= 0 and self.ts[i] >= t - MAX_GAP_SECONDS
+        return int(round(self.soc[i])) if ok else None
+
+
+def _soc_near(rows, t, after=True, index=None):
     """SOC of the first sample at/after `t` (or the last one at/before it), within MAX_GAP_SECONDS."""
-    best = None
-    for r in rows:
-        ts, soc = r.get("ts"), _finite(r.get("soc"))
-        if ts is None or soc is None:
-            continue
-        if after and t <= ts <= t + MAX_GAP_SECONDS and (best is None or ts < best[0]):
-            best = (ts, soc)
-        if not after and t - MAX_GAP_SECONDS <= ts <= t and (best is None or ts > best[0]):
-            best = (ts, soc)
-    return int(round(best[1])) if best else None
+    return (index or _SocIndex(rows)).near(t, after)
 
 
 def _backup_wh(rows, a, b):
@@ -291,7 +303,7 @@ def outage_details(rows, *, start, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
     if timeline is None:
         timeline = grid_timeline(rows, start=start, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
                                  bypass=bypass, bypass_seen=bypass_seen)
-    out = []
+    out, idx = [], _SocIndex(rows)
     for s in timeline:
         if s["state"] != "off" or s["end"] - s["start"] < OUTAGE_MIN_SECONDS:
             continue
@@ -300,7 +312,7 @@ def outage_details(rows, *, start, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
         seconds = b - a
         out.append({"start": _iso(a), "end": _iso(b), "seconds": round(seconds), "energy_wh": round(wh, 1),
                     "avg_w": round(wh * 3600.0 / seconds) if seconds > 0 and wh > 0 else None,
-                    "soc_start": _soc_near(rows, a, after=True), "soc_end": _soc_near(rows, b, after=False),
+                    "soc_start": idx.near(a, after=True), "soc_end": idx.near(b, after=False),
                     "ongoing": now - b < MAX_GAP_SECONDS})
     return out
 
@@ -325,15 +337,15 @@ def charge_sessions(rows, *, start, now):
             cur["active"] += t1 - t0
         else:
             sessions.append({"a": t0, "b": t1, "wh": wh, "est": wh if estimated else 0.0, "active": t1 - t0})
-    out = []
+    out, idx = [], _SocIndex(rows)
     for c in sessions:
-        soc_a, soc_b = _soc_near(rows, c["a"], after=True), _soc_near(rows, c["b"], after=False)
+        soc_a, soc_b = idx.near(c["a"], after=True), idx.near(c["b"], after=False)
         rise = soc_b - soc_a if soc_a is not None and soc_b is not None else 0
         if c["wh"] < CHARGE_MIN_WH and rise < CHARGE_MIN_SOC:
             continue
         out.append({"start": _iso(c["a"]), "end": _iso(c["b"]), "seconds": round(c["b"] - c["a"]),
                     "energy_wh": round(c["wh"], 1), "avg_w": round(c["wh"] * 3600.0 / c["active"]) if c["active"] else None,
-                    "soc_start": _soc_near(rows, c["a"], after=True), "soc_end": _soc_near(rows, c["b"], after=False),
+                    "soc_start": soc_a, "soc_end": soc_b,
                     "estimated": c["est"] > 0.5 * c["wh"], "ongoing": now - c["b"] < MAX_GAP_SECONDS})
     return out
 
@@ -348,6 +360,7 @@ def stats(rows, *, now, days=WEEK_DAYS, threshold_w=BACKUP_DRAW_THRESHOLD_W,
                              bypass=bypass, bypass_seen=bypass_seen)
     outages = outage_details(rows, start=first, now=now, timeline=timeline)
     charges = charge_sessions(rows, start=first, now=now)
+    off_spans = [(s["start"], s["end"]) for s in timeline if s["state"] == "off"]
     per_day = []
     for i, a in enumerate(starts):
         b = now if i == 0 else starts[i - 1]
@@ -356,7 +369,7 @@ def stats(rows, *, now, days=WEEK_DAYS, threshold_w=BACKUP_DRAW_THRESHOLD_W,
         for t0, t1, row in _state_intervals(rows, a, b):
             span = t1 - t0
             w = _finite(row.get("offgrid_w"))
-            light_off = any(s["state"] == "off" and s["start"] <= t0 < s["end"] for s in timeline)
+            light_off = any(x <= t0 < y for x, y in off_spans)
             if light_off and w is not None and w > 0:
                 backup_wh += w * span / 3600.0
             power = _measured_battery_w(row)
