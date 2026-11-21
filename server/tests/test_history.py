@@ -86,6 +86,7 @@ class InsightsTests(unittest.TestCase):
             "soc_history": [],
             "today": {"charge_seconds": 0, "discharge_seconds": 0, "outage_seconds": 0, "charge_wh": 0.0,
                       "discharge_wh": 0.0, "charge_estimated": False, "discharge_estimated": False,
+                      "outage_energy_wh": 0, "outages": [],
                       "grid_timeline": [{"start": "2026-11-09T00:00:00+02:00",
                                          "end": insights["today"]["grid_timeline"][0]["end"], "state": "unknown"}]},
             "outage_periods": [],

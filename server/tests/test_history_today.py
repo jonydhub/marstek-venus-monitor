@@ -54,7 +54,7 @@ class TodayDurationTests(unittest.TestCase):
         insights = compute_insights(rows, now=self.now, current_offgrid_w=80.0, temperature_c=20.0)
         self.assertEqual(set(insights["today"]), {"charge_seconds", "discharge_seconds", "outage_seconds", "charge_wh",
                                                   "discharge_wh", "charge_estimated", "discharge_estimated",
-                                                  "grid_timeline"})
+                                                  "grid_timeline", "outage_energy_wh", "outages"})
 
 
 class OutagePeriodTests(unittest.TestCase):

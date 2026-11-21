@@ -244,13 +244,135 @@ def today_durations(rows, *, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
     timeline = grid_timeline(rows, start=midnight, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
                              bypass=bypass, bypass_seen=bypass_seen)
     outage = sum(s["end"] - s["start"] for s in timeline if s["state"] == "off")
+    outages = outage_details(rows, start=midnight, now=now, timeline=timeline)
     return {"charge_seconds": round(charge), "discharge_seconds": round(discharge), "outage_seconds": round(outage),
             "charge_wh": round(energy["charge"], 1), "discharge_wh": round(energy["discharge"], 1),
             "charge_estimated": energy["charge_est"] > 1.0, "discharge_estimated": energy["discharge_est"] > 1.0,
+            "outage_energy_wh": round(sum(o["energy_wh"] for o in outages), 1), "outages": outages,
             "grid_timeline": [{"start": _iso(s["start"]), "end": _iso(s["end"]), "state": s["state"]} for s in timeline]}
 
 
 WEEK_DAYS = 7
+CHARGE_JOIN_SECONDS = 600.0   # charging runs closer than this are one charge session
+CHARGE_MIN_WH = 100.0         # a recharge: ≥ this much energy or ≥ CHARGE_MIN_SOC % — not a standby top-up 99→100 %
+CHARGE_MIN_SOC = 2
+OUTAGE_MIN_SECONDS = 60.0
+
+
+def _soc_near(rows, t, after=True):
+    """SOC of the first sample at/after `t` (or the last one at/before it), within MAX_GAP_SECONDS."""
+    best = None
+    for r in rows:
+        ts, soc = r.get("ts"), _finite(r.get("soc"))
+        if ts is None or soc is None:
+            continue
+        if after and t <= ts <= t + MAX_GAP_SECONDS and (best is None or ts < best[0]):
+            best = (ts, soc)
+        if not after and t - MAX_GAP_SECONDS <= ts <= t and (best is None or ts > best[0]):
+            best = (ts, soc)
+    return int(round(best[1])) if best else None
+
+
+def _backup_wh(rows, a, b):
+    """Energy the station delivered on its backup output over [a, b] (Wh, step integral of offgrid_w ≥ 0)."""
+    ws = 0.0
+    for t0, t1, row in _state_intervals(rows, a, b):
+        w = _finite(row.get("offgrid_w"))
+        if w is not None and w > 0:
+            ws += w * (t1 - t0)
+    return ws / 3600.0
+
+
+def outage_details(rows, *, start, now, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+                   confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False, timeline=None):
+    """Measured outages over [start, now], oldest first: start/end (ISO), seconds, energy from the station (Wh, backup
+    output), average W, SOC at start/end, ``ongoing`` for the one still running at ``now``. Same light rules as the
+    «Фактично» row (one timeline; a short unknown gap inside an outage splits it, as on the row)."""
+    if timeline is None:
+        timeline = grid_timeline(rows, start=start, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                                 bypass=bypass, bypass_seen=bypass_seen)
+    out = []
+    for s in timeline:
+        if s["state"] != "off" or s["end"] - s["start"] < OUTAGE_MIN_SECONDS:
+            continue
+        a, b = s["start"], s["end"]
+        wh = _backup_wh(rows, a, b)
+        seconds = b - a
+        out.append({"start": _iso(a), "end": _iso(b), "seconds": round(seconds), "energy_wh": round(wh, 1),
+                    "avg_w": round(wh * 3600.0 / seconds) if seconds > 0 and wh > 0 else None,
+                    "soc_start": _soc_near(rows, a, after=True), "soc_end": _soc_near(rows, b, after=False),
+                    "ongoing": now - b < MAX_GAP_SECONDS})
+    return out
+
+
+def charge_sessions(rows, *, start, now):
+    """Battery charge sessions over [start, now], oldest first: start/end, seconds, energy in (Wh; measured AC power,
+    else the capacity-trend estimate), SOC from/to, ``estimated`` when part of it is the estimate. Runs closer than
+    CHARGE_JOIN_SECONDS merge; standby top-ups (< CHARGE_MIN_WH and < CHARGE_MIN_SOC %) are left out."""
+    sessions = []
+    for t0, t1, row in _state_intervals(rows, start, now):
+        if row.get("flow_dir") != "charging":
+            continue
+        power, estimated = _measured_battery_w(row), False
+        if power is None or power <= 0:
+            power, estimated = _finite(row.get("flow_w")), True
+        wh = max(0.0, power or 0.0) * (t1 - t0) / 3600.0
+        if sessions and t0 - sessions[-1]["b"] <= CHARGE_JOIN_SECONDS:
+            cur = sessions[-1]
+            cur["b"] = t1
+            cur["wh"] += wh
+            cur["est"] += wh if estimated else 0.0
+            cur["active"] += t1 - t0
+        else:
+            sessions.append({"a": t0, "b": t1, "wh": wh, "est": wh if estimated else 0.0, "active": t1 - t0})
+    out = []
+    for c in sessions:
+        soc_a, soc_b = _soc_near(rows, c["a"], after=True), _soc_near(rows, c["b"], after=False)
+        rise = soc_b - soc_a if soc_a is not None and soc_b is not None else 0
+        if c["wh"] < CHARGE_MIN_WH and rise < CHARGE_MIN_SOC:
+            continue
+        out.append({"start": _iso(c["a"]), "end": _iso(c["b"]), "seconds": round(c["b"] - c["a"]),
+                    "energy_wh": round(c["wh"], 1), "avg_w": round(c["wh"] * 3600.0 / c["active"]) if c["active"] else None,
+                    "soc_start": _soc_near(rows, c["a"], after=True), "soc_end": _soc_near(rows, c["b"], after=False),
+                    "estimated": c["est"] > 0.5 * c["wh"], "ongoing": now - c["b"] < MAX_GAP_SECONDS})
+    return out
+
+
+def stats(rows, *, now, days=WEEK_DAYS, threshold_w=BACKUP_DRAW_THRESHOLD_W,
+          confirm_gap=gridstate.DEFAULT_CONFIRM_GAP_SECONDS, bypass="auto", bypass_seen=False):
+    """«Статистика» for today and the previous days: per-day totals, the outages and the charge sessions (newest
+    first). One light timeline over the whole window, as the week view."""
+    starts = day_starts(now, days)
+    first = starts[-1]
+    timeline = grid_timeline(rows, start=first, now=now, threshold_w=threshold_w, confirm_gap=confirm_gap,
+                             bypass=bypass, bypass_seen=bypass_seen)
+    outages = outage_details(rows, start=first, now=now, timeline=timeline)
+    charges = charge_sessions(rows, start=first, now=now)
+    per_day = []
+    for i, a in enumerate(starts):
+        b = now if i == 0 else starts[i - 1]
+        off = sum(max(0.0, min(s["end"], b) - max(s["start"], a)) for s in timeline if s["state"] == "off")
+        backup_wh = charge_wh = discharge_wh = 0.0
+        for t0, t1, row in _state_intervals(rows, a, b):
+            span = t1 - t0
+            w = _finite(row.get("offgrid_w"))
+            light_off = any(s["state"] == "off" and s["start"] <= t0 < s["end"] for s in timeline)
+            if light_off and w is not None and w > 0:
+                backup_wh += w * span / 3600.0
+            power = _measured_battery_w(row)
+            if power is None and row.get("flow_dir") in ("charging", "discharging"):
+                power = _finite(row.get("flow_w"))
+            if power:
+                if power > 0:
+                    charge_wh += power * span / 3600.0
+                else:
+                    discharge_wh += -power * span / 3600.0
+        day_iso = datetime.fromtimestamp(a, KYIV).date().isoformat()
+        day_outages = [o for o in outages if o["start"][:10] == day_iso]
+        per_day.append({"date": day_iso, "is_today": i == 0, "off_seconds": round(off), "outages": len(day_outages),
+                        "outage_energy_wh": round(backup_wh, 1), "charge_wh": round(charge_wh, 1),
+                        "discharge_wh": round(discharge_wh, 1)})
+    return {"days": per_day, "outages": outages[::-1], "charges": charges[::-1]}
 
 
 def day_starts(now, days=WEEK_DAYS):

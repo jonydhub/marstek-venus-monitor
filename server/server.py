@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
 import gridstate
-from history import (day_starts, week_light, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
+from history import (day_starts, week_light, stats as history_stats, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
                      measured_backup_load, smoothed_backup_load)
 from outage import build_outage_service
 from netcache import CachedJsonClient
@@ -625,6 +625,27 @@ def light_week_payload(now=None) -> dict:
         return payload
 
 
+STATS_CACHE_SECONDS = 60
+_stats_cache = {"at": 0.0, "payload": None}
+
+
+def stats_payload(now=None) -> dict:
+    """GET /api/stats: per-day totals, outages (energy from the station, SOC) and charge sessions for 7 days."""
+    now = time.time() if now is None else now
+    with _light_week_lock:
+        if _stats_cache["payload"] is not None and now - _stats_cache["at"] < STATS_CACHE_SECONDS:
+            return _stats_cache["payload"]
+        body = {"days": [], "outages": [], "charges": []}
+        if poller.history is not None:
+            rows = poller.history.since(day_starts(now)[-1] - 3600)
+            body = history_stats(rows, now=now, threshold_w=BACKUP_THRESHOLD_W,
+                                 confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
+                                 bypass=SETTINGS.bypass_load, bypass_seen=poller.bypass_seen())
+        payload = {**body, "generated_at": datetime.now(timezone.utc).isoformat()}
+        _stats_cache.update(at=now, payload=payload)
+        return payload
+
+
 def regions_catalog():
     """Canonical regions; live queue lists from ua-outages when reachable, else the static table."""
     try:
@@ -743,6 +764,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logging.warning("light week failed: %s", exc)
                 return self.send_json(500, {"error": "light_week_unavailable"})
+        if path == "/api/stats":
+            try:
+                return self.send_json(200, stats_payload())
+            except Exception as exc:
+                logging.warning("stats failed: %s", exc)
+                return self.send_json(500, {"error": "stats_unavailable"})
         if path == "/api/regions":
             try:
                 regions = regions_catalog()
