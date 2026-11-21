@@ -126,6 +126,9 @@ data class BatteryInsights(
     /** 7-day mean backup draw while drawing (zero-load excluded) and how much real load it is based on. */
     val backupLoadMean7dWatts: Double? = null,
     val backupLoadCoverage7dSeconds: Double = 0.0,
+    /** insights.today.outages (oldest first) and their energy sum; null = server without them. */
+    val todayOutages: List<OutageDetail>? = null,
+    val todayOutageEnergyWh: Double? = null,
 )
 
 object BatteryInsightsParser {
@@ -161,6 +164,8 @@ object BatteryInsightsParser {
                     if (b > a) LightSpan(a, b, s.optString("state", "unknown")) else null
                 }
             },
+            todayOutages = StatsParser.outages(block.optJSONObject("today")?.optJSONArray("outages")),
+            todayOutageEnergyWh = block.optJSONObject("today")?.finite("outage_energy_wh"),
             lastGridChargeWatts = block.optJSONObject("last_grid_charge")?.finite("w"),
             lastGridChargeMillis = block.optJSONObject("last_grid_charge")?.let { parseTime(it.opt("t")) },
             backupLoadMean7dWatts = block.finite("backup_load_mean_w_7d"),

@@ -11,7 +11,16 @@ import java.util.Locale
  * as fractions of the day. on = light was on (green), off = none (coral), unknown = no data (dark); after [nowFraction]
  * the track stays grey (future). [text] = «Фактично: Світла нема (з 21:51)» / «Фактично: Світло є» / «Фактично: немає даних».
  */
-data class ActualDay(val segments: List<Segment>, val nowFraction: Float, val state: String, val text: String) {
+data class ActualDay(
+    val segments: List<Segment>,
+    val nowFraction: Float,
+    val state: String,
+    val text: String,
+    /** Today's outages as label segments above the bar (coral times; see [ActualOutageLabels]). */
+    val outageLabels: List<ScheduleBarModel.Segment> = emptyList(),
+    /** «Без світла 37 хв · зі станції 0,35 кВт·год» under the axis; null without outages. */
+    val energyLine: String? = null,
+) {
     data class Segment(val start: Float, val end: Float, val state: String)
 }
 
@@ -21,8 +30,10 @@ object ActualDays {
     /** The newest span must reach this close to now to name the current state (else «немає даних»). */
     private const val FRESH_MILLIS = 10 * 60_000L
 
-    fun day(timeline: List<LightSpan>?, nowMillis: Long): ActualDay? {
+    /** [outages] = insights.today.outages (null = older server: labels from the timeline's off spans, no energy). */
+    fun day(timeline: List<LightSpan>?, nowMillis: Long, outages: List<OutageDetail>? = null, outageEnergyWh: Double? = null): ActualDay? {
         timeline ?: return null
+        val spans = outages ?: ActualOutageLabels.fromTimeline(timeline, nowMillis)
         val date = Instant.ofEpochMilli(nowMillis).atZone(kyiv).toLocalDate()
         val start = date.atStartOfDay(kyiv).toInstant().toEpochMilli()
         val end = date.plusDays(1).atStartOfDay(kyiv).toInstant().toEpochMilli()
@@ -45,6 +56,8 @@ object ActualDays {
             nowFraction = ((nowMillis - start) / span).coerceIn(0.0, 1.0).toFloat(),
             state = known?.third ?: "unknown",
             text = "Фактично: $word$since",
+            outageLabels = ActualOutageLabels.segments(spans, nowMillis),
+            energyLine = ActualOutageLabels.energyLine(spans, outageEnergyWh),
         )
     }
 

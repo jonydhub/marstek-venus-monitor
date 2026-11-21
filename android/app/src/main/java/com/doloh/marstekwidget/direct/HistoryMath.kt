@@ -1,5 +1,9 @@
 package com.doloh.marstekwidget.direct
 
+import com.doloh.marstekwidget.domain.ChargeSession
+import com.doloh.marstekwidget.domain.OutageDetail
+import com.doloh.marstekwidget.domain.StatsDay
+import com.doloh.marstekwidget.domain.StatsReport
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -287,7 +291,10 @@ object HistoryMath {
             .put("temperature_c", temperatureC?.takeIf(Double::isFinite) ?: JSONObject.NULL)
             .put("soc_history", history)
             .put("today", todayStats(rows, now, thresholdW, bypass = bypass).let { t ->
+                val outages = outageDetails(rows, t.timeline, now)
                 JSONObject().put("charge_seconds", t.chargeSeconds).put("discharge_seconds", t.dischargeSeconds)
+                    .put("outages", JSONArray().apply { outages.forEach { put(outageJson(it)) } })
+                    .put("outage_energy_wh", Math.round(outages.sumOf { it.energyWh ?: 0.0 } * 10.0) / 10.0)
                     .put("outage_seconds", t.outageSeconds).put("charge_wh", t.chargeWh).put("discharge_wh", t.dischargeWh)
                     .put("charge_estimated", t.chargeEstimated).put("discharge_estimated", t.dischargeEstimated)
                     .put("grid_timeline", JSONArray().apply {
@@ -310,6 +317,104 @@ object HistoryMath {
     }
 
     fun prune(rows: List<HistorySample>, now: Double): List<HistorySample> = rows.filter { it.ts >= now - RETENTION_SECONDS }
+
+    // ---- «Статистика» / today's outages (port of server history.py outage_details / charge_sessions / stats) ----
+    const val CHARGE_JOIN_SECONDS = 600.0
+    const val CHARGE_MIN_WH = 100.0
+    const val CHARGE_MIN_SOC = 3
+    const val OUTAGE_MIN_SECONDS = 60.0
+
+    /** SOC of the first sample at/after [t] (or the last at/before it) within MAX_GAP (phone: 20 min, server: 5). */
+    private fun socNear(rows: List<HistorySample>, t: Double, after: Boolean): Int? {
+        var best: HistorySample? = null
+        rows.forEach { r ->
+            r.soc ?: return@forEach
+            if (after && r.ts >= t && r.ts <= t + MAX_GAP_SECONDS && (best == null || r.ts < best!!.ts)) best = r
+            if (!after && r.ts <= t && r.ts >= t - MAX_GAP_SECONDS && (best == null || r.ts > best!!.ts)) best = r
+        }
+        return best?.soc
+    }
+
+    /** Energy from the backup output over [a, b] (Wh, step integral of offgrid_w > 0). */
+    private fun backupWh(rows: List<HistorySample>, a: Double, b: Double): Double =
+        stateSpans(rows, a, b).sumOf { s -> (s.sample.offgridW?.takeIf { it.isFinite() && it > 0 } ?: 0.0) * (s.t1 - s.t0) } / 3600.0
+
+    private fun ms(t: Double) = Math.round(t * 1000)
+
+    /** Confirmed outages (≥ 60 s) of [timeline], oldest first, with energy, average W, SOC and ongoing. */
+    fun outageDetails(rows: List<HistorySample>, timeline: List<GridSpan>, now: Double): List<OutageDetail> =
+        timeline.filter { it.state == "off" && it.end - it.start >= OUTAGE_MIN_SECONDS }.map { s ->
+            val wh = backupWh(rows, s.start, s.end)
+            val seconds = s.end - s.start
+            OutageDetail(ms(s.start), ms(s.end), Math.round(seconds), Math.round(wh * 10.0) / 10.0,
+                if (seconds > 0 && wh > 0) Math.round(wh * 3600.0 / seconds).toInt() else null,
+                socNear(rows, s.start, true), socNear(rows, s.end, false), now - s.end < MAX_GAP_SECONDS)
+        }
+
+    /** Charge sessions over [start, now], oldest first: runs ≤ 10 min apart merge, standby top-ups dropped. */
+    fun chargeSessions(rows: List<HistorySample>, start: Double, now: Double): List<ChargeSession> {
+        data class Acc(val a: Double, var b: Double, var wh: Double, var est: Double, var active: Double)
+        val sessions = mutableListOf<Acc>()
+        stateSpans(rows, start, now).forEach { s ->
+            if (s.sample.flowDir != "charging") return@forEach
+            var power = measuredBatteryW(s.sample)
+            var estimated = false
+            if (power == null || power <= 0) { power = s.sample.flowW?.takeIf(Double::isFinite); estimated = true }
+            val wh = (power ?: 0.0).coerceAtLeast(0.0) * (s.t1 - s.t0) / 3600.0
+            val cur = sessions.lastOrNull()
+            if (cur != null && s.t0 - cur.b <= CHARGE_JOIN_SECONDS) {
+                cur.b = s.t1; cur.wh += wh; if (estimated) cur.est += wh; cur.active += s.t1 - s.t0
+            } else sessions += Acc(s.t0, s.t1, wh, if (estimated) wh else 0.0, s.t1 - s.t0)
+        }
+        return sessions.mapNotNull { c ->
+            val socA = socNear(rows, c.a, true)
+            val socB = socNear(rows, c.b, false)
+            val rise = if (socA != null && socB != null) socB - socA else 0
+            if (c.wh < CHARGE_MIN_WH && rise < CHARGE_MIN_SOC) return@mapNotNull null
+            ChargeSession(ms(c.a), ms(c.b), Math.round(c.b - c.a), Math.round(c.wh * 10.0) / 10.0,
+                if (c.active > 0) Math.round(c.wh * 3600.0 / c.active).toInt() else null, socA, socB,
+                c.est > 0.5 * c.wh, now - c.b < MAX_GAP_SECONDS)
+        }
+    }
+
+    /** «Статистика» for today and the previous [days] − 1 Kyiv days (direct mode: 2, the 48 h history). */
+    fun stats(rows: List<HistorySample>, now: Double, days: Int = 2, thresholdW: Double = BACKUP_DRAW_THRESHOLD_W,
+              confirmGap: Double = CONFIRM_GAP_SECONDS, bypass: GridBypass = GridBypass()): StatsReport {
+        val today = Instant.ofEpochMilli(ms(now)).atZone(kyiv).toLocalDate()
+        val starts = (0 until days).map { today.minusDays(it.toLong()).atStartOfDay(kyiv).toEpochSecond().toDouble() }
+        val first = starts.last()
+        val timeline = gridTimeline(rows, first, now, thresholdW, confirmGap, bypass)
+        val offSpans = timeline.filter { it.state == "off" }
+        val outages = outageDetails(rows, timeline, now)
+        val charges = chargeSessions(rows, first, now)
+        val perDay = starts.mapIndexed { i, a ->
+            val b = if (i == 0) now else starts[i - 1]
+            val off = offSpans.sumOf { (minOf(it.end, b) - maxOf(it.start, a)).coerceAtLeast(0.0) }
+            var backup = 0.0
+            var charge = 0.0
+            var discharge = 0.0
+            stateSpans(rows, a, b).forEach { s ->
+                val span = s.t1 - s.t0
+                val w = s.sample.offgridW?.takeIf(Double::isFinite)
+                if (w != null && w > 0 && offSpans.any { it.start <= s.t0 && s.t0 < it.end }) backup += w * span / 3600.0
+                var power = measuredBatteryW(s.sample)
+                if (power == null && (s.sample.flowDir == "charging" || s.sample.flowDir == "discharging")) power = s.sample.flowW?.takeIf(Double::isFinite)
+                if (power != null && power > 0) charge += power * span / 3600.0
+                if (power != null && power < 0) discharge += -power * span / 3600.0
+            }
+            val date = today.minusDays(i.toLong())
+            StatsDay(date, i == 0, Math.round(off),
+                outages.count { Instant.ofEpochMilli(it.startMillis).atZone(kyiv).toLocalDate() == date },
+                Math.round(backup * 10.0) / 10.0, Math.round(charge * 10.0) / 10.0, Math.round(discharge * 10.0) / 10.0)
+        }
+        return StatsReport(perDay, outages.reversed(), charges.reversed())
+    }
+
+    /** One outage as the server's insights.today.outages item. */
+    private fun outageJson(o: OutageDetail): JSONObject = JSONObject()
+        .put("start", isoAt(o.startMillis / 1000)).put("end", isoAt(o.endMillis / 1000)).put("seconds", o.seconds)
+        .put("energy_wh", o.energyWh ?: JSONObject.NULL).put("avg_w", o.avgW ?: JSONObject.NULL)
+        .put("soc_start", o.socStart ?: JSONObject.NULL).put("soc_end", o.socEnd ?: JSONObject.NULL).put("ongoing", o.ongoing)
 }
 
 /**

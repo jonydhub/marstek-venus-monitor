@@ -381,6 +381,10 @@ class MainActivity : Activity() {
         journalCard.addView(actionButton("Відкрити журнал · аномалії · експорт", filled = false) {
             startActivity(Intent(this@MainActivity, JournalActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
+        // Statistics entry point, same style as the journal button.
+        journalCard.addView(actionButton("Статистика", filled = false) {
+            startActivity(Intent(this@MainActivity, StatsActivity::class.java))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
         // Accumulated counters.
         val energyCard = card()
@@ -661,7 +665,8 @@ class MainActivity : Activity() {
 
         // Schedule: today / tomorrow rows + windows text (nothing repeated from the hero).
         val hasSchedule = info != null && info.scheduleEnabled && !info.scheduleUnavailable
-        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, System.currentTimeMillis())
+        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, System.currentTimeMillis(), snapshot?.insights?.todayOutages,
+            snapshot?.insights?.todayOutageEnergyWh)
         scheduleDays.visibility = if (hasSchedule || actual != null) View.VISIBLE else View.GONE
         scheduleDays.setDays(if (hasSchedule) days else emptyList(), actual, ActualDays.scheduleNowText(info, now))
         scheduleCaption.text = listOfNotNull("Графік відключень", info?.group?.let { "черга $it" }).joinToString(" · ") + "  ›"

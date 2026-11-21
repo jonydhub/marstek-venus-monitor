@@ -43,16 +43,28 @@ object ChartColors {
  */
 object ActualBarPainter {
     /** [alignPx] > 0 without labels: the same side inset as a row with labels of that size (stacked rows line up). */
-    fun draw(canvas: Canvas, width: Float, height: Float, day: ActualDay, density: Float, labelsPx: Float = 0f, alignPx: Float = 0f) {
+    /** Height of the outage time-label row above the bar (0 without outages or labels). */
+    fun topZone(day: ActualDay, timeLabelsPx: Float, density: Float): Float =
+        if (day.outageLabels.isNotEmpty()) DayScheduleBarPainter.timeLabelZone(timeLabelsPx, density) else 0f
+
+    /** [timeLabelsPx] > 0: coral outage times above the bar, placed like the schedule window labels. */
+    fun draw(canvas: Canvas, width: Float, height: Float, day: ActualDay, density: Float, labelsPx: Float = 0f, alignPx: Float = 0f,
+             timeLabelsPx: Float = 0f) {
         val marker = 2.5f * density
+        val zone = topZone(day, timeLabelsPx, density)
         val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ChartColors.LABEL; textSize = maxOf(labelsPx, alignPx) }
         val tickZone = if (labelsPx > 0f) 6f * density + labelsPx + 2f * density else 0f
         val inset = if (labelsPx > 0f || alignPx > 0f) labelPaint.measureText("24") / 2f else 0f
         val left = maxOf(inset, marker)
         val right = width - maxOf(inset, marker)
-        val bar = RectF(left, marker, right, height - tickZone - marker)
+        val bar = RectF(left, zone + marker, right, height - tickZone - marker)
         val r = minOf(bar.height() / 2f, 4f * density)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        if (zone > 0f) {
+            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = timeLabelsPx; typeface = Typeface.DEFAULT_BOLD; color = ChartColors.ACTUAL_OFF }
+            ScheduleTimeLabels.layout(day.outageLabels, null, null, bar.left, bar.width(), width, gap = 3f * density) { text.measureText(it) }
+                .forEach { l -> canvas.drawText(l.text, l.left, zone - 2.5f * density, text) }
+        }
         paint.color = ChartColors.ACTUAL_FUTURE
         canvas.drawRoundRect(bar, r, r, paint)
         canvas.save()
@@ -88,21 +100,24 @@ object ActualBarPainter {
         if (day.nowFraction >= 1f) return  // a finished day («Світло за 7 днів»): no now-marker
         val nx = x(day.nowFraction)
         paint.color = Color.BLACK
-        canvas.drawRoundRect(RectF(nx - 2.5f * density, 0f, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
+        canvas.drawRoundRect(RectF(nx - 2.5f * density, zone, nx + 2.5f * density, bar.bottom + marker), density, density, paint)
         paint.color = Color.WHITE
-        canvas.drawRoundRect(RectF(nx - 1.5f * density, 0f, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
+        canvas.drawRoundRect(RectF(nx - 1.5f * density, zone, nx + 1.5f * density, bar.bottom + marker), density, density, paint)
     }
 }
 
-class ActualDayView(context: Context, private val labels: Boolean = true) : View(context) {
+class ActualDayView(context: Context, private val labels: Boolean = true, private val timeLabels: Boolean = false) : View(context) {
     private var day: ActualDay? = null
     fun setDay(value: ActualDay) { day = value; contentDescription = "${value.text}; зелене — світло було, червоне — не було, темне — немає даних"; invalidate() }
     override fun onDraw(canvas: Canvas) {
         val d = day ?: return
         val density = resources.displayMetrics.density
         ActualBarPainter.draw(canvas, width.toFloat(), height.toFloat(), d, density, labelsPx = if (labels) 10f * density else 0f,
-            alignPx = 10f * density)
+            alignPx = 10f * density, timeLabelsPx = if (timeLabels) timeLabelPx() else 0f)
     }
+
+    fun timeLabelPx(): Float =
+        android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_SP, DayScheduleView.TIME_LABEL_SP, resources.displayMetrics)
 }
 
 /** SOC bar like the web dashboard: dim track, filled part = red → amber → green → teal gradient spanning the full track. */

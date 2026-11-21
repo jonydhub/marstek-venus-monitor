@@ -265,6 +265,17 @@ object DirectEngine {
 
     fun bypassSeen(context: Context, host: String, port: Int): Boolean = prefs(context).getBoolean(bypassKey(host, port), false)
 
+    /** «Статистика» in direct mode: the phone's own 48 h history → today and yesterday. */
+    fun stats(context: Context, settings: AppSettings, nowMillis: Long = System.currentTimeMillis()): com.doloh.marstekwidget.domain.StatsReport {
+        val nowS = nowMillis / 1000.0
+        val rows = HistoryStore(context).rows(nowS)
+        val bypassMode = GridBypass.normalize(settings.bypassLoadMode)
+        val bypass = GridBypass(bypassMode, bypassMode != GridBypass.NO && bypassSeen(context, settings.deviceHost.orEmpty(), settings.devicePort))
+        return HistoryMath.stats(rows, nowS, DIRECT_STATS_DAYS, settings.backupThresholdW, HistoryMath.CONFIRM_GAP_SECONDS, bypass)
+    }
+
+    const val DIRECT_STATS_DAYS = 2
+
     private fun rememberBypassSeen(context: Context, host: String, port: Int) {
         prefs(context).edit().putBoolean(bypassKey(host, port), true).apply()
     }

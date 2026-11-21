@@ -67,8 +67,11 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
     private fun addActual(actual: ActualDay) {
         val color = when (actual.state) { "on" -> GREEN; "off" -> CORAL; else -> MUTED }
         addView(text(actual.text, 10.5f, color, true), params(dp(8)))
-        addView(ActualDayView(context).apply { setDay(actual) },
-            LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ACTUAL_BAR_DP) + actualTickZonePx()).apply { topMargin = dp(3) })
+        val view = ActualDayView(context, timeLabels = true).apply { setDay(actual) }
+        val zone = kotlin.math.ceil(ActualBarPainter.topZone(actual, view.timeLabelPx(), resources.displayMetrics.density)).toInt()
+        addView(view, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ACTUAL_BAR_DP) + actualTickZonePx() + zone).apply { topMargin = dp(3) })
+        // «Без світла 37 хв · зі станції 0,35 кВт·год» under the axis
+        actual.energyLine?.let { addView(text(it, 10.5f, MUTED, false), params(dp(2))) }
     }
 
     /** Hour ticks + «0 6 12 18 24» under the «Фактично» bar (the same zone the schedule bar has). */

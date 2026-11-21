@@ -74,6 +74,13 @@ object ScheduleTimeLabels {
             .sortedWith(compareBy({ it.maybe }, { it.start }))
         for (s in ordered) {
             val kind = if (s.maybe) Kind.MAYBE else Kind.WINDOW
+            if (s.label.isNotEmpty()) {
+                // fixed single label: centred → flush left → flush right
+                val pick = listOf(label(s.label, (x(s.start) + x(s.end)) / 2f, kind), at(s.label, kind) { x(s.start) },
+                    at(s.label, kind) { x(s.end) - it }).firstOrNull { free(it) }
+                if (pick != null) { placed += pick; shown += s }
+                continue
+            }
             val from = at(s.from, kind) { x(s.start) }
             val to = at(s.to, kind) { x(s.end) - it }
             if (!touches(from, to) && free(from) && free(to)) {

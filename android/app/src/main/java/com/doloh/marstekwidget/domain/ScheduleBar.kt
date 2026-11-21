@@ -8,7 +8,8 @@ import java.time.format.DateTimeFormatter
 /** Today + tomorrow (0–24 | 0–24) as fractions of 48 h from local midnight; shared by the app view and widget bitmaps. */
 data class ScheduleBarModel(val segments: List<Segment>, val nowFraction: Float, val hasSchedule: Boolean) {
     /** [from]/[to] = «HH:mm» of the (day-clipped) window edges, «24:00» for the end of the day; empty when unknown. */
-    data class Segment(val start: Float, val end: Float, val maybe: Boolean, val from: String = "", val to: String = "")
+    /** [label] non-empty: always one label with that text (e.g. «до 08:15», «з 15:58») instead of edge times. */
+    data class Segment(val start: Float, val end: Float, val maybe: Boolean, val from: String = "", val to: String = "", val label: String = "")
 }
 
 object ScheduleBar {

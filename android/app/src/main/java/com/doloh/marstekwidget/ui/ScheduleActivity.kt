@@ -74,7 +74,8 @@ class ScheduleActivity : Activity() {
         val now = ZonedDateTime.now(KYIV)
 
         val head = ui.card()
-        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, now.toInstant().toEpochMilli())
+        val actual = ActualDays.day(snapshot?.insights?.lightTimeline, now.toInstant().toEpochMilli(), snapshot?.insights?.todayOutages,
+            snapshot?.insights?.todayOutageEnergyWh)
         if (info == null || !info.scheduleEnabled) {
             head.addView(ui.label("Графік не налаштовано", 15f, Ui.TEXT, true))
             head.addView(ui.hint("Оберіть область і чергу в Налаштуваннях → «Графік відключень». Світло є чи ні застосунок все одно визначає за резервним виходом батареї."))
@@ -87,6 +88,7 @@ class ScheduleActivity : Activity() {
                 content.addView(card, ui.matchWrap(8))
             }
             content.addView(weekCard(), ui.matchWrap(8))
+            content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
             return
         }
         val region = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
@@ -124,6 +126,7 @@ class ScheduleActivity : Activity() {
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
         content.addView(weekCard(), ui.matchWrap(8))
+        content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         refreshButton = ui.button("Оновити графік", filled = true) { refresh() }
@@ -186,6 +189,8 @@ class ScheduleActivity : Activity() {
         }
         return card
     }
+
+    private fun statsButton() = ui.button("Статистика") { startActivity(Intent(this, StatsActivity::class.java)) }
 
     private fun legend() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL

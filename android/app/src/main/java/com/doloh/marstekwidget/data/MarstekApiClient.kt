@@ -86,6 +86,23 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
         }
     }
 
+    /** «Статистика» (GET /api/stats); NotSupported for an older server without it (HTTP 404). */
+    suspend fun fetchStats(): StatsFetch {
+        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return StatsFetch.Failed("Сервер не налаштовано")
+        // uncached 7-day stats take seconds on the server: allow a longer read
+        return when (val raw = fetchJson("${base.trimEnd('/')}/api/stats", readTimeoutMs = 30_000)) {
+            is Raw.Ok -> StatsFetch.Ok(com.doloh.marstekwidget.domain.StatsParser.parse(raw.root))
+            is Raw.Failed -> if (raw.message == "HTTP 404") StatsFetch.NotSupported else StatsFetch.Failed(raw.message)
+            Raw.NeedsSignIn -> StatsFetch.Failed("Потрібен вхід")
+        }
+    }
+
+    sealed class StatsFetch {
+        data class Ok(val report: com.doloh.marstekwidget.domain.StatsReport) : StatsFetch()
+        object NotSupported : StatsFetch()
+        data class Failed(val message: String) : StatsFetch()
+    }
+
     sealed class LightWeekFetch {
         data class Ok(val days: List<com.doloh.marstekwidget.domain.WeekDay>) : LightWeekFetch()
         object NotSupported : LightWeekFetch()
@@ -98,7 +115,7 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
         data class Failed(val message: String) : JournalFetch()
     }
 
-    private suspend fun fetchJson(statusUrl: String): Raw {
+    private suspend fun fetchJson(statusUrl: String, readTimeoutMs: Int = 12_000): Raw {
         var cookies: String? = null
         var userAgent: String? = null
         if (settings.serverAuth == ServerAuth.CF_ACCESS) {
@@ -117,7 +134,7 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
                 connection = URL(statusUrl).openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
                 connection.connectTimeout = 12_000
-                connection.readTimeout = 12_000
+                connection.readTimeout = readTimeoutMs
                 connection.instanceFollowRedirects = false
                 connection.setRequestProperty("Accept", "application/json")
                 connection.setRequestProperty("Cache-Control", "no-cache")
@@ -138,7 +155,8 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
                         else Raw.Failed(if (settings.serverAuth == ServerAuth.BEARER) "Токен не прийнято (HTTP $status)" else "Потрібна авторизація (HTTP $status)")
                     else -> Raw.Failed("HTTP $status")
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                android.util.Log.w("MarstekApi", "GET $statusUrl failed", e)
                 Raw.Failed("Сервер недоступний")
             } finally {
                 connection?.disconnect()
