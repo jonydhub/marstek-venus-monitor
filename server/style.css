@@ -198,5 +198,5 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .stats-days li{grid-template-columns:auto 1fr;gap:10px;align-items:baseline}.stats-days li span{text-align:right}.stats-days li.off span{color:#ff9d8f}
 .stats-empty{color:var(--dim);font-size:12px;margin:0}
 @media(min-width:760px){.stats-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(min-width:1100px){.official-shell>.stats{grid-column:1/-1}.stats-lists{display:grid}}
+@media(min-width:1100px){.official-shell>.stats{grid-column:1/-1}.stats-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 24px}.stats-days li{grid-template-columns:1fr;gap:1px}.stats-days li span{text-align:left}}
 @media(max-width:520px){.stats-days li{grid-template-columns:1fr;gap:1px}.stats-days li span{text-align:left}}
