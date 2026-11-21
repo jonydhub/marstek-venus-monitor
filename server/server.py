@@ -626,24 +626,47 @@ def light_week_payload(now=None) -> dict:
 
 
 STATS_CACHE_SECONDS = 60
+STATS_MAX_AGE_SECONDS = 300
 _stats_cache = {"at": 0.0, "payload": None}
 
 
+def _compute_stats(now) -> dict:
+    body = {"days": [], "outages": [], "charges": []}
+    if poller.history is not None:
+        rows = poller.history.since(day_starts(now)[-1] - 3600)
+        body = history_stats(rows, now=now, threshold_w=BACKUP_THRESHOLD_W,
+                             confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
+                             bypass=SETTINGS.bypass_load, bypass_seen=poller.bypass_seen())
+    return {**body, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
 def stats_payload(now=None) -> dict:
-    """GET /api/stats: per-day totals, outages (energy from the station, SOC) and charge sessions for 7 days."""
+    """GET /api/stats: per-day totals, outages (energy from the station, SOC) and charge sessions for 7 days.
+
+    Served from the cache that refresh_stats() keeps warm in the background (computing takes seconds on a small
+    box); computed inline only when the cache is empty or older than STATS_MAX_AGE_SECONDS."""
     now = time.time() if now is None else now
     with _light_week_lock:
-        if _stats_cache["payload"] is not None and now - _stats_cache["at"] < STATS_CACHE_SECONDS:
-            return _stats_cache["payload"]
-        body = {"days": [], "outages": [], "charges": []}
-        if poller.history is not None:
-            rows = poller.history.since(day_starts(now)[-1] - 3600)
-            body = history_stats(rows, now=now, threshold_w=BACKUP_THRESHOLD_W,
-                                 confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
-                                 bypass=SETTINGS.bypass_load, bypass_seen=poller.bypass_seen())
-        payload = {**body, "generated_at": datetime.now(timezone.utc).isoformat()}
+        cached = _stats_cache["payload"]
+        if cached is not None and now - _stats_cache["at"] < STATS_MAX_AGE_SECONDS:
+            return cached
+    payload = _compute_stats(now)
+    with _light_week_lock:
         _stats_cache.update(at=now, payload=payload)
-        return payload
+    return payload
+
+
+def refresh_stats():
+    """Background loop: recompute /api/stats every STATS_CACHE_SECONDS so requests never wait for it."""
+    while True:
+        try:
+            now = time.time()
+            payload = _compute_stats(now)
+            with _light_week_lock:
+                _stats_cache.update(at=now, payload=payload)
+        except Exception as exc:
+            logging.warning("stats refresh failed: %s", exc)
+        time.sleep(STATS_CACHE_SECONDS)
 
 
 def regions_catalog():
@@ -860,6 +883,7 @@ def main():
         logging.warning("event write failed: %s", exc)
     threading.Thread(target=poller.run_outage_refresh, name="outage", daemon=True).start()
     threading.Thread(target=poller.run, name="marstek-poller", daemon=True).start()
+    threading.Thread(target=refresh_stats, name="stats", daemon=True).start()
     servers = []
     for host, port in binds:
         srv = ThreadingHTTPServer((host, port), Handler)

@@ -146,6 +146,7 @@ class EmbeddedServer:
         if threads:
             threading.Thread(target=srv.poller.run_outage_refresh, name="outage", daemon=True).start()
             threading.Thread(target=srv.poller.run, name="marstek-poller", daemon=True).start()
+            threading.Thread(target=srv.refresh_stats, name="stats", daemon=True).start()
         self.started = True
 
     def _listen(self, cfg):
