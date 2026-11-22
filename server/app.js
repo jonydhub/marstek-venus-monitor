@@ -291,7 +291,9 @@ function scheduleTimeLabels(segments, now, nowText, width, measure, gap = 4) {
   const at = (text, kind, leftOf) => { const w = measure(text); return {text, kind, w, left: Math.max(0, Math.min(Math.max(0, width - w), leftOf(w)))}; };
   const touches = (p, q) => p.left < q.left + q.w + gap && q.left < p.left + p.w + gap;
   const free = l => placed.every(p => !touches(p, l));
-  const ordered = (segments || []).filter(s => s.from && s.to && s.b > s.a).slice().sort((p, q) => (p.maybe - q.maybe) || (p.a - q.a));
+  // `priority` (optional, bigger first): the week rows label long outages before a short neighbour takes the room
+  const ordered = (segments || []).filter(s => s.from && s.to && s.b > s.a).slice()
+    .sort((p, q) => (p.maybe - q.maybe) || ((q.priority || 0) - (p.priority || 0)) || (p.a - q.a));
   for (const s of ordered) {
     const kind = s.kind || (s.maybe ? 'maybe' : 'off');
     if (s.label) {  // one fixed label («з 15:58», «до 00:15»): centred, else flush left / right over the block
@@ -506,8 +508,87 @@ function weekDayTotals(day) {
   if (unknown >= 30 * 60000) parts.push(`без даних ${spanText(unknown)}`);
   return parts.join(' · ');
 }
-function renderWeek(payload) {
+/** Energy under one outage: «0,42 кВт·год · 80→62 %», a shorter fallback, '' without data (same as Android WeekOutageLabels). */
+function weekEnergyTexts(o) {
+  const soc = o.socStart !== null && o.socStart !== undefined && o.socEnd !== null && o.socEnd !== undefined ? `${o.socStart}→${o.socEnd} %` : '';
+  const kwh = o.energy > 0 ? formatKwh(o.energy) : '';
+  if (kwh && soc) return [`${kwh} · ${soc}`, kwh];
+  return kwh ? [kwh] : soc ? [soc] : [];
+}
+/**
+ * Outages of one «Світло за 7 днів» day as label segments: times above the bar («08:10–09:20», «до 00:30» for the tail of
+ * yesterday's, «з 21:05» for the running one) and the battery used under it, from /api/stats outages matched by the
+ * largest overlap; an outage crossing midnight gets its energy once, on the longer part. Same rules as Android
+ * WeekOutageLabels (keep in sync).
+ */
+function weekDayOutages(day, statsOutages = [], nowMs = Date.now()) {
+  const start = Date.parse(day.start), end = Date.parse(day.end), span = end - start;
+  const spans = (day.timeline || []).filter(s => s.state === 'off')
+    .map(s => ({a: Math.max(Date.parse(s.start), start), b: Math.min(Date.parse(s.end), end)}))
+    .filter(s => Number.isFinite(s.a) && Number.isFinite(s.b) && s.b - s.a >= 60000);
+  const last = (day.timeline || [])[(day.timeline || []).length - 1];
+  const lastEnd = last ? Date.parse(last.end) : NaN;
+  const overlap = (a, b, x, y) => Math.max(0, Math.min(b, y) - Math.max(a, x));
+  return spans.map((s, i) => {
+    const running = day.is_today && i === spans.length - 1 && last?.state === 'off' && Math.abs(lastEnd - s.b) < 1000 && nowMs - s.b < 10 * 60000;
+    const label = running ? `з ${kyivHm(s.a)}` : s.a <= start ? `до ${kyivHm(s.b)}` : '';
+    // the stats outage this span belongs to, labelled only where most of it lies
+    let match = null, best = 0;
+    for (const o of statsOutages || []) {
+      const oa = Date.parse(o.start), ob = o.ongoing ? nowMs : Date.parse(o.end);
+      const ov = overlap(s.a, s.b, oa, ob);
+      if (ov > best) { best = ov; match = {o, oa, ob}; }
+    }
+    let energy = 0, socStart = null, socEnd = null;
+    if (match) {
+      const {o, oa, ob} = match;
+      const dayStartOf = t => kyivMidnight(new Date(t));
+      // split the outage at Kyiv midnights; this day must hold its longest piece
+      let longest = 0, longestDay = null;
+      for (let d = dayStartOf(oa); d < ob; d = kyivMidnight(new Date(d + 26 * 3600e3))) {
+        const piece = overlap(oa, ob, d, kyivMidnight(new Date(d + 26 * 3600e3)));
+        if (piece > longest) { longest = piece; longestDay = d; }
+      }
+      if (longestDay === start) { energy = Number(o.energy_wh) || 0; socStart = o.soc_start ?? null; socEnd = o.soc_end ?? null; }
+    }
+    return {a: (s.a - start) / span, b: (s.b - start) / span, maybe: false, kind: 'lightoff', priority: (s.b - s.a) / 60000,
+      from: kyivHm(s.a), to: kyivHm(s.b), label, energy, socStart, socEnd};
+  });
+}
+/** Energy labels under the bar (fallback to the short text, else skipped) + the outages left without one. */
+function weekEnergyLabels(outages, width, measure, gap = 4) {
+  const placed = [], skipped = [];
+  const x = f => Math.max(0, Math.min(1, f)) * width;
+  const free = l => placed.every(p => !(p.left < l.left + l.w + gap && l.left < p.left + p.w + gap));
+  // the biggest draw gets its place first; a tiny outage's long label must not push it off
+  const order = outages.filter(o => weekEnergyTexts(o).length).slice()
+    .sort((p, q) => (q.energy - p.energy) || ((q.socStart - q.socEnd) - (p.socStart - p.socEnd)) || (p.a - q.a));
+  for (const o of order) {
+    const texts = weekEnergyTexts(o);
+    let pick = null;
+    for (const text of texts) {
+      const w = measure(text);
+      const at = leftOf => ({text, w, left: Math.max(0, Math.min(Math.max(0, width - w), leftOf))});
+      pick = [at((x(o.a) + x(o.b)) / 2 - w / 2), at(x(o.a)), at(x(o.b) - w)].find(free) || null;
+      if (pick) break;
+    }
+    if (pick) placed.push(pick); else skipped.push(o);
+  }
+  const out = placed.sort((p, q) => p.left - q.left);
+  out.skipped = skipped.sort((p, q) => p.a - q.a);
+  return out;
+}
+/**
+ * One muted line under a week row for the outages the bar could not fully label (time above or energy below did not
+ * fit): «07:47–08:49 — 0,16 кВт·год · 100→96 %; …», in time order; '' when everything is on the bar.
+ */
+function weekMissingLine(outages, unlabeledTimes = [], skippedEnergy = []) {
+  const missing = outages.filter(o => unlabeledTimes.includes(o) || skippedEnergy.includes(o)).sort((p, q) => p.a - q.a);
+  return missing.map(o => { const e = weekEnergyTexts(o)[0]; return `${o.label || `${o.from}–${o.to}`}${e ? ` — ${e}` : ''}`; }).join('; ');
+}
+function renderWeek(payload, stats = null) {
   const host = $('week-days'); if (!host) return;
+  const statsOutages = stats?.outages || [];
   host.replaceChildren();
   const days = payload?.days || [];
   let off = 0, known = 0;
@@ -518,6 +599,9 @@ function renderWeek(payload) {
     const head = el('div', 'week-head');
     head.append(el('b', '', weekDayTitle(day)), el('span', day.off_seconds >= 60 ? 'off' : '', weekDayTotals(day)));
     box.append(head);
+    const outages = weekDayOutages(day, statsOutages);
+    const times = el('div', 'sched-times'); times.setAttribute('aria-hidden', 'true');
+    if (outages.length) box.append(times);
     const track = el('div', 'sched-track actual');
     track.setAttribute('role', 'img');
     track.setAttribute('aria-label', `${weekDayTitle(day)}: ${weekDayTotals(day)}`);
@@ -530,7 +614,26 @@ function renderWeek(payload) {
     for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
     if (day.is_today) { const now = el('i', 'now'); now.style.left = `${(Math.min(1, (Date.now() - start) / span) * 100).toFixed(2)}%`; track.append(now); }
     box.append(track);
+    const energy = el('div', 'sched-times week-energy'); energy.setAttribute('aria-hidden', 'true');
+    const skippedLine = el('p', 'week-skipped');
+    if (outages.some(o => weekEnergyTexts(o).length)) box.append(energy);
+    if (outages.length) box.append(skippedLine);
     host.append(box);
+    if (outages.length) requestAnimationFrame(() => {  // labels need the laid-out width
+      const width = track.getBoundingClientRect().width;
+      if (!width) return;
+      times.replaceChildren();
+      const timeLabels = scheduleTimeLabels(outages, null, null, width, labelWidth);
+      for (const l of timeLabels) {
+        const sp = el('span', l.kind, l.text); sp.style.left = `${l.left.toFixed(1)}px`; times.append(sp);
+      }
+      energy.replaceChildren();
+      const placed = weekEnergyLabels(outages, width, labelWidth);
+      for (const l of placed) { const sp = el('span', 'energy', l.text); sp.style.left = `${l.left.toFixed(1)}px`; energy.append(sp); }
+      const line = weekMissingLine(outages, timeLabels.unlabeled || [], placed.skipped);
+      skippedLine.textContent = line; skippedLine.hidden = !line;
+      track.setAttribute('aria-label', `${weekDayTitle(day)}: ${weekDayTotals(day)}${outages.length ? `; відключення ${outages.map(o => `${o.label || `${o.from}–${o.to}`}${weekEnergyTexts(o).length ? ` (${weekEnergyTexts(o)[0]})` : ''}`).join(', ')}` : ''}`);
+    });
   }
   if (host.lastChild) scaleRows(host.lastChild);
   set('week-summary', known ? `За 7 днів без світла ${spanText(off * 1000)}${days.some(d => d.off_seconds) ? ` · днів з відключеннями: ${days.filter(d => d.off_seconds >= 60).length}` : ''}` : 'Ще немає вимірів за ці дні');
@@ -540,9 +643,10 @@ async function openWeek() {
   set('week-summary', 'Завантажую…');
   if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
   try {
+    const statsReq = apiFetch('/api/stats').then(r => (r.ok ? r.json() : null)).catch(() => null);  // battery used per outage
     const response = await apiFetch('/api/light-week');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderWeek(await response.json());
+    renderWeek(await response.json(), await statsReq);
   } catch (err) {
     $('week-days')?.replaceChildren();
     set('week-summary', `Не вдалося завантажити (${err.message || err})`);

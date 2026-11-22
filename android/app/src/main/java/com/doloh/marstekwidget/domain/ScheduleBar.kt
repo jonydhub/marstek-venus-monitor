@@ -9,7 +9,9 @@ import java.time.format.DateTimeFormatter
 data class ScheduleBarModel(val segments: List<Segment>, val nowFraction: Float, val hasSchedule: Boolean) {
     /** [from]/[to] = «HH:mm» of the (day-clipped) window edges, «24:00» for the end of the day; empty when unknown. */
     /** [label] non-empty: always one label with that text (e.g. «до 08:15», «з 15:58») instead of edge times. */
-    data class Segment(val start: Float, val end: Float, val maybe: Boolean, val from: String = "", val to: String = "", val label: String = "")
+    /** [priority]: bigger is labelled first (after the maybe-last rule); 0 for schedule windows (start order). */
+    data class Segment(val start: Float, val end: Float, val maybe: Boolean, val from: String = "", val to: String = "", val label: String = "",
+                       val priority: Int = 0)
 }
 
 object ScheduleBar {

@@ -16,6 +16,7 @@ import com.doloh.marstekwidget.domain.LightKind
 import com.doloh.marstekwidget.domain.LightStatusResolver
 import com.doloh.marstekwidget.domain.LightWeek
 import com.doloh.marstekwidget.domain.WeekDay
+import com.doloh.marstekwidget.domain.WeekOutageLabels
 import com.doloh.marstekwidget.domain.OutageSourceLinks
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
 import com.doloh.marstekwidget.domain.ScheduleDays
@@ -27,6 +28,7 @@ import com.doloh.marstekwidget.widget.WidgetPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,8 +89,7 @@ class ScheduleActivity : Activity() {
                 card.addView(legend(), ui.matchWrap(10))
                 content.addView(card, ui.matchWrap(8))
             }
-            content.addView(weekCard(), ui.matchWrap(8))
-            content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
+            addWeekAndStats(settings)
             return
         }
         val region = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
@@ -125,8 +126,7 @@ class ScheduleActivity : Activity() {
         days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows, actual, ActualDays.scheduleNowText(info, now)) })
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
-        content.addView(weekCard(), ui.matchWrap(8))
-        content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
+        addWeekAndStats(settings)
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         refreshButton = ui.button("Оновити графік", filled = true) { refresh() }
@@ -158,6 +158,12 @@ class ScheduleActivity : Activity() {
         if (showcase) { summary.text = "Демо-режим"; return card }
         scope.launch {
             val now = System.currentTimeMillis()
+            // the battery used per outage comes from «Статистика» (no energy row when it is unavailable)
+            val statsJob = async {
+                if (direct) runCatching { withContext(Dispatchers.IO) { DirectEngine.stats(this@ScheduleActivity, settings, now) } }.getOrNull()?.outages
+                else (MarstekApiClient(this@ScheduleActivity, settings, SettingsStore(this@ScheduleActivity).token()).fetchStats()
+                    as? MarstekApiClient.StatsFetch.Ok)?.report?.outages
+            }
             val days: List<WeekDay>? = if (direct) {
                 runCatching { withContext(Dispatchers.IO) { DirectEngine.lightWeek(this@ScheduleActivity, settings, now) } }.getOrNull()
                     ?.filter { it.isToday || it.offSeconds + it.onSeconds > 0 }
@@ -167,9 +173,11 @@ class ScheduleActivity : Activity() {
                 is MarstekApiClient.LightWeekFetch.Failed -> { summary.text = "Не вдалося завантажити (${r.message})"; return@launch }
             }
             if (days.isNullOrEmpty()) { summary.text = "Ще немає вимірів"; return@launch }
+            val statsOutages = statsJob.await().orEmpty()
             summary.text = LightWeek.summary(days) ?: "Ще немає вимірів"
             summary.setTextColor(if (days.any { it.offSeconds >= 60 }) ChartColors.ACTUAL_OFF else Ui.MUTED)
             val today = java.time.LocalDate.now(KYIV)
+            val density = resources.displayMetrics.density
             rows.removeAllViews()
             days.forEachIndexed { i, day ->
                 val head = LinearLayout(this@ScheduleActivity).apply { orientation = LinearLayout.HORIZONTAL }
@@ -179,15 +187,40 @@ class ScheduleActivity : Activity() {
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = ui.dp(8) })
                 rows.addView(head, ui.matchWrap(if (i == 0) 6 else 10))
                 val last = i == days.lastIndex
-                val density = resources.displayMetrics.density
                 val tickZone = if (last) kotlin.math.ceil(density * (6f + 10f + 2f)).toInt() else 0
-                rows.addView(ActualDayView(this@ScheduleActivity, labels = last).apply {
-                    setDay(LightWeek.bar(day, now))
+                // outage times above the bar (coral, like «Фактично»), battery used under it
+                val outages = WeekOutageLabels.weekDayOutages(day, statsOutages, now)
+                val bar = LightWeek.bar(day, now).copy(outageLabels = outages.map { it.segment })
+                val view = ActualDayView(this@ScheduleActivity, labels = last, timeLabels = outages.isNotEmpty()).apply {
+                    setDay(bar)
                     contentDescription = "${LightWeek.title(day, today)}: ${LightWeek.totalsText(day)}"
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(16) + tickZone).apply { topMargin = ui.dp(3) })
+                }
+                val zone = kotlin.math.ceil(ActualBarPainter.topZone(bar, view.timeLabelPx(), density)).toInt()
+                rows.addView(view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(16) + tickZone + zone).apply { topMargin = ui.dp(3) })
+                if (outages.isNotEmpty()) {
+                    // one muted line for outages missing their time label above or their energy label below
+                    val missingLine = ui.label("", 10.5f, Ui.MUTED).apply { visibility = View.GONE }
+                    val energy = WeekEnergyRowView(this@ScheduleActivity).apply {
+                        setOutages(outages)
+                        onMissing = { missing ->
+                            val text = WeekOutageLabels.weekMissingLine(missing)
+                            missingLine.text = text.orEmpty()
+                            missingLine.visibility = if (text == null) View.GONE else View.VISIBLE
+                        }
+                    }
+                    rows.addView(energy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, energy.rowHeightPx()).apply { topMargin = ui.dp(1) })
+                    rows.addView(missingLine, ui.matchWrap(1))
+                }
             }
         }
         return card
+    }
+
+    /** «Світло за 7 днів» + «Статистика», unless Settings → «Тиждень і статистика» is off (default in direct mode). */
+    private fun addWeekAndStats(settings: com.doloh.marstekwidget.settings.AppSettings) {
+        if (!settings.weekStatsEnabled) return
+        content.addView(weekCard(), ui.matchWrap(8))
+        content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
     }
 
     private fun statsButton() = ui.button("Статистика") { startActivity(Intent(this, StatsActivity::class.java)) }
