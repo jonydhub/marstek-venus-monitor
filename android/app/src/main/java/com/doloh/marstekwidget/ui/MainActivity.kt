@@ -65,6 +65,9 @@ import com.doloh.marstekwidget.domain.SummaryLineKind
 import com.doloh.marstekwidget.domain.SummaryTone
 import com.doloh.marstekwidget.domain.WidgetSummaryResolver
 import com.doloh.marstekwidget.notify.AlertNotifier
+import com.doloh.marstekwidget.update.UpdateCheckOutcome
+import com.doloh.marstekwidget.update.UpdateChecker
+import com.doloh.marstekwidget.update.UpdatePreferences
 import com.doloh.marstekwidget.widget.WidgetFetchState
 import com.doloh.marstekwidget.widget.WidgetPreferences
 import com.doloh.marstekwidget.widget.WidgetRefreshScheduler
@@ -84,6 +87,10 @@ class MainActivity : Activity() {
     private val metricValues = mutableMapOf<String, TextView>()
     private lateinit var statusText: TextView
     private lateinit var signInBanner: LinearLayout
+    private lateinit var updateBanner: LinearLayout
+    private lateinit var updateTitle: TextView
+    private lateinit var updateNote: TextView
+    private lateinit var updateClose: TextView
     private lateinit var socValue: TextView
     private lateinit var lightDot: TextView
     private lateinit var lightHeadline: TextView
@@ -142,6 +149,7 @@ class MainActivity : Activity() {
         }
         WidgetRefreshScheduler.ensurePeriodic(this)
         AlertNotifier.ensureChannels(this)
+        UpdateChecker.ensureChannel(this)
         showDashboard()
     }
 
@@ -162,10 +170,14 @@ class MainActivity : Activity() {
         SystemBarsInsetHelper.apply(content, 14, 10, 14, 18)
         setContentView(content)
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
+        renderUpdateBanner()
     }
 
     override fun onResume() {
         super.onResume()
+        UpdateChecker.mainScreenVisible = true
+        renderUpdateBanner()
+        checkForUpdate()
         statsButton?.visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
         refreshTelemetry()
@@ -175,6 +187,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        UpdateChecker.mainScreenVisible = false
         handler.removeCallbacks(refreshLoop)
         super.onPause()
     }
@@ -237,6 +250,49 @@ class MainActivity : Activity() {
             setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)) }
         })
         page.addView(header)
+
+        // «Вийшла версія X» (mint = good news; amber stays for warnings). Hidden unless a newer release is known.
+        updateBanner = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(6), dp(4), dp(11))
+            background = rounded(Color.rgb(12, 44, 52), dp(16), Color.rgb(34, 112, 122))
+            visibility = View.GONE
+        }
+        val updateRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val updateTexts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(5), 0, 0)
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+        updateTitle = label("", 13f, MINT, true).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        updateNote = label("", 11f, TEXT, false).apply {
+            setPadding(0, dp(2), 0, 0)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        updateTexts.addView(updateTitle)
+        updateTexts.addView(updateNote)
+        updateRow.addView(updateTexts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        updateClose = label("✕", 16f, MUTED, false).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                UpdateChecker.bannerRelease(this@MainActivity)?.let { UpdatePreferences(this@MainActivity).dismiss(it.version) }
+                renderUpdateBanner()
+            }
+        }
+        updateRow.addView(updateClose, LinearLayout.LayoutParams(dp(44), dp(44)))
+        updateBanner.addView(updateRow)
+        val updateButtons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        updateButtons.addView(actionButton("Оновити", filled = true, accent = MINT) {
+            UpdateChecker.bannerRelease(this@MainActivity)?.let { openUrl(it.downloadUrl) }
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(4) })
+        updateButtons.addView(actionButton("Що нового", filled = false) {
+            UpdateChecker.bannerRelease(this@MainActivity)?.let { openUrl(it.htmlUrl) }
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4); marginEnd = dp(10) })
+        updateBanner.addView(updateButtons, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+        page.addView(updateBanner, sectionMargin())
 
         // Single sign-in banner.
         signInBanner = LinearLayout(this).apply {
@@ -520,12 +576,12 @@ class MainActivity : Activity() {
         setLineSpacing(dp(2).toFloat(), 1f)
     }
 
-    private fun actionButton(value: String, filled: Boolean, action: () -> Unit) = Button(this).apply {
+    private fun actionButton(value: String, filled: Boolean, accent: Int = AMBER, action: () -> Unit) = Button(this).apply {
         text = value
         textSize = 11f * spec.textScale
         isAllCaps = false
         setTextColor(if (filled) BG else TEXT)
-        background = rounded(if (filled) AMBER else SURFACE_RAISED, dp(13), if (filled) AMBER else STROKE)
+        background = rounded(if (filled) accent else SURFACE_RAISED, dp(13), if (filled) accent else STROKE)
         minHeight = dp(40)
         setPadding(dp(10), 0, dp(10), 0)
         setOnClickListener { action() }
@@ -770,6 +826,30 @@ class MainActivity : Activity() {
             journalPreview.addView(label("${JournalExport.time(e.tsMillis).substring(5, 16)} · ${e.category.title}", 9f, DIM, false))
             journalPreview.addView(label(e.text, 11f, TEXT, false).apply { setPadding(0, 0, 0, dp(5)); maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
         }
+    }
+
+    private fun renderUpdateBanner() {
+        if (!::updateBanner.isInitialized) return
+        val release = if (showcase) null else UpdateChecker.bannerRelease(this)
+        updateBanner.visibility = if (release == null) View.GONE else View.VISIBLE
+        if (release == null) return
+        updateTitle.text = "Вийшла версія ${release.version}"
+        updateNote.text = release.note.orEmpty()
+        updateNote.visibility = if (release.note.isNullOrBlank()) View.GONE else View.VISIBLE
+        (updateTitle.parent as View).contentDescription = listOfNotNull("Вийшла нова версія ${release.version}", release.note).joinToString(". ")
+        updateClose.contentDescription = "Сховати повідомлення про версію ${release.version}"
+    }
+
+    /** Background, throttled to 12 h inside [UpdateChecker]; the UI never waits for it. */
+    private fun checkForUpdate() {
+        if (showcase) return
+        scope.launch {
+            if (UpdateChecker.check(this@MainActivity) == UpdateCheckOutcome.CHECKED) renderUpdateBanner()
+        }
+    }
+
+    private fun openUrl(url: String) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
     }
 
     private fun loadServerJournal() {

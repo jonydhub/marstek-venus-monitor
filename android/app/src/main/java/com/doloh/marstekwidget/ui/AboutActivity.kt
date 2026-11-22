@@ -10,8 +10,26 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import com.doloh.marstekwidget.BuildConfig
 import com.doloh.marstekwidget.R
+import com.doloh.marstekwidget.update.AppUpdate
+import com.doloh.marstekwidget.update.UpdateCheckOutcome
+import com.doloh.marstekwidget.update.UpdateChecker
+import com.doloh.marstekwidget.update.UpdatePreferences
+import android.widget.TextView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AboutActivity : Activity() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private lateinit var updateLine: TextView
+    private lateinit var updateButtons: LinearLayout
+    private var checking = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val ui = Ui(this)
@@ -23,6 +41,15 @@ class AboutActivity : Activity() {
         names.addView(ui.label("Версія ${BuildConfig.VERSION_NAME}", 11f, Ui.MUTED))
         head.addView(names)
         page.addView(head, ui.matchWrap(12))
+
+        // «Остання версія» from the last GitHub check + «Перевірити зараз» (ignores the 12 h limit).
+        val updates = ui.card()
+        updateLine = ui.label("", 12f, Ui.TEXT, true)
+        updates.addView(updateLine)
+        updateButtons = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        updates.addView(updateButtons)
+        page.addView(updates, ui.matchWrap(10))
+        renderUpdate(null)
 
         val disclaimer = ui.card()
         disclaimer.addView(ui.label("Неофіційний застосунок, не пов'язаний з Marstek.", 13f, Ui.AMBER, true))
@@ -47,6 +74,40 @@ class AboutActivity : Activity() {
         val scroll = ui.scrollCentered(page)
         SystemBarsInsetHelper.apply(scroll, 0, 0, 0, 0)
         setContentView(scroll)
+    }
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
+
+    private fun renderUpdate(outcome: UpdateCheckOutcome?) {
+        val ui = Ui(this)
+        val prefs = UpdatePreferences(this)
+        val latest = prefs.latest()
+        val checkedAt = prefs.lastSuccessMs().takeIf { it > 0 }?.let { SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(Date(it)) }
+        val newer = latest != null && AppUpdate.isNewer(latest.version, UpdateChecker.installedVersion)
+        updateLine.text = when {
+            checking -> "Перевіряю…"
+            latest == null || checkedAt == null -> if (outcome == UpdateCheckOutcome.FAILED) "Не вдалося перевірити — немає зв'язку з GitHub" else "Нові версії ще не перевірялись"
+            newer -> "Остання версія: ${latest?.version} (перевірено $checkedAt)"
+            else -> "У вас остання версія (перевірено $checkedAt)"
+        }
+        updateLine.setTextColor(if (newer && !checking) Ui.MINT else Ui.TEXT)
+        updateButtons.removeAllViews()
+        if (outcome == UpdateCheckOutcome.FAILED && latest != null) updateButtons.addView(ui.hint("Не вдалося перевірити зараз — показано останній відомий результат"))
+        if (!prefs.enabled()) updateButtons.addView(ui.hint("Автоматична перевірка вимкнена в налаштуваннях"))
+        if (newer && !checking && latest != null) updateButtons.addView(ui.button("Оновити до ${latest.version}", filled = true) { open(latest.downloadUrl) }, ui.matchWrap(6))
+        updateButtons.addView(ui.button(if (checking) "Перевіряю…" else "Перевірити зараз") {
+            if (checking) return@button
+            checking = true
+            renderUpdate(null)
+            scope.launch {
+                val result = UpdateChecker.check(this@AboutActivity, force = true, foreground = true)
+                checking = false
+                renderUpdate(result)
+            }
+        }, ui.matchWrap(6))
     }
 
     private fun open(url: String) {
