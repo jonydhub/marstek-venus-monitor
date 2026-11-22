@@ -37,6 +37,8 @@ import com.doloh.marstekwidget.domain.AlertGroup
 import com.doloh.marstekwidget.domain.BatteryDisplayFormatter
 import com.doloh.marstekwidget.domain.JournalDetector
 import com.doloh.marstekwidget.notify.AlertNotifier
+import com.doloh.marstekwidget.update.UpdateChecker
+import com.doloh.marstekwidget.update.UpdatePreferences
 import com.doloh.marstekwidget.widget.WidgetPreferences
 import com.doloh.marstekwidget.outage.OfficialSources
 import com.doloh.marstekwidget.outage.OutageRegions
@@ -229,6 +231,7 @@ class SettingsActivity : Activity() {
             "«Вистачить на…» рахує лише енергію понад цей поріг; на графіку — червона пунктирна лінія. 0 = до 0 %."))
         page.addView(reserveCard, ui.matchWrap(10))
         if (!onboarding) page.addView(notificationsCard(), ui.matchWrap(10))
+        if (!onboarding) page.addView(updatesCard(), ui.matchWrap(10))
         if (!onboarding && draft.mode == ConnectionMode.SERVER && draft.serverUrl != null) {
             val web = ui.card()
             web.addView(ui.title("Веб-дашборд сервера"))
@@ -312,6 +315,18 @@ class SettingsActivity : Activity() {
             header.performClick()
             card.post { (card.parent?.parent?.parent as? ScrollView ?: findScroll(card))?.smoothScrollTo(0, card.top) }
         }
+        return card
+    }
+
+    /** «Нові версії»: saved immediately, like the notification switches. */
+    private fun updatesCard(): LinearLayout {
+        val card = ui.card()
+        val prefs = UpdatePreferences(this)
+        card.addView(switch("Повідомляти про нові версії", prefs.enabled()) { checked ->
+            prefs.setEnabled(checked)
+            if (checked) requestNotificationPermission() else UpdateChecker.cancel(this)
+        })
+        card.addView(ui.hint("Застосунок раз на 12 год дивиться на GitHub, чи вийшла нова версія; нічого не надсилає"))
         return card
     }
 
