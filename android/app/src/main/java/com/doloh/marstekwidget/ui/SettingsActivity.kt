@@ -125,9 +125,16 @@ class SettingsActivity : Activity() {
         modeGroup.setOnCheckedChangeListener { _, id ->
             draft = draft.copy(mode = if (id == server.id) ConnectionMode.SERVER else ConnectionMode.DIRECT)
             updatePanels()
+            // no explicit choice yet → the toggle follows the mode (on with a server, off in direct mode)
+            if (draft.weekStats == null) weekStatsSwitch.setCheckedSilently(draft.weekStatsEnabled)
         }
         modeCard.addView(modeGroup)
         modeCard.addView(ui.hint("Напряму: телефон опитує батарею в домашній мережі через Marstek Open API (UDP). Через сервер: ваш власний сервер із /api/status, доступний і поза домом."))
+        weekStatsSwitch = switch("Тиждень і статистика", draft.weekStatsEnabled) { value ->
+            if (!syncingWeekStats) draft = draft.copy(weekStats = value)
+        }
+        modeCard.addView(weekStatsSwitch, ui.matchWrap(8))
+        modeCard.addView(ui.hint("Без сервера телефон має лише свою історію (до 2 діб і лише поки він опитує станцію)"))
 
         directPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         directPanel.addView(ui.button("Знайти батарею", filled = true) { scan() }, ui.matchWrap(8))
@@ -312,6 +319,17 @@ class SettingsActivity : Activity() {
         var p = view.parent
         while (p != null) { if (p is ScrollView) return p; p = p.parent }
         return null
+    }
+
+    private lateinit var weekStatsSwitch: Switch
+
+    private var syncingWeekStats = false
+
+    /** Sets the switch without counting it as the user's explicit choice. */
+    private fun Switch.setCheckedSilently(value: Boolean) {
+        syncingWeekStats = true
+        isChecked = value
+        syncingWeekStats = false
     }
 
     private fun switch(text: String, checked: Boolean, onChange: (Boolean) -> Unit) = Switch(this).apply {

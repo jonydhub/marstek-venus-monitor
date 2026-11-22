@@ -36,7 +36,12 @@ data class AppSettings(
     val dischargeFloorPct: Double = DEFAULT_DISCHARGE_FLOOR_PCT,
     /** UPS bypass handling for the light in direct mode: auto (learn) / yes / no — see GridHysteresis, GridBypass. */
     val bypassLoadMode: String = GridBypass.AUTO,
+    /** «Тиждень і статистика» explicit choice; null = follow the mode (on with a server, off in direct mode). */
+    val weekStats: Boolean? = null,
 ) {
+    /** Show «Світло за 7 днів» + «Статистика»: the explicit choice, else ON in SERVER mode, OFF in DIRECT mode. */
+    val weekStatsEnabled: Boolean get() = weekStats ?: (mode == ConnectionMode.SERVER)
+
     val outageConfig: OutageConfig?
         get() = if (outageRegionId != null && !outageQueue.isNullOrBlank()) OutageConfig(outageRegionId, outageQueue) else null
 
@@ -68,6 +73,7 @@ class SettingsStore(context: Context) {
         detectedRatedWh = prefs.getFloat("battery.detected_rated_wh", -1f).toDouble().takeIf { it > 0 },
         dischargeFloorPct = prefs.getFloat("battery.floor_pct", AppSettings.DEFAULT_DISCHARGE_FLOOR_PCT.toFloat()).toDouble(),
         bypassLoadMode = GridBypass.normalize(prefs.getString("light.bypass_load", null)),
+        weekStats = if (prefs.contains(WEEK_STATS)) prefs.getBoolean(WEEK_STATS, false) else null,
     )
 
     fun save(s: AppSettings) {
@@ -87,6 +93,7 @@ class SettingsStore(context: Context) {
             .putFloat("battery.detected_rated_wh", (s.detectedRatedWh ?: -1.0).toFloat())
             .putFloat("battery.floor_pct", s.dischargeFloorPct.toFloat())
             .putString("light.bypass_load", GridBypass.normalize(s.bypassLoadMode))
+            .also { e -> s.weekStats?.let { e.putBoolean(WEEK_STATS, it) } ?: e.remove(WEEK_STATS) }
             .apply()
     }
 
@@ -97,7 +104,10 @@ class SettingsStore(context: Context) {
     fun token(): String? = secrets.read()
     fun setToken(value: String?) = if (value.isNullOrBlank()) secrets.clear() else secrets.write(value.trim())
 
-    private companion object { const val PREFS = "marstek_settings" }
+    private companion object {
+        const val PREFS = "marstek_settings"
+        const val WEEK_STATS = "ui.week_stats"
+    }
 }
 
 /** Server token encrypted with an Android Keystore AES-GCM key (never stored in plain text, never logged). */

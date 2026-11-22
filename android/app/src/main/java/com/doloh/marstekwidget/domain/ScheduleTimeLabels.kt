@@ -71,7 +71,7 @@ object ScheduleTimeLabels {
         fun free(l: Label) = placed.none { touches(it, l) }
         val shown = mutableListOf<ScheduleBarModel.Segment>()
         val ordered = segments.filter { it.from.isNotEmpty() && it.to.isNotEmpty() && it.end > it.start }
-            .sortedWith(compareBy({ it.maybe }, { it.start }))
+            .sortedWith(compareBy({ it.maybe }, { -it.priority }, { it.start }))
         for (s in ordered) {
             val kind = if (s.maybe) Kind.MAYBE else Kind.WINDOW
             if (s.label.isNotEmpty()) {

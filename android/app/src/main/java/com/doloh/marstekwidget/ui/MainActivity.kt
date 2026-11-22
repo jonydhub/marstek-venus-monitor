@@ -116,6 +116,7 @@ class MainActivity : Activity() {
     private var refreshing = false
     private var spec = ScreenLayoutSelector.specFor(0)
     private val settings: AppSettings get() = SettingsStore(this).load()
+    private var statsButton: View? = null
     private val refreshIntervalMs: Long get() = if (settings.mode == ConnectionMode.DIRECT) DIRECT_INTERVAL_MS else SERVER_INTERVAL_MS
 
     /** Debug-only fixture showcase: no network refresh, no sign-in banner. Ignored in release builds. */
@@ -165,6 +166,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        statsButton?.visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
         refreshTelemetry()
         loadServerJournal()
@@ -382,9 +384,11 @@ class MainActivity : Activity() {
             startActivity(Intent(this@MainActivity, JournalActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
         // Statistics entry point, same style as the journal button.
-        journalCard.addView(actionButton("Статистика", filled = false) {
+        // Hidden when Settings → «Тиждень і статистика» is off (default in direct mode); re-checked in onResume.
+        statsButton = actionButton("Статистика", filled = false) {
             startActivity(Intent(this@MainActivity, StatsActivity::class.java))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
+        }.apply { visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE }
+        journalCard.addView(statsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
         // Accumulated counters.
         val energyCard = card()
