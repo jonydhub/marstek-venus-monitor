@@ -476,7 +476,7 @@ class MainActivity : Activity() {
         diagBody.addView(modeMeta)
         diagnosticsText = label("", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
         diagBody.addView(diagnosticsText)
-        // The device's lifetime counters (ES.GetStatus): Venus E fw 148 leaves load at 0 — raw values only, not a card.
+        // The device's lifetime counters (ES.GetStatus): Venus E fw 148/151 leave load at 0 — raw values only, not a card.
         countersText = label("", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
         diagBody.addView(countersText)
         diagBody.addView(label(getString(R.string.main_grid_sign_note), 9f, DIM, false).apply { setPadding(0, dp(4), 0, 0) })
