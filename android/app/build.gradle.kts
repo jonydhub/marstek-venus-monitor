@@ -13,8 +13,8 @@ android {
         applicationId = "com.doloh.marstekwidget"
         minSdk = 26
         targetSdk = 35
-        versionCode = 149
-        versionName = "1.4.7"
+        versionCode = 150
+        versionName = "1.4.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

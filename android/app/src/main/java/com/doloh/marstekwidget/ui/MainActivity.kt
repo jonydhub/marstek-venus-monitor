@@ -361,7 +361,7 @@ class MainActivity : Activity() {
 
         // Active alerts («На що звернути увагу»), hidden when nothing needs attention.
         alertsCard = card().apply { background = rounded(Color.rgb(40, 30, 22), dp(18), Color.rgb(120, 86, 40)) }
-        alertsCard.addView(sectionTitle(getString(R.string.main_alerts_title)).apply { setTextColor(AMBER) })
+        alertsCard.addView(sectionTitle(getString(R.string.main_alerts_title), R.drawable.ic_ui_alert, AMBER).apply { setTextColor(AMBER) })
         alertsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         alertsCard.addView(alertsList)
 
@@ -454,7 +454,14 @@ class MainActivity : Activity() {
             }
             metricValues[key + "Kwh"] = energy
             box.addView(energy, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16)))
-            box.addView(label(caption, 10f, if (key == "todayOutage") CORAL else MUTED, false).apply { maxLines = 1 })
+            box.addView(label(caption, 10f, if (key == "todayOutage") CORAL else MUTED, false).apply {
+                maxLines = 1
+                when (key) {
+                    "todayCharge" -> withIcon(R.drawable.ic_ui_charge, POWER_ON, 13, gapDp = 4)
+                    "todayDischarge" -> withIcon(R.drawable.ic_ui_discharge, AMBER, 13, gapDp = 4)
+                    else -> withIcon(R.drawable.ic_ui_light_off, CORAL, 13, gapDp = 4)
+                }
+            })
             tiles.addView(box, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 if (i > 0) marginStart = dp(4)
                 if (i < 2) marginEnd = dp(4)
@@ -465,7 +472,7 @@ class MainActivity : Activity() {
         hero.addView(todayCaption)
 
         // Schedule: «Сьогодні» / «Завтра» rows with an hour scale + windows as text. Tap → «Графік відключень».
-        val scheduleCard = if (wide) card().apply { addView(sectionTitle(getString(R.string.main_schedule_title))) } else null
+        val scheduleCard = if (wide) card().apply { addView(sectionTitle(getString(R.string.main_schedule_title), R.drawable.ic_ui_schedule)) } else null
         val scheduleHost = scheduleCard ?: hero
         val scheduleBlock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -490,7 +497,7 @@ class MainActivity : Activity() {
 
         // 24 h SOC chart: outage shading, event markers, axis labels, discharge floor.
         historyCard = card()
-        historyCard.addView(sectionTitle(getString(R.string.main_history_title)))
+        historyCard.addView(sectionTitle(getString(R.string.main_history_title), R.drawable.ic_ui_chart))
         sparkline = SocChartView(this).apply {
             // Chart markers merge into counted clusters; the journal lists every event.
             isClickable = true
@@ -502,33 +509,33 @@ class MainActivity : Activity() {
 
         // Battery & flows.
         val flowCard = card()
-        flowCard.addView(sectionTitle(getString(R.string.main_details_title)))
+        flowCard.addView(sectionTitle(getString(R.string.main_details_title), R.drawable.ic_ui_flow))
         flowCard.addView(metricRow("battery", R.string.main_battery_flow, "temperature", R.string.main_temperature))
         flowCard.addView(metricRow("backup", R.string.main_backup, "grid", R.string.main_grid), rowMargin())
         flowCard.addView(metricRow("backupAvg", R.string.main_backup_avg, "backupToday", R.string.main_backup_today), rowMargin())
 
         // Journal entry point: last events + «Відкрити журнал».
         val journalCard = card()
-        journalCard.addView(sectionTitle("Журнал подій"))
+        journalCard.addView(sectionTitle("Журнал подій", R.drawable.ic_ui_journal))
         journalPreview = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         journalCard.addView(journalPreview)
-        journalCard.addView(actionButton("Відкрити журнал · аномалії · експорт", filled = false) {
+        journalCard.addView(actionButton("Відкрити журнал · аномалії · експорт", filled = false, icon = R.drawable.ic_ui_journal) {
             startActivity(Intent(this@MainActivity, JournalActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
         // Statistics entry point, same style as the journal button.
         // Hidden when Settings → «Тиждень і статистика» is off (default in direct mode); re-checked in onResume.
-        statsButton = actionButton("Статистика", filled = false) {
+        statsButton = actionButton("Статистика і звіт", filled = false, icon = R.drawable.ic_ui_stats) {
             startActivity(Intent(this@MainActivity, StatsActivity::class.java))
         }.apply { visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE }
         journalCard.addView(statsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
-        journalCard.addView(actionButton("Калькулятор енергії", filled = false) {
+        journalCard.addView(actionButton("Калькулятор енергії", filled = false, icon = R.drawable.ic_ui_calc) {
             startActivity(Intent(this@MainActivity, CalcActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
         // «Лічильники»: today / 7 days / total, counted by the server from its history (the station's own counters are
         // incomplete). Hidden until loaded; direct mode shows the phone's days without «Усього».
         countersCard = card().apply { visibility = View.GONE }
-        countersCard.addView(sectionTitle("Лічильники · кВт·год"))
+        countersCard.addView(sectionTitle("Лічильники · кВт·год", R.drawable.ic_ui_counters))
         countersBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         countersCard.addView(countersBody)
 
@@ -536,6 +543,7 @@ class MainActivity : Activity() {
         val diagCard = card()
         val diagBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         diagCard.addView(label("Діагностика  ▸", 12f, TEXT, true).apply {
+            withIcon(R.drawable.ic_ui_diag, MUTED)
             setOnClickListener {
                 val open = diagBody.visibility != View.VISIBLE
                 diagBody.visibility = if (open) View.VISIBLE else View.GONE
@@ -648,7 +656,10 @@ class MainActivity : Activity() {
         background = rounded(SURFACE, dp(18), STROKE)
     }
 
-    private fun sectionTitle(value: String) = label(value, 12f, TEXT, true).apply { setPadding(0, 0, 0, dp(8)) }
+    private fun sectionTitle(value: String, icon: Int? = null, iconColor: Int = MINT) = label(value, 12f, TEXT, true).apply {
+        setPadding(0, 0, 0, dp(8))
+        icon?.let { withIcon(it, iconColor) }
+    }
 
     private fun label(value: String, sizeSp: Float, color: Int, bold: Boolean) = TextView(this).apply {
         text = value
@@ -658,14 +669,18 @@ class MainActivity : Activity() {
         setLineSpacing(dp(2).toFloat(), 1f)
     }
 
-    private fun actionButton(value: String, filled: Boolean, accent: Int = AMBER, action: () -> Unit) = Button(this).apply {
+    private fun actionButton(value: String, filled: Boolean, accent: Int = AMBER, icon: Int? = null, action: () -> Unit) = Button(this).apply {
+        icon?.let {
+            withIcon(it, MINT, 17, gapDp = 10)
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+        }
         text = value
         textSize = 11f * spec.textScale
         isAllCaps = false
         setTextColor(if (filled) BG else TEXT)
         background = rounded(if (filled) accent else SURFACE_RAISED, dp(13), if (filled) accent else STROKE)
         minHeight = dp(40)
-        setPadding(dp(10), 0, dp(10), 0)
+        setPadding(dp(if (icon != null) 14 else 10), 0, dp(10), 0)
         setOnClickListener { action() }
     }
 

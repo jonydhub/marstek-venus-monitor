@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.DirectEngine
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.domain.StatsReport
@@ -67,7 +68,7 @@ class StatsActivity : Activity() {
     private fun reportCard(settings: com.doloh.marstekwidget.settings.AppSettings) = ui.card().apply {
         val head = LinearLayout(this@StatsActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
         val texts = LinearLayout(this@StatsActivity).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(ui.label("ЗВІТ", 9f, Ui.DIM, true))
+        texts.addView(ui.label("ЗВІТ", 9f, Ui.DIM, true).apply { withIcon(R.drawable.ic_ui_report, Ui.MINT, 12, gapDp = 4) })
         reportTitle = ui.label("—", 14f, Ui.TEXT, true)
         texts.addView(reportTitle)
         head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -133,7 +134,14 @@ class StatsActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(ui.dp(12), ui.dp(10), ui.dp(12), ui.dp(10))
                     background = ui.rounded(Ui.SURFACE_RAISED, ui.dp(14), Ui.STROKE)
-                    addView(ui.label(t.title, 11f, Ui.MUTED))
+                    addView(ui.label(t.title, 11f, Ui.MUTED).apply {
+                        when (t.title) {
+                            "Без світла" -> withIcon(R.drawable.ic_ui_light_off, ChartColors.ACTUAL_OFF, 14, gapDp = 5)
+                            "Зі станції" -> withIcon(R.drawable.ic_ui_station, Ui.AMBER, 14, gapDp = 5)
+                            "Заряджено" -> withIcon(R.drawable.ic_ui_plug, Ui.GOOD, 14, gapDp = 5)
+                            "Найдовше" -> withIcon(R.drawable.ic_ui_timer, ChartColors.ACTUAL_OFF, 14, gapDp = 5)
+                        }
+                    })
                     addView(ui.label(t.value, 17f, if (t.title == "Без світла" || t.title == "Найдовше") ChartColors.ACTUAL_OFF else Ui.TEXT, true))
                     addView(ui.label(t.sub, 10f, Ui.DIM))
                     contentDescription = "${t.title}: ${t.value}, ${t.sub}"
@@ -147,7 +155,7 @@ class StatsActivity : Activity() {
         // 2. per day — one table, column titles once
         val today = LocalDate.now(KYIV)
         val days = ui.card()
-        days.addView(ui.title("По днях · кВт·год"))
+        days.addView(ui.title("По днях · кВт·год", R.drawable.ic_ui_stats))
         val dayLines = StatsTable.dayLines(report.days, today)
         if (dayLines.isEmpty()) days.addView(ui.label("Ще немає вимірів", 12f, Ui.MUTED))
         else {
@@ -157,8 +165,8 @@ class StatsActivity : Activity() {
         content.addView(days, ui.matchWrap(8))
 
         // 3–4. outages / charges — grouped by day
-        content.addView(sessionCard("Відключення", StatsTable.outageGroups(report.outages, today), "Відключень не було"), ui.matchWrap(8))
-        content.addView(sessionCard("Заряджання", StatsTable.chargeGroups(report.charges, today), "Заряджань не було"), ui.matchWrap(8))
+        content.addView(sessionCard("Відключення", StatsTable.outageGroups(report.outages, today), "Відключень не було", R.drawable.ic_ui_light_off, ChartColors.ACTUAL_OFF), ui.matchWrap(8))
+        content.addView(sessionCard("Заряджання", StatsTable.chargeGroups(report.charges, today), "Заряджань не було", R.drawable.ic_ui_charge, Ui.GOOD), ui.matchWrap(8))
         content.addView(ui.hint("Станція — енергія з резервного виходу, поки світла не було. Дрібні підзаряди 99→100 % не показано."), ui.matchWrap(6))
     }
 
@@ -167,8 +175,8 @@ class StatsActivity : Activity() {
         (getChildAt(1) as? android.widget.TextView)?.setTextColor(ChartColors.ACTUAL_OFF)
     }
 
-    private fun sessionCard(title: String, groups: List<StatsTable.Group>, empty: String) = ui.card().apply {
-        addView(ui.title(title))
+    private fun sessionCard(title: String, groups: List<StatsTable.Group>, empty: String, icon: Int, iconColor: Int) = ui.card().apply {
+        addView(ui.title(title, icon, iconColor))
         if (groups.isEmpty()) { addView(ui.label(empty, 12f, Ui.MUTED)); return@apply }
         addView(ui.tableRow(StatsTable.SESSION_HEADER, SESSION_WEIGHTS, header = true))
         groups.forEachIndexed { gi, g ->

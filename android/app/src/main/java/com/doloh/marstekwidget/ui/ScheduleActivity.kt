@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.DirectEngine
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.data.TelemetryRepository
@@ -123,7 +124,7 @@ class ScheduleActivity : Activity() {
         }
 
         val days = ui.card()
-        days.addView(ui.title("Сьогодні і завтра"))
+        days.addView(ui.title("Сьогодні і завтра", R.drawable.ic_ui_schedule))
         days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows, actual, ActualDays.scheduleNowText(info, now)) })
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
@@ -146,7 +147,7 @@ class ScheduleActivity : Activity() {
      */
     private fun weekCard(): LinearLayout {
         val card = ui.card()
-        card.addView(ui.title("Світло за 7 днів"))
+        card.addView(ui.title("Світло за 7 днів", R.drawable.ic_ui_chart))
         val summary = ui.label("Завантажую…", 12f, Ui.MUTED, true)
         card.addView(summary)
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -222,7 +223,7 @@ class ScheduleActivity : Activity() {
         content.addView(statsButton(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.dp(44)).apply { topMargin = ui.dp(8) })
     }
 
-    private fun statsButton() = ui.button("Статистика") { startActivity(Intent(this, StatsActivity::class.java)) }
+    private fun statsButton() = ui.button("Статистика і звіт") { startActivity(Intent(this, StatsActivity::class.java)) }
 
     private fun legend() = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL

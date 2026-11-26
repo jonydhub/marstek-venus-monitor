@@ -978,7 +978,9 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     set('hero-sub', parts.filter(Boolean).join(' · '));
     set('hero-note', `Час — енергія ${floorText} ${autonomyBasisText(a)}.${err}`);
   } else {
-    if (flow.available && flow.direction === 'charging') set('hero-forecast', `Заряджається · до 100% ≈ ${formatDuration(flow.charge_eta_seconds)}`);
+    // at 100 % the station still tops up a few watts (ETA 0) — same wording as Android WidgetSummary
+    if (flow.available && flow.direction === 'charging' && (flow.charge_eta_seconds === 0 || (soc !== null && soc >= 100))) set('hero-forecast', 'Заряджено · дозаряд');
+    else if (flow.available && flow.direction === 'charging') set('hero-forecast', `Заряджається · до 100% ≈ ${formatDuration(flow.charge_eta_seconds)}`);
     else if (soc !== null && soc >= 99 && (!flow.available || flow.direction === 'idle')) set('hero-forecast', 'Заряджено');
     else if (runtime !== null) set('hero-forecast', `Запасу на ${formatDuration(runtime)}`);
     else set('hero-forecast', flow.direction === 'discharging' ? 'Розряджається' : 'Очікування');

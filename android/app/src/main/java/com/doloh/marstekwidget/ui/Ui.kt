@@ -44,7 +44,10 @@ class Ui(private val activity: Activity) {
         background = rounded(SURFACE, dp(18), STROKE)
     }
 
-    fun title(value: String) = label(value, 12f, TEXT, true).apply { setPadding(0, 0, 0, dp(8)) }
+    fun title(value: String, icon: Int? = null, iconColor: Int = MINT) = label(value, 12f, TEXT, true).apply {
+        setPadding(0, 0, 0, dp(8))
+        icon?.let { withIcon(it, iconColor) }
+    }
 
     fun label(value: String, sizeSp: Float, color: Int = TEXT, bold: Boolean = false) = TextView(activity).apply {
         text = value
@@ -175,4 +178,18 @@ class Ui(private val activity: Activity) {
         val GOOD = Color.rgb(127, 227, 178)
         val CORAL = Color.rgb(255, 128, 111)
     }
+}
+
+
+/**
+ * Line icon (res/drawable/ic_ui_* / ic_dev_*, Lucide ISC, white strokes) tinted to [color], before the text or on top.
+ * The 24-dp viewport scales to [sizeDp]; stroke width scales with it.
+ */
+fun TextView.withIcon(res: Int, color: Int, sizeDp: Int = 16, top: Boolean = false, gapDp: Int = 7) {
+    val d = context.getDrawable(res)?.mutate() ?: return
+    val px = (sizeDp * resources.displayMetrics.density).toInt()
+    d.setTint(color)
+    d.setBounds(0, 0, px, px)
+    compoundDrawablePadding = (gapDp * resources.displayMetrics.density).toInt()
+    if (top) setCompoundDrawablesRelative(null, d, null, null) else setCompoundDrawablesRelative(d, null, null, null)
 }

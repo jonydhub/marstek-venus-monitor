@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.domain.EnergyCalc
 import com.doloh.marstekwidget.widget.WidgetPreferences
 
@@ -41,7 +42,7 @@ class CalcActivity : Activity() {
 
         // inputs
         val input = ui.card()
-        input.addView(ui.title("Що вмикаєте"))
+        input.addView(ui.title("Що вмикаєте", R.drawable.ic_ui_plug))
         input.addView(presetGrid())
         wattsEdit = ui.field("1500", numeric = true)
         hoursEdit = ui.field("0", numeric = true)
@@ -103,6 +104,7 @@ class CalcActivity : Activity() {
                 row.forEachIndexed { j, p ->
                     addView(TextView(this@CalcActivity).apply {
                         text = "${p.name}\n${p.watts}\u00A0Вт"
+                        PRESET_ICONS[p.name]?.let { withIcon(it, Ui.MINT, 20, top = true, gapDp = 4) }
                         textSize = 11f
                         setTextColor(Ui.TEXT)
                         gravity = Gravity.CENTER
@@ -157,5 +159,15 @@ class CalcActivity : Activity() {
             addView(ui.label(title, 12.5f, Ui.MUTED), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(ui.label(value, 13f, color, true).apply { gravity = Gravity.END; fontFeatureSettings = "tnum" })
         })
+    }
+
+    private companion object {
+        /** Lucide line icons per preset (EnergyCalc.PRESETS names). */
+        val PRESET_ICONS = mapOf(
+            "Чайник" to R.drawable.ic_dev_kettle, "Мікрохвильовка" to R.drawable.ic_dev_microwave,
+            "Бойлер" to R.drawable.ic_dev_boiler, "Обігрівач" to R.drawable.ic_dev_heater,
+            "Пральна" to R.drawable.ic_dev_washer, "Холодильник" to R.drawable.ic_dev_fridge,
+            "Телевізор" to R.drawable.ic_dev_tv, "Ноутбук" to R.drawable.ic_dev_laptop, "Роутер" to R.drawable.ic_dev_router,
+        )
     }
 }

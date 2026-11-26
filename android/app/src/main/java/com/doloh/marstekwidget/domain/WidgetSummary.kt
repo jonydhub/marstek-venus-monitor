@@ -140,6 +140,13 @@ object WidgetSummaryResolver {
                 val etaSeconds = if (charging) snapshot.etaSeconds else dischargeEtaSeconds(snapshot)
                 val eta = EtaTextFormatter.formatSeconds(etaSeconds)
                 val target = if (charging) "100%" else floorTarget(info)
+                // At 100 % the station still tops up a few watts: ETA 0 → «Заряджено · дозаряд», not «До 100% ≈ Готово».
+                val toppingUp = charging && ((etaSeconds != null && etaSeconds <= 0L) || (snapshot.socPercent ?: 0) >= 100)
+                val etaLine = when {
+                    toppingUp -> "Заряджено · дозаряд"
+                    etaSeconds != null -> "До $target ≈ $eta · оцінка"
+                    else -> "До $target: —"
+                }
                 return WidgetSummary(
                     mode = if (charging) SummaryMode.CHARGING else SummaryMode.DISCHARGING,
                     lightState = light,
@@ -150,13 +157,13 @@ object WidgetSummaryResolver {
                     trailingSecondary = listOfNotNull("до $target", temperature).joinToString(SEP),
                     // Power is already the headline, so the detail list starts with the ETA.
                     lines = listOfNotNull(
-                        SummaryLine(SummaryLineKind.ETA, if (etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —"),
+                        SummaryLine(SummaryLineKind.ETA, etaLine),
                         lightLine,
                         reserveLine,
                         temperatureLine,
                     ),
                     batteryState = listOfNotNull(if (charging) "Заряджається" else "Розряджається", power?.let { "≈ $it" }).joinToString(SEP),
-                    etaText = if (etaSeconds != null) "До $target ≈ $eta · оцінка" else "До $target: —",
+                    etaText = etaLine,
                 )
             }
             BatteryDirection.IDLE, BatteryDirection.UNKNOWN -> {
