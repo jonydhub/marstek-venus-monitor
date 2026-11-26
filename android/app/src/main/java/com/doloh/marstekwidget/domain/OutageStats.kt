@@ -49,7 +49,13 @@ data class StatsDay(
 }
 
 /** «Статистика»: days newest first, outages and charges newest first. */
-data class StatsReport(val days: List<StatsDay>, val outages: List<OutageDetail>, val charges: List<ChargeSession>)
+data class StatsReport(
+    val days: List<StatsDay>,
+    val outages: List<OutageDetail>,
+    val charges: List<ChargeSession>,
+    /** «Лічильники» from the server; null for an older server and in direct mode (see [Counters.fromDays]). */
+    val counters: EnergyCounters? = null,
+)
 
 object StatsParser {
     fun time(raw: Any?): Long? = when (raw) {
@@ -90,7 +96,7 @@ object StatsParser {
             }
         }.orEmpty()
         val charges = root.optJSONArray("charges")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(::charge) } }.orEmpty()
-        return StatsReport(days, outages(root.optJSONArray("outages")).orEmpty(), charges)
+        return StatsReport(days, outages(root.optJSONArray("outages")).orEmpty(), charges, Counters.parse(root.optJSONObject("counters")))
     }
 }
 

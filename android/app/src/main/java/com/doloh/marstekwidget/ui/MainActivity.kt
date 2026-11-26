@@ -32,6 +32,7 @@ import android.widget.TextView
 import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.AccessCookie
 import com.doloh.marstekwidget.data.JournalStore
+import com.doloh.marstekwidget.data.DirectEngine
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.domain.ActualDays
 import com.doloh.marstekwidget.domain.ChartEventClusters
@@ -61,6 +62,9 @@ import com.doloh.marstekwidget.domain.AlertSeverity
 import com.doloh.marstekwidget.domain.SummaryMode
 import com.doloh.marstekwidget.domain.OperatingModeFormatter
 import com.doloh.marstekwidget.domain.PowerBadges
+import com.doloh.marstekwidget.domain.EnergyCounters
+import com.doloh.marstekwidget.domain.CountersTable
+import com.doloh.marstekwidget.domain.Counters
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
 import com.doloh.marstekwidget.domain.SummaryLineKind
 import com.doloh.marstekwidget.domain.SummaryTone
@@ -75,6 +79,7 @@ import com.doloh.marstekwidget.widget.WidgetRefreshScheduler
 import com.doloh.marstekwidget.widget.WidgetRenderer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -122,6 +127,9 @@ class MainActivity : Activity() {
     private lateinit var journalPreview: LinearLayout
     private lateinit var diagnosticsText: TextView
     private lateinit var countersText: TextView
+    private lateinit var countersCard: LinearLayout
+    private lateinit var countersBody: LinearLayout
+    private var countersLoadedAt = 0L
     private var serverJournal: List<com.doloh.marstekwidget.domain.JournalEvent> = emptyList()
     private var refreshing = false
     private var spec = ScreenLayoutSelector.specFor(0)
@@ -185,8 +193,47 @@ class MainActivity : Activity() {
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
         refreshTelemetry()
         loadServerJournal()
+        loadCounters()
         handler.removeCallbacks(refreshLoop)
         handler.postDelayed(refreshLoop, refreshIntervalMs)
+    }
+
+    /** «Лічильники» from /api/stats (server) or the phone's history (direct); at most every 5 min. */
+    private fun loadCounters(force: Boolean = false) {
+        if (!settings.weekStatsEnabled) { countersCard.visibility = View.GONE; return }
+        val now = System.currentTimeMillis()
+        if (!force && now - countersLoadedAt < 5 * 60_000L) return
+        countersLoadedAt = now
+        val current = settings
+        scope.launch {
+            val counters = if (current.mode == ConnectionMode.SERVER) {
+                when (val r = MarstekApiClient(this@MainActivity, current, SettingsStore(this@MainActivity).token()).fetchStats()) {
+                    is MarstekApiClient.StatsFetch.Ok -> r.report.counters
+                    else -> null
+                }
+            } else runCatching {
+                withContext(Dispatchers.IO) { Counters.fromDays(DirectEngine.stats(this@MainActivity, current).days) }
+            }.getOrNull()
+            if (counters == null) { countersLoadedAt = 0L; return@launch }
+            renderCounters(counters)
+        }
+    }
+
+    private fun renderCounters(c: EnergyCounters) {
+        val ui = Ui(this)
+        val t = CountersTable.table(c)
+        val weights = if (t.head.size == 4) listOf(2.3f, 1f, 1f, 1f) else listOf(2.3f, 1f, 1f)
+        countersBody.removeAllViews()
+        countersBody.addView(ui.tableRow(t.head, weights, header = true))
+        t.rows.forEach { row ->
+            countersBody.addView(ui.tableRow(row, weights).also { line ->
+                for (i in 1 until line.childCount) (line.getChildAt(i) as? TextView)?.let { cell ->
+                    if (cell.text != "—") { cell.setTextColor(TEXT); cell.setTypeface(cell.typeface, android.graphics.Typeface.BOLD) }
+                }
+            })
+        }
+        countersBody.addView(label(CountersTable.note(c), 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
+        countersCard.visibility = View.VISIBLE
     }
 
     override fun onPause() {
@@ -462,6 +509,13 @@ class MainActivity : Activity() {
             startActivity(Intent(this@MainActivity, CalcActivity::class.java))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
+        // «Лічильники»: today / 7 days / total, counted by the server from its history (the station's own counters are
+        // incomplete). Hidden until loaded; direct mode shows the phone's days without «Усього».
+        countersCard = card().apply { visibility = View.GONE }
+        countersCard.addView(sectionTitle("Лічильники · кВт·год"))
+        countersBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        countersCard.addView(countersBody)
+
         // Diagnostics, collapsed by default.
         val diagCard = card()
         val diagBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -484,16 +538,16 @@ class MainActivity : Activity() {
         diagCard.addView(diagBody)
 
         when (spec.mode) {
-            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, diagCard)
+            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, countersCard, diagCard)
                 .forEach { page.addView(it, sectionMargin()) }
             ScreenLayoutMode.TWO_COLUMN -> page.addView(columns(
                 listOf(hero, historyCard, flowCard),
-                listOf(scheduleCard!!, alertsCard, journalCard, diagCard),
+                listOf(scheduleCard!!, alertsCard, journalCard, countersCard, diagCard),
             ))
             ScreenLayoutMode.THREE_COLUMN -> page.addView(columns(
                 listOf(hero, flowCard),
                 listOf(scheduleCard!!, alertsCard, historyCard),
-                listOf(journalCard, diagCard),
+                listOf(journalCard, countersCard, diagCard),
             ))
         }
 
