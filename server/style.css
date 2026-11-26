@@ -249,4 +249,4 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .report-tab[aria-pressed="true"]{background:rgba(54,198,213,.15);color:var(--text);font-weight:600}
 .report-table .stats-row{grid-template-columns:2.2fr 1.2fr 1.2fr}
 .report-table .stats-row:not(.head) span:nth-child(2){color:var(--text);font-weight:600}
-@media(min-width:1100px){.official-shell>.report{grid-column:1/-1}}
+.report-table{max-width:620px}

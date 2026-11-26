@@ -1125,8 +1125,9 @@ function sufficiency(i) {
   }
   if (charge > 0 && rated !== null && storedAt < rated * 0.99 && charge < MAX_CHARGE_W - 200) {
     const fullAtMax = (rated - stored) / MAX_CHARGE_W * 3600;
-    const atMax = fullAtMax <= t ? `100\u00A0% ${suffClock(now + fullAtMax * 1000, now)}` : `до ${pct(stored + MAX_CHARGE_W * t / 3600)}`;
-    out.advice = `До відключення ${suffClock(nextStart, now)} зарядиться лише до ${pct(storedAt)}. На 2,5\u00A0кВт — ${atMax}: збільште потужність заряду в застосунку Marstek.`;
+    const atMax = fullAtMax <= t ? `100\u00A0% ${suffClock(now + fullAtMax * 1000, now)}`
+      : `до ${Math.min(99, Math.round((stored + MAX_CHARGE_W * t / 3600) / rated * 100))}\u00A0%`;  // not full → never «100 %»
+    out.advice = `До відключення зарядиться лише до ${pct(storedAt)}. На 2,5\u00A0кВт — ${atMax}: збільште потужність заряду в застосунку Marstek.`;
   }
   return out;
 }

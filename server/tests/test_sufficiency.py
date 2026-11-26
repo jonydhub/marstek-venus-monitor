@@ -70,13 +70,19 @@ class SufficiencyTests(unittest.TestCase):
     def test_advice_slow_charge_full_at_max(self):
         # 30 min at 1200 W: 2000 + 600 = 2600 → 51 %; at 2500 W: full in 1 h 15 min > 30 min → 2000 + 1250 → 63 %
         r = suff(now=ms(15), light="on", charge_w=1200, stored_wh=2000, next_start=ms(15, 30), next_end=ms(19, 30))
-        self.assertEqual(r["advice"], "До відключення о 15:30 зарядиться лише до 51 %. На 2,5 кВт — до 63 %: "
+        self.assertEqual(r["advice"], "До відключення зарядиться лише до 51 %. На 2,5 кВт — до 63 %: "
                                       "збільште потужність заряду в застосунку Marstek.")
 
     def test_advice_reaches_full_at_max(self):
         # 2 h to the outage, 1000 W → 4000 + 2000 → capped? no: 3000 + 2000 = 5000 → 98 %; at 2500: full in 51 min → 15:51
         r = suff(now=ms(15), light="on", charge_w=1000, stored_wh=3000, next_start=ms(17), next_end=ms(19))
-        self.assertEqual(r["advice"], "До відключення о 17:00 зарядиться лише до 98 %. На 2,5 кВт — 100 % о 15:51: "
+        self.assertEqual(r["advice"], "До відключення зарядиться лише до 98 %. На 2,5 кВт — 100 % о 15:51: "
+                                      "збільште потужність заряду в застосунку Marstek.")
+
+    def test_advice_almost_full_is_not_100(self):
+        # 1 h at 1194 W: 2600 + 1194 → 74 %; at 2500 W: 5100 Wh = 99,6 % — not full before the outage → «до 99 %»
+        r = suff(now=ms(15), light="on", charge_w=1194, stored_wh=2600, next_start=ms(16), next_end=ms(20))
+        self.assertEqual(r["advice"], "До відключення зарядиться лише до 74 %. На 2,5 кВт — до 99 %: "
                                       "збільште потужність заряду в застосунку Marstek.")
 
     def test_no_advice(self):
