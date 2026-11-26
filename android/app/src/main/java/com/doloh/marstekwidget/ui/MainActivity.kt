@@ -458,6 +458,9 @@ class MainActivity : Activity() {
             startActivity(Intent(this@MainActivity, StatsActivity::class.java))
         }.apply { visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE }
         journalCard.addView(statsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
+        journalCard.addView(actionButton("Калькулятор енергії", filled = false) {
+            startActivity(Intent(this@MainActivity, CalcActivity::class.java))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
         // Diagnostics, collapsed by default.
         val diagCard = card()

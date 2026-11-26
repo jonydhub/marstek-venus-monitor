@@ -216,3 +216,18 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .stats-row.off span:nth-child(2){color:#ff9d8f}
 .stats-row.live span{color:#ff9d8f;font-weight:600}
 .stats-group{margin-top:4px;padding:7px 0 1px;border-top:1px solid var(--line);font-size:11px;font-weight:600}
+/* v26: «Калькулятор» */
+.calc{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(155deg,rgba(26,33,45,.98),rgba(21,27,37,.96))}
+.calc-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:4px 0 12px}
+.calc-preset{display:flex;flex-direction:column;align-items:center;gap:1px;padding:7px 4px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.035);color:var(--text);font:inherit;font-size:12px;cursor:pointer}
+.calc-preset small{color:var(--muted);font-size:11px}.calc-preset:hover,.calc-preset:focus-visible{border-color:#36c6d5}
+.calc-inputs{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px}
+.calc label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--dim)}
+.calc input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.18);color:var(--text);font:inherit;font-size:16px;font-variant-numeric:tabular-nums}
+.calc-result{margin:14px 0 10px;padding:12px 14px;border-radius:16px;background:rgba(54,198,213,.06)}
+.calc-result strong{display:block;color:#36c6d5;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+.calc-row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:13px}.calc-row span{color:var(--muted)}.calc-row b{font-variant-numeric:tabular-nums;text-align:right}.calc-row.bad b{color:#ff9d8f}
+.calc-warning{margin:8px 0 0;color:var(--amber);font-size:12px;font-weight:650}.calc-warning[hidden]{display:none}
+.calc-tariff{max-width:260px}.calc-tariff small{color:var(--dim);font-size:10px}
+@media(min-width:760px){.calc-presets{grid-template-columns:repeat(9,minmax(0,1fr))}}
+@media(min-width:1100px){.official-shell>.calc{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);column-gap:24px;align-items:start}.calc>.flow-heading,.calc>.calc-presets{grid-column:1/-1}.calc>.calc-inputs{grid-column:1;grid-row:3}.calc>.calc-tariff{grid-column:1;grid-row:4;margin-top:12px}.calc>.calc-result{grid-column:2;grid-row:3/5;margin:0}}

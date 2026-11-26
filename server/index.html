@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=25">
+  <link rel="stylesheet" href="/style.css?v=26">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -123,6 +123,18 @@
         <div><h3 class="stats-sub">Заряджання</h3><div class="stats-table" id="stats-charges"></div></div>
       </div>
       <p class="flow-footnote">Станція — енергія з резервного виходу, поки світла не було. Дрібні підзаряди 99→100 % не показано.</p>
+    </section>
+
+    <section class="calc" id="calc" aria-label="Калькулятор енергії">
+      <div class="flow-heading"><div><p class="eyebrow">КАЛЬКУЛЯТОР</p><h2>Скільки піде енергії</h2></div></div>
+      <div class="calc-presets" id="calc-presets"></div>
+      <div class="calc-inputs">
+        <label class="calc-watts">Потужність, Вт<input id="calc-watts" inputmode="decimal" autocomplete="off"></label>
+        <label>Годин<input id="calc-hours" inputmode="decimal" autocomplete="off"></label>
+        <label>Хвилин<input id="calc-minutes" inputmode="decimal" autocomplete="off"></label>
+      </div>
+      <div class="calc-result"><strong id="calc-energy">—</strong><div id="calc-rows"></div><p class="calc-warning" id="calc-warning" hidden>Понад 2,5 кВт — резервний вихід станції не потягне</p></div>
+      <label class="calc-tariff">Тариф, грн за кВт·год<input id="calc-tariff" inputmode="decimal" autocomplete="off"><small>4,32 — для населення до 30.04.2027; ніч на двозонному — 2,16</small></label>
     </section>
 
     <section class="journal" id="journal" aria-label="Журнал подій">

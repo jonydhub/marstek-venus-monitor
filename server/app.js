@@ -939,6 +939,69 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   }
   const sub = $('hero-sub'); if (sub) { sub.hidden = light.state !== 'off' && light.state !== 'nolink' && sub.dataset.redundant === '1'; }
 }
+/**
+ * «Калькулятор» — same rules as Android EnergyCalc (keep in sync): power × time → energy, cost, share of the battery,
+ * charge after it and how long the usable charge lasts at that power. Null when the power or the time is not positive.
+ */
+const CALC_TARIFF = 4.32, CALC_BACKUP_LIMIT_W = 2500;
+const CALC_PRESETS = [['Чайник', 2000, 5], ['Мікрохвильовка', 1000, 5], ['Бойлер', 1500, 60], ['Обігрівач', 1500, 60], ['Пральна', 500, 90],
+  ['Холодильник', 100, 1440], ['Телевізор', 100, 180], ['Ноутбук', 65, 240], ['Роутер', 15, 1440]];
+function calcNum(v, digits) { return Number(v).toLocaleString('uk-UA', {minimumFractionDigits: digits, maximumFractionDigits: digits}); }
+function energyCalc(watts, seconds, battery = null, tariff = CALC_TARIFF) {
+  const w = Number(watts), sec = Number(seconds);
+  if (watts === null || watts === undefined || !Number.isFinite(w) || w <= 0 || !Number.isFinite(sec) || sec <= 0) return null;
+  const fin = v => v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : null;
+  const wh = w * sec / 3600;
+  const pick = (v, ok) => { const n = fin(v); return n !== null && ok(n) ? n : null; };  // (null >= 0 is true in JS)
+  const rated = pick(battery?.rated_wh, n => n > 0), stored = pick(battery?.stored_wh, n => n >= 0), floor = pick(battery?.floor_pct, n => n > 0);
+  let usable = fin(battery?.usable_wh);
+  if (usable === null && stored !== null) usable = stored - (rated !== null && floor !== null ? rated * floor / 100 : 0);
+  if (usable !== null) usable = Math.max(0, usable);
+  const fits = usable === null ? null : wh <= usable;
+  const t = fin(tariff);
+  return {
+    energy: wh < 999.5 ? `${Math.round(wh)}\u00A0Вт·год` : `${calcNum(wh / 1000, 2)}\u00A0кВт·год`,
+    cost: t !== null && t > 0 ? `${calcNum(wh / 1000 * t, 2)}\u00A0грн` : null,
+    battery_share: rated !== null ? `${Math.round(wh / rated * 100)}\u00A0%` : null,
+    soc_after: fits === true && rated !== null && stored !== null ? `${Math.round((stored - wh) / rated * 100)}\u00A0%` : null,
+    fits,
+    runtime: usable !== null ? spanText(Math.round(usable / w * 3600) * 1000) : null,
+    runtime_to: `до ${floor === null ? '0' : floor % 1 ? calcNum(floor, 1) : String(floor)}\u00A0%`,
+    over_limit: w > CALC_BACKUP_LIMIT_W,
+  };
+}
+let calcBattery = null;
+function calcInput(id) { const v = String($(id)?.value ?? '').trim().replace(',', '.'); return v === '' ? null : Number(v); }
+function renderCalc() {
+  if (!$('calc-watts')) return;
+  const store = {}; for (const id of ['calc-watts', 'calc-hours', 'calc-minutes', 'calc-tariff']) store[id] = $(id).value;
+  try { localStorage.setItem('marstek-calc', JSON.stringify(store)); } catch (e) { /* private mode */ }
+  const seconds = (calcInput('calc-hours') || 0) * 3600 + (calcInput('calc-minutes') || 0) * 60;
+  const r = energyCalc(calcInput('calc-watts'), seconds, calcBattery, calcInput('calc-tariff'));
+  const rows = $('calc-rows'); rows.replaceChildren();
+  set('calc-energy', r ? r.energy : '—');
+  $('calc-warning').hidden = !r?.over_limit;
+  if (!r) { rows.append(el('p', 'stats-empty', 'Вкажіть потужність і час')); return; }
+  const add = (k, v, cls = '') => { const d = el('div', `calc-row ${cls}`.trim()); d.append(el('span', '', k), el('b', '', v)); rows.append(d); };
+  if (r.cost) add('Коштуватиме', r.cost);
+  if (r.battery_share) add('Від повної батареї', r.battery_share);
+  if (r.fits === true && r.soc_after) add('Заряд після', r.soc_after);
+  if (r.fits === false) add('Від поточного заряду', 'не вистачить', 'bad');
+  if (r.runtime) add('Заряду вистачить на', `${r.runtime} · ${r.runtime_to}`);
+}
+function initCalc() {
+  const host = $('calc-presets'); if (!host) return;
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem('marstek-calc') || '{}'); } catch (e) { saved = {}; }
+  const defaults = {'calc-watts': '1500', 'calc-hours': '0', 'calc-minutes': '30', 'calc-tariff': '4,32'};
+  for (const [id, v] of Object.entries(defaults)) { $(id).value = saved[id] ?? v; $(id).addEventListener('input', renderCalc); }
+  for (const [name, w, min] of CALC_PRESETS) {
+    const b = el('button', 'calc-preset'); b.type = 'button';
+    b.append(el('span', '', name), el('small', '', `${w}\u00A0Вт`));
+    b.addEventListener('click', () => { $('calc-watts').value = w; $('calc-hours').value = Math.floor(min / 60); $('calc-minutes').value = min % 60; renderCalc(); });
+    host.append(b);
+  }
+  renderCalc();
+}
 function render(data) {
   const m=data.methods||{}, wifi=good(m['Wifi.GetStatus']), ble=good(m['BLE.GetStatus']), bat=good(m['Bat.GetStatus']), es=good(m['ES.GetStatus']), mode=good(m['ES.GetMode']), em=good(m['EM.GetStatus']);
   const required = m['Bat.GetStatus']?.ok && m['ES.GetStatus']?.ok;
@@ -957,6 +1020,7 @@ function render(data) {
   $('soc-ring').setAttribute('aria-valuenow', Number.isFinite(socNumber) ? String(Math.round(socNumber)) : '0');
   const batteryWh = bat.bat_capacity ?? es.bat_cap;
   const ratedWh = bat.rated_capacity ?? es.bat_cap;
+  calcBattery = {rated_wh: ratedWh, stored_wh: batteryWh, usable_wh: data.power_outage?.autonomy?.usable_wh, floor_pct: data.power_outage?.autonomy?.floor_pct}; renderCalc();
   set('capacity-kwh', formatKwh(batteryWh));
   set('capacity', batteryWh != null && ratedWh != null ? `${formatKwh(batteryWh)} / ${formatKwh(ratedWh)}` : formatKwh(batteryWh));
   set('temperature', num(bat.bat_temp,'°C'));
@@ -1068,4 +1132,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(error => console.warn('PWA offline shell registration failed', error));
 }
 document.querySelector('.diagnostics')?.addEventListener('toggle', drawChart);
-refresh(); loadJournal(); loadStats(); setInterval(refresh,15000); setInterval(loadJournal,60000); setInterval(loadStats,300000); window.addEventListener('resize',drawChart);
+initCalc(); refresh(); loadJournal(); loadStats(); setInterval(refresh,15000); setInterval(loadJournal,60000); setInterval(loadStats,300000); window.addEventListener('resize',drawChart);
