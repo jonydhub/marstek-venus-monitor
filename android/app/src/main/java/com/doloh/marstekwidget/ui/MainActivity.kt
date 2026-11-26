@@ -60,6 +60,7 @@ import com.doloh.marstekwidget.domain.AlertGroup
 import com.doloh.marstekwidget.domain.AlertSeverity
 import com.doloh.marstekwidget.domain.SummaryMode
 import com.doloh.marstekwidget.domain.OperatingModeFormatter
+import com.doloh.marstekwidget.domain.PowerBadges
 import com.doloh.marstekwidget.domain.PowerOutageFormatter
 import com.doloh.marstekwidget.domain.SummaryLineKind
 import com.doloh.marstekwidget.domain.SummaryTone
@@ -92,6 +93,7 @@ class MainActivity : Activity() {
     private lateinit var updateNote: TextView
     private lateinit var updateClose: TextView
     private lateinit var socValue: TextView
+    private lateinit var powerValue: TextView
     private lateinit var lightDot: TextView
     private lateinit var lightHeadline: TextView
     private lateinit var modeChip: TextView
@@ -319,7 +321,17 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         socValue = label("—%", 46f, MINT, true).apply { includeFontPadding = false }
-        heroRow.addView(socValue)
+        // Big battery power right under the SOC while it charges / discharges («↓ 445 Вт», «↑ 1,1 кВт»).
+        powerValue = label("", 22f, AMBER, true).apply {
+            includeFontPadding = false
+            maxLines = 1
+            visibility = View.GONE
+            setPadding(dp(2), dp(2), 0, 0)
+        }
+        val socColumn = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        socColumn.addView(socValue)
+        socColumn.addView(powerValue)
+        heroRow.addView(socColumn)
         val stateColumn = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), 0, 0, 0)
@@ -616,6 +628,11 @@ class MainActivity : Activity() {
         socValue.text = snapshot?.socPercent?.let { getString(R.string.main_soc_value, it) } ?: "—%"
         socValue.setTextColor(if ((snapshot?.socPercent ?: 100) < 20) CORAL else MINT)
         socProgress.setSoc(snapshot?.socPercent)
+        val badge = PowerBadges.of(snapshot, state == WidgetFetchState.ERROR || snapshot?.batteryLinkLost == true)
+        powerValue.visibility = if (badge != null) View.VISIBLE else View.GONE
+        powerValue.text = badge?.text.orEmpty()
+        powerValue.setTextColor(if (badge?.charging == true) POWER_ON else AMBER)
+        powerValue.contentDescription = badge?.let { (if (it.charging) "Заряджається " else "Розряджається ") + it.text.drop(2) }
         val temperature = (snapshot?.temperatureCelsius ?: snapshot?.insights?.temperatureCelsius)?.let(WidgetSummaryResolver::formatTemperature)
         capacityLine.text = listOfNotNull(
             if (snapshot?.batteryCapacityWh != null) getString(R.string.widget_capacity_value, BatteryDisplayFormatter.formatKwh(snapshot.batteryCapacityWh), BatteryDisplayFormatter.formatKwh(snapshot.ratedCapacityWh))
@@ -641,6 +658,8 @@ class MainActivity : Activity() {
             }
             light.kind == LightKind.NO_LINK -> "Дані на екрані — останні збережені"
             warning != null && warning != BatteryWarning.HIGH_POWER -> warningLabel(warning)
+            // the power is the big number under the SOC: the state line names only the direction
+            badge != null && light.kind != LightKind.OFF -> if (badge.charging) "Заряджається" else "Розряджається"
             else -> summary?.batteryState?.takeIf { light.kind != LightKind.OFF } ?: directionWord(snapshot)
         }
         stateLine.setTextColor(if (warning != null && warning != BatteryWarning.HIGH_POWER) AMBER else MUTED)

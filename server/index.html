@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=23">
+  <link rel="stylesheet" href="/style.css?v=24">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -74,7 +74,7 @@
           <h1 id="capacity-kwh">— кВт·год</h1>
           <span id="battery-state" class="battery-state">Очікую дані батареї</span>
         </div>
-        <div class="soc-readout"><strong id="soc-value">—</strong><span>%</span><small>заряду</small></div>
+        <div class="soc-readout"><strong id="soc-value">—</strong><span>%</span><small>заряду</small><b id="soc-power" class="soc-power" hidden></b></div>
       </div>
       <div id="soc-ring" class="soc-track" role="progressbar" aria-label="Рівень заряду батареї" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span class="soc-fill"></span></div>
       <div class="battery-meta">

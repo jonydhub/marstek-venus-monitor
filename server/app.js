@@ -106,7 +106,25 @@ function formatDuration(seconds) {
   if (hours) return minutes ? `${hours} год ${minutes} хв` : `${hours} год`;
   return `${minutes} хв`;
 }
+/**
+ * Big power next to the SOC — same rules as Android PowerBadges (keep in sync): «↓ 445 Вт» discharging, «↑ 1,1 кВт»
+ * charging, «≈» when estimated; null when idle / no reading / under 10 W.
+ */
+function powerBadge(flow = {}) {
+  const charging = flow.direction === 'charging';
+  if (!flow.available || !(charging || flow.direction === 'discharging')) return null;
+  const watts = Math.abs(Number(flow.power_w));
+  if (!Number.isFinite(watts) || watts < 10) return null;
+  const value = watts < 999.5 ? `${Math.round(watts)}\u00A0Вт` : `${(watts / 1000).toLocaleString('uk-UA', {minimumFractionDigits: 1, maximumFractionDigits: 1})}\u00A0кВт`;
+  return {text: `${charging ? '↑' : '↓'}\u00A0${flow.estimated === false ? '' : '≈\u00A0'}${value}`, charging};
+}
 function renderBatteryFlow(flow = {}) {
+  const badge = powerBadge(flow), badgeEl = $('soc-power');
+  if (badgeEl) {
+    badgeEl.hidden = !badge;
+    badgeEl.textContent = badge ? badge.text : '';
+    badgeEl.classList.toggle('charging', Boolean(badge?.charging));
+  }
   const windowSeconds = Number(flow.window_seconds) || 0;
   const windowMinutes = Math.round(windowSeconds / 60);
   const measured = flow.estimated === false;
