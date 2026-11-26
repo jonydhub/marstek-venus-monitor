@@ -34,37 +34,45 @@ class SufficiencyTest {
         assertNull(suff(ts(17), "off", currentEnd = ts(20)).verdict)
     }
 
-    @Test fun nextOutageEnough() = assertEquals(true to "На відключення 20:00–00:00 вистачить · лишиться ≈ 43 %",
-        suff(ts(15), "on", load = 457.0, nextStart = ts(20), nextEnd = ts(0, day = 27)).v())
-
-    @Test fun nextOutageTomorrowNamesTheDay() = assertEquals("На відключення завтра 21:00–00:00 вистачить · лишиться ≈ 52 %",
-        suff(ts(18), "on", load = 457.0, nextStart = ts(21, day = 27), nextEnd = ts(0, day = 28)).v()?.second)
-
-    @Test fun nextOutageShort() = assertEquals(false to "На відключення 20:00–00:00 не вистачить ≈ 33 хв",
-        suff(ts(15), "on", load = 1000.0, nextStart = ts(20), nextEnd = ts(0, day = 27)).v())
-
-    @Test fun chargingCountsUntilTheOutage() {
-        val r = suff(ts(15), "on", stored = 4000.0, load = 1000.0, charge = 1194.0, nextStart = ts(16), nextEnd = ts(20))
-        assertEquals(true to "На відключення 16:00–20:00 вистачить · лишиться ≈ 22 %", r.v())
+    @Test fun idleShowsNothing() {
+        assertNull(suff(ts(18), "on", stored = 5120.0, load = 494.0, nextStart = ts(21, day = 27), nextEnd = ts(0, day = 28)).verdict)
+        val r = suff(ts(15), "on", stored = 2000.0, load = 1000.0, nextStart = ts(20))
+        assertNull(r.verdict)
         assertNull(r.advice)
     }
 
-    @Test fun adviceNotFullEvenAtMax() = assertEquals(
-        "До відключення зарядиться лише до 51 %. На 2,5 кВт — до 63 %: збільште потужність заряду в застосунку Marstek.",
-        suff(ts(15), "on", stored = 2000.0, charge = 1200.0, nextStart = ts(15, 30), nextEnd = ts(19, 30)).advice.c())
+    @Test fun chargingFullInTime() {
+        val r = suff(ts(15), "on", stored = 4000.0, charge = 1194.0, nextStart = ts(16), nextEnd = ts(20))
+        assertEquals(true to "Встигне зарядитися: 100 % о 15:56, відключення о 16:00", r.v())
+        assertNull(r.advice)
+    }
 
-    @Test fun adviceReachesFullAtMax() = assertEquals(
-        "До відключення зарядиться лише до 98 %. На 2,5 кВт — 100 % о 15:51: збільште потужність заряду в застосунку Marstek.",
-        suff(ts(15), "on", stored = 3000.0, charge = 1000.0, nextStart = ts(17), nextEnd = ts(19)).advice.c())
+    @Test fun chargingFullBeforeTomorrowsOutage() = assertEquals("Встигне зарядитися: 100 % о 20:36, відключення завтра о 21:00",
+        suff(ts(18), "on", stored = 2000.0, charge = 1200.0, nextStart = ts(21, day = 27)).v()?.second)
 
-    @Test fun adviceAlmostFullIsNot100() = assertEquals(
-        "До відключення зарядиться лише до 74 %. На 2,5 кВт — до 99 %: збільште потужність заряду в застосунку Marstek.",
-        suff(ts(15), "on", stored = 2600.0, charge = 1194.0, nextStart = ts(16), nextEnd = ts(20)).advice.c())
+    @Test fun notFullEvenAtMax() {
+        val r = suff(ts(15), "on", stored = 2000.0, charge = 1200.0, nextStart = ts(15, 30), nextEnd = ts(19, 30))
+        assertEquals(false to "Не встигне зарядитися: до відключення о 15:30 буде ≈ 51 %", r.v())
+        assertEquals("На 2,5 кВт — до 63 %: збільште потужність заряду в застосунку Marstek.", r.advice.c())
+    }
 
-    @Test fun noAdvice() {
-        assertNull(suff(ts(15), "on", stored = 4500.0, charge = 1200.0, nextStart = ts(17)).advice)
-        assertNull(suff(ts(15), "on", stored = 1000.0, charge = 2450.0, nextStart = ts(15, 30)).advice)
-        assertNull(suff(ts(15), "on", stored = 1000.0, nextStart = ts(15, 30)).advice)
-        assertNull(suff(ts(15), "on", stored = 1000.0, charge = 1200.0).advice)
+    @Test fun fullAtMax() {
+        val r = suff(ts(15), "on", stored = 3000.0, charge = 1000.0, nextStart = ts(17), nextEnd = ts(19))
+        assertEquals("Не встигне зарядитися: до відключення о 17:00 буде ≈ 98 %", r.v()?.second)
+        assertEquals("На 2,5 кВт — 100 % о 15:51: збільште потужність заряду в застосунку Marstek.", r.advice.c())
+    }
+
+    @Test fun almostFullAtMaxIsNot100() {
+        val r = suff(ts(15), "on", stored = 2600.0, charge = 1194.0, nextStart = ts(16), nextEnd = ts(20))
+        assertEquals("Не встигне зарядитися: до відключення о 16:00 буде ≈ 74 %", r.v()?.second)
+        assertEquals("На 2,5 кВт — до 99 %: збільште потужність заряду в застосунку Marstek.", r.advice.c())
+    }
+
+    @Test fun noAdviceAtFullPowerNothingWithoutOutageOrWhenFull() {
+        val r = suff(ts(15), "on", stored = 1000.0, charge = 2450.0, nextStart = ts(15, 30))
+        assertEquals("Не встигне зарядитися: до відключення о 15:30 буде ≈ 43 %", r.v()?.second)
+        assertNull(r.advice)
+        assertNull(suff(ts(15), "on", stored = 1000.0, charge = 1200.0).verdict)
+        assertNull(suff(ts(15), "on", stored = 5080.0, charge = 100.0, nextStart = ts(16)).verdict)
     }
 }

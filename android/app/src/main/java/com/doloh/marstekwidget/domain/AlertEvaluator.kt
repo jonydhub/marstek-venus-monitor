@@ -264,8 +264,11 @@ object AlertEvaluator {
                 m = m.copy(reserveNextSentFor = info.nextStart)
             }
             // charging, but not fast enough to be full by the outage → suggest a higher charge power (Sufficiency)
-            Sufficiency.of(snapshot, info, linkLost = false, nowMillis = nowMillis).advice?.let { advice ->
-                val alert = Alert(AlertId.CHARGE_TOO_SLOW, AlertSeverity.WARN, "Не встигне зарядитися до відключення", advice)
+            val suff = Sufficiency.of(snapshot, info, linkLost = false, nowMillis = nowMillis)
+            suff.advice?.let { advice ->
+                val now = suff.verdict?.text?.substringAfter(": ")?.replaceFirstChar { it.uppercase() }
+                val alert = Alert(AlertId.CHARGE_TOO_SLOW, AlertSeverity.WARN, "Не встигне зарядитися до відключення",
+                    listOfNotNull(now, advice).joinToString(". "))
                 active += alert
                 if (m0.chargeSlowSentFor != info.nextStart) events += alert
                 m = m.copy(chargeSlowSentFor = info.nextStart)

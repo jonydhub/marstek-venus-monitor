@@ -187,7 +187,7 @@ class AlertEvaluatorTest {
         val r = eval(null, slow)
         val alert = r.one(AlertId.CHARGE_TOO_SLOW)
         assertEquals("Не встигне зарядитися до відключення", alert.title)
-        assertEquals("До відключення зарядиться лише до 53 %. На 2,5 кВт — до 79 %: збільште потужність заряду в застосунку Marstek.",
+        assertEquals("До відключення о 20:00 буде ≈ 53 %. На 2,5 кВт — до 79 %: збільште потужність заряду в застосунку Marstek.",
             alert.text.replace('\u00A0', ' '))
         assertFalse(AlertId.CHARGE_TOO_SLOW in eval(r.memory, slow).ids())
         assertTrue(eval(r.memory, slow).active.any { it.id == AlertId.CHARGE_TOO_SLOW })

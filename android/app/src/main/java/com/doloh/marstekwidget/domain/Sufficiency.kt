@@ -71,7 +71,6 @@ object Sufficiency {
         val load = loadW?.takeIf { it.isFinite() && it > 0 }
         val charge = chargeW?.takeIf { it.isFinite() && it > 0 } ?: 0.0
         val floorWh = if (rated != null && floorPct != null && floorPct > 0) rated * floorPct / 100 else 0.0
-        fun pct(wh: Double) = "${(wh / (rated ?: 1.0) * 100).roundToInt()}$NBSP%"
 
         if (light == "off" && currentEnd != null && currentEnd > now && load != null) {
             val runtime = max(0.0, stored - floorWh) / load * 3600
@@ -85,28 +84,21 @@ object Sufficiency {
             }
             return Result(verdict, null)
         }
-        if (light != "on" || nextStart == null || nextStart <= now) return Result(null, null)
+        // Light on: only while charging — will it be full before the next outage? Idle / no outage ahead → nothing.
+        if (light != "on" || nextStart == null || nextStart <= now || charge <= 0 || rated == null || stored >= rated * 0.99) {
+            return Result(null, null)
+        }
         val t = nextStart - now
-        val storedAt = (stored + charge * t / 3600).let { if (rated != null) min(rated, it) else it }
-        var verdict: Verdict? = null
-        if (load != null && nextEnd != null && nextEnd > nextStart) {
-            val range = "${day(nextStart, now)}${hm(nextStart)}–${hm(nextEnd)}"
-            val need = load * (nextEnd - nextStart) / 3600
-            val usable = storedAt - floorWh
-            verdict = if (usable >= need) {
-                Verdict(true, "На відключення $range вистачить" + (rated?.let { " · лишиться ≈$NBSP${pct(storedAt - need)}" } ?: ""))
-            } else {
-                Verdict(false, "На відключення $range не вистачить ≈$NBSP${span((need - max(0.0, usable)) / load * 3600)}")
-            }
-        }
-        var advice: String? = null
-        if (charge > 0 && rated != null && storedAt < rated * 0.99 && charge < MAX_CHARGE_W - ADVICE_MARGIN_W) {
-            val fullAtMax = (rated - stored) / MAX_CHARGE_W * 3600
-            val atMax = if (fullAtMax <= t) "100$NBSP% ${clock(now + fullAtMax, now)}"
-            else "до ${min(99, ((stored + MAX_CHARGE_W * t / 3600) / rated * 100).roundToInt())}$NBSP%"  // not full → never «100 %»
-            advice = "До відключення зарядиться лише до ${pct(storedAt)}. На 2,5${NBSP}кВт — $atMax: збільште потужність заряду в застосунку Marstek."
-        }
-        return Result(verdict, advice)
+        val whenText = clock(nextStart, now)
+        val fullIn = (rated - stored) / charge * 3600
+        if (fullIn <= t) return Result(Verdict(true, "Встигне зарядитися: 100$NBSP% ${clock(now + fullIn, now)}, відключення $whenText"), null)
+        val at = min(99, ((stored + charge * t / 3600) / rated * 100).roundToInt())  // not full → never «100 %»
+        val verdict = Verdict(false, "Не встигне зарядитися: до відключення $whenText буде ≈$NBSP$at$NBSP%")
+        if (charge >= MAX_CHARGE_W - ADVICE_MARGIN_W) return Result(verdict, null)
+        val fullAtMax = (rated - stored) / MAX_CHARGE_W * 3600
+        val atMax = if (fullAtMax <= t) "100$NBSP% ${clock(now + fullAtMax, now)}"
+        else "до ${min(99, ((stored + MAX_CHARGE_W * t / 3600) / rated * 100).roundToInt())}$NBSP%"
+        return Result(verdict, "На 2,5${NBSP}кВт — $atMax: збільште потужність заряду в застосунку Marstek.")
     }
 
     private fun seconds(iso: String?): Double? = iso?.let {

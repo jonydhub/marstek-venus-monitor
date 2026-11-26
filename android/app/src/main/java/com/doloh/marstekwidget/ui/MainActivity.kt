@@ -850,7 +850,11 @@ class MainActivity : Activity() {
             ?.takeIf { !nextVerdict && it != sub && it !in shownBySchedule }
         outageLine.text = nextText.orEmpty()
         outageLine.visibility = if (nextText.isNullOrBlank()) View.GONE else View.VISIBLE
-        val reserveText = reserve?.text?.takeIf { light.kind == LightKind.ON && it != eta && !nextVerdict }
+        // «Запас ≈ 9 год · вистачить» while nothing is used reads like a statement about now — only a warning stays
+        val reserveText = reserve?.text?.takeIf {
+            light.kind == LightKind.ON && it != eta && !nextVerdict &&
+                (snapshot?.direction == com.doloh.marstekwidget.domain.BatteryDirection.DISCHARGING || reserve.tone == SummaryTone.WARNING || reserve.tone == SummaryTone.CRITICAL)
+        }
         reserveLine.visibility = if (reserveText == null) View.GONE else View.VISIBLE
         reserveLine.text = reserveText.orEmpty()
         reserveLine.setTextColor(toneColor(reserve?.tone))
