@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
 import gridstate
+import report as report_module
 from history import (day_starts, week_light, stats as history_stats, counters as history_counters, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
                      measured_backup_load, smoothed_backup_load)
 from outage import build_outage_service
@@ -641,6 +642,23 @@ def _compute_stats(now) -> dict:
     return {**body, "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
+def report_payload(query="", now=None) -> dict:
+    """GET /api/report?period=week|month&offset=N: totals of the period N back (0 = to date) and the one before it,
+    from the stored day totals + today (see report.py). Uses the stats cache for today."""
+    params = parse_qs(query or "")
+    period = (params.get("period") or ["week"])[0]
+    if period not in ("week", "month"):
+        raise ValueError("period")
+    offset = max(0, min(24, int((params.get("offset") or ["0"])[0])))
+    body = stats_payload(now)
+    days = list(poller.history.day_totals()) if poller.history is not None else []
+    if body.get("days"):
+        today = body["days"][0]
+        days = [d for d in days if d["date"] != today["date"]] + [today]
+    today_date = datetime.now(KYIV_TZ).date() if now is None else datetime.fromtimestamp(now, KYIV_TZ).date()
+    return report_module.report(days, today=today_date, period=period, offset=offset)
+
+
 def stats_payload(now=None) -> dict:
     """GET /api/stats: per-day totals, outages (energy from the station, SOC) and charge sessions for 7 days.
 
@@ -794,6 +812,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logging.warning("stats failed: %s", exc)
                 return self.send_json(500, {"error": "stats_unavailable"})
+        if path == "/api/report":
+            try:
+                return self.send_json(200, report_payload(query))
+            except ValueError:
+                return self.send_json(400, {"error": "bad_request"})
+            except Exception as exc:
+                logging.warning("report failed: %s", exc)
+                return self.send_json(500, {"error": "report_unavailable"})
         if path == "/api/regions":
             try:
                 regions = regions_catalog()

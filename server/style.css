@@ -236,3 +236,17 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .counters[hidden]{display:none}
 .counters-table .stats-row{grid-template-columns:2.3fr 1fr 1fr 1fr}
 .counters-table .stats-row:not(.head) span:not(:first-child):not(.dash){color:var(--text);font-weight:600}
+/* v28: «Чи вистачить» + charge advice in the hero */
+.hero-verdict{margin:6px 0 0;font-size:14px;font-weight:620;line-height:1.35}.hero-verdict.good{color:#5fe0cf}.hero-verdict.bad{color:var(--coral)}
+.hero-advice{margin:8px 0 0;padding:8px 11px;border:1px solid rgba(245,183,46,.35);border-radius:12px;background:rgba(245,183,46,.08);color:var(--amber);font-size:12.5px;line-height:1.4}
+.hero-verdict[hidden],.hero-advice[hidden]{display:none}
+/* v29: «Звіт» */
+.report{margin:14px 0;padding:16px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(155deg,rgba(26,33,45,.98),rgba(21,27,37,.96))}
+.report[hidden]{display:none}
+.report .flow-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.report-tabs{display:flex;gap:4px;padding:3px;border:1px solid var(--line);border-radius:12px}
+.report-tab{padding:6px 10px;border:0;border-radius:9px;background:none;color:var(--muted);font:inherit;font-size:12px;cursor:pointer}
+.report-tab[aria-pressed="true"]{background:rgba(54,198,213,.15);color:var(--text);font-weight:600}
+.report-table .stats-row{grid-template-columns:2.2fr 1.2fr 1.2fr}
+.report-table .stats-row:not(.head) span:nth-child(2){color:var(--text);font-weight:600}
+@media(min-width:1100px){.official-shell>.report{grid-column:1/-1}}

@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icons/marstek-192.png">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=27">
+  <link rel="stylesheet" href="/style.css?v=29">
 </head>
 <body>
   <form id="token-form" class="token-form" hidden>
@@ -38,6 +38,8 @@
       <h2 id="hero-title" class="hero-title">Перевіряю…</h2>
       <p id="hero-forecast" class="hero-forecast">—</p>
       <p id="hero-sub" class="hero-sub">—</p>
+      <p id="hero-verdict" class="hero-verdict" hidden></p>
+      <p id="hero-advice" class="hero-advice" hidden></p>
       <div class="today-tiles" id="today-tiles" aria-label="Сьогодні з 00:00">
         <div><b id="today-charge">—</b><small id="today-charge-kwh">&nbsp;</small><span>Заряд</span></div>
         <div><b id="today-discharge">—</b><small id="today-discharge-kwh">&nbsp;</small><span>Розряд</span></div>
@@ -129,6 +131,13 @@
         <div><h3 class="stats-sub">Заряджання</h3><div class="stats-table" id="stats-charges"></div></div>
       </div>
       <p class="flow-footnote">Станція — енергія з резервного виходу, поки світла не було. Дрібні підзаряди 99→100 % не показано.</p>
+    </section>
+
+    <section class="report" id="report" aria-label="Звіт" hidden>
+      <div class="flow-heading"><div><p class="eyebrow">ЗВІТ</p><h2 id="report-title">—</h2></div>
+        <div class="report-tabs" role="group" aria-label="Період"><button type="button" class="report-tab" data-period="week" aria-pressed="true">Тиждень</button><button type="button" class="report-tab" data-period="month" aria-pressed="false">Місяць</button></div></div>
+      <div class="stats-table report-table" id="report-table"></div>
+      <p class="flow-footnote">Вартість — за тарифом 4,32 грн/кВт·год. Щопонеділка й 1-го числа звіт приходить у Telegram.</p>
     </section>
 
     <section class="calc" id="calc" aria-label="Калькулятор енергії">
