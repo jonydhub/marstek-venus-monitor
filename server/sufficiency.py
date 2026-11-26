@@ -70,9 +70,6 @@ def sufficiency(*, now, light, stored_wh, rated_wh=None, floor_pct=None, load_w=
     floor_wh = rated * floor / 100 if rated is not None and floor > 0 else 0.0
     cur_end, nxt_start, nxt_end = _num(current_end), _num(next_start), _num(next_end)
 
-    def pct(wh: float) -> str:
-        return f"{round(wh / (rated or 1) * 100)}{NBSP}%"
-
     if light == "off" and cur_end is not None and cur_end > now and load is not None:
         runtime, remaining = max(0.0, stored - floor_wh) / load * 3600, cur_end - now
         if runtime >= remaining:
@@ -83,29 +80,25 @@ def sufficiency(*, now, light, stored_wh, rated_wh=None, floor_pct=None, load_w=
             out["verdict"] = {"ok": False, "text": f"Не вистачить ≈{NBSP}{_span(remaining - runtime)}: заряду до "
                                                    f"{_hm(now + runtime)}, світло {_clock(cur_end, now)}"}
         return out
-    if light != "on" or nxt_start is None or nxt_start <= now:
+    # Light on: only while charging — will it be full before the next outage? Idle / no outage ahead → nothing
+    # (a forecast «вистачить · лишиться 71 %» with nothing being used reads like a statement about now).
+    if light != "on" or nxt_start is None or nxt_start <= now or charge <= 0 or rated is None or stored >= rated * 0.99:
         return out
     t = nxt_start - now
-    stored_at = stored + charge * t / 3600
-    if rated is not None:
-        stored_at = min(rated, stored_at)
-    if load is not None and nxt_end is not None and nxt_end > nxt_start:
-        rng = f"{_day(nxt_start, now)}{_hm(nxt_start)}–{_hm(nxt_end)}"
-        need, usable = load * (nxt_end - nxt_start) / 3600, stored_at - floor_wh
-        if usable >= need:
-            left = f" · лишиться ≈{NBSP}{pct(stored_at - need)}" if rated is not None else ""
-            out["verdict"] = {"ok": True, "text": f"На відключення {rng} вистачить{left}"}
-        else:
-            out["verdict"] = {"ok": False, "text": f"На відключення {rng} не вистачить ≈{NBSP}"
-                                                   f"{_span((need - max(0.0, usable)) / load * 3600)}"}
-    if charge > 0 and rated is not None and stored_at < rated * 0.99 and charge < MAX_CHARGE_W - ADVICE_MARGIN_W:
+    when = _clock(nxt_start, now)
+    full_in = (rated - stored) / charge * 3600
+    if full_in <= t:
+        out["verdict"] = {"ok": True, "text": f"Встигне зарядитися: 100{NBSP}% {_clock(now + full_in, now)}, відключення {when}"}
+        return out
+    at = min(99, round((stored + charge * t / 3600) / rated * 100))  # not full → never «100 %»
+    out["verdict"] = {"ok": False, "text": f"Не встигне зарядитися: до відключення {when} буде ≈{NBSP}{at}{NBSP}%"}
+    if charge < MAX_CHARGE_W - ADVICE_MARGIN_W:
         full_at_max = (rated - stored) / MAX_CHARGE_W * 3600
         if full_at_max <= t:
             at_max = f"100{NBSP}% {_clock(now + full_at_max, now)}"
-        else:  # not full before the outage → never «100 %»
+        else:
             at_max = f"до {min(99, round((stored + MAX_CHARGE_W * t / 3600) / rated * 100))}{NBSP}%"
-        out["advice"] = (f"До відключення зарядиться лише до {pct(stored_at)}. На 2,5{NBSP}кВт — {at_max}: "
-                         f"збільште потужність заряду в застосунку Marstek.")
+        out["advice"] = f"На 2,5{NBSP}кВт — {at_max}: збільште потужність заряду в застосунку Marstek."
     return out
 
 

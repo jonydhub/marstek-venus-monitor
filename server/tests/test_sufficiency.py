@@ -46,50 +46,47 @@ class SufficiencyTests(unittest.TestCase):
         self.assertIsNone(suff(now=ts(17), light="off", load_w=975)["verdict"])
         self.assertIsNone(suff(now=ts(17), light="off", current_end=ts(20))["verdict"])
 
-    def test_next_outage_enough(self):
-        r = suff(now=ts(15), light="on", load_w=457, next_start=ts(20), next_end=ts(0, day=27))
-        # need 457 × 4 = 1828 Wh; left 4014 − 1828 = 2186 → 43 %
-        self.assertEqual(r["verdict"], {"ok": True, "text": "На відключення 20:00–00:00 вистачить · лишиться ≈ 43 %"})
+    def test_idle_shows_nothing(self):
+        # light on, battery idle (100 % or not) — no forecast, even with an outage ahead
+        self.assertEqual(suff(now=ts(18), light="on", load_w=494, stored_wh=5120, next_start=ts(21, day=27), next_end=ts(0, day=28)),
+                         {"verdict": None, "advice": None})
+        self.assertEqual(suff(now=ts(15), light="on", load_w=1000, stored_wh=2000, next_start=ts(20)),
+                         {"verdict": None, "advice": None})
 
-    def test_next_outage_tomorrow_names_the_day(self):
-        r = suff(now=ts(18), light="on", load_w=457, next_start=ts(21, day=27), next_end=ts(0, day=28))
-        self.assertEqual(r["verdict"]["text"], "На відключення завтра 21:00–00:00 вистачить · лишиться ≈ 52 %")
+    def test_charging_full_in_time(self):
+        # 1120 Wh at 1194 W = 56 min → 15:56, outage at 16:00
+        r = suff(now=ts(15), light="on", charge_w=1194, stored_wh=4000, next_start=ts(16), next_end=ts(20))
+        self.assertEqual(r, {"verdict": {"ok": True, "text": "Встигне зарядитися: 100 % о 15:56, відключення о 16:00"},
+                             "advice": None})
 
-    def test_next_outage_short(self):
-        r = suff(now=ts(15), light="on", load_w=1000, next_start=ts(20), next_end=ts(0, day=27))
-        # need 4000, usable 3450,8 → бракує 549,2 Wh = 33 хв при 1000 Вт
-        self.assertEqual(r["verdict"], {"ok": False, "text": "На відключення 20:00–00:00 не вистачить ≈ 33 хв"})
+    def test_charging_full_before_tomorrows_outage(self):
+        r = suff(now=ts(18), light="on", charge_w=1200, stored_wh=2000, next_start=ts(21, day=27))
+        self.assertEqual(r["verdict"]["text"], "Встигне зарядитися: 100 % о 20:36, відключення завтра о 21:00")
 
-    def test_charging_counts_until_the_outage(self):
-        # 1 h at 1194 W before 16:00 → 5120 (capped) → 4 h at 1000 W fits, 1120 left = 22 %
-        r = suff(now=ts(15), light="on", load_w=1000, charge_w=1194, stored_wh=4000, next_start=ts(16), next_end=ts(20))
-        self.assertEqual(r["verdict"], {"ok": True, "text": "На відключення 16:00–20:00 вистачить · лишиться ≈ 22 %"})
-        self.assertIsNone(r["advice"])
-
-    def test_advice_not_full_even_at_max(self):
-        # 30 min at 1200 W: 2000 + 600 = 2600 → 51 %; at 2500 W: 2000 + 1250 → 63 %
+    def test_not_full_even_at_max(self):
+        # 30 min at 1200 W: 2600 Wh → 51 %; at 2500 W: 3250 → 63 %
         r = suff(now=ts(15), light="on", charge_w=1200, stored_wh=2000, next_start=ts(15, 30), next_end=ts(19, 30))
-        self.assertEqual(r["advice"], "До відключення зарядиться лише до 51 %. На 2,5 кВт — до 63 %: "
-                                      "збільште потужність заряду в застосунку Marstek.")
+        self.assertEqual(r["verdict"], {"ok": False, "text": "Не встигне зарядитися: до відключення о 15:30 буде ≈ 51 %"})
+        self.assertEqual(r["advice"], "На 2,5 кВт — до 63 %: збільште потужність заряду в застосунку Marstek.")
 
-    def test_advice_reaches_full_at_max(self):
-        # 2 h to the outage at 1000 W: 3000 + 2000 = 5000 → 98 %; at 2500 W full in 50 min 53 s → 15:51
+    def test_full_at_max(self):
+        # 2 h at 1000 W: 5000 → 98 %; at 2500 W full in 50 min 53 s → 15:51
         r = suff(now=ts(15), light="on", charge_w=1000, stored_wh=3000, next_start=ts(17), next_end=ts(19))
-        self.assertEqual(r["advice"], "До відключення зарядиться лише до 98 %. На 2,5 кВт — 100 % о 15:51: "
-                                      "збільште потужність заряду в застосунку Marstek.")
+        self.assertEqual(r["verdict"]["text"], "Не встигне зарядитися: до відключення о 17:00 буде ≈ 98 %")
+        self.assertEqual(r["advice"], "На 2,5 кВт — 100 % о 15:51: збільште потужність заряду в застосунку Marstek.")
 
-    def test_advice_almost_full_is_not_100(self):
-        # 1 h at 1194 W: 2600 + 1194 → 74 %; at 2500 W: 5100 Wh = 99,6 % — not full → «до 99 %»
+    def test_almost_full_at_max_is_not_100(self):
+        # 1 h at 1194 W → 74 %; at 2500 W: 5100 Wh = 99,6 % — not full → «до 99 %»
         r = suff(now=ts(15), light="on", charge_w=1194, stored_wh=2600, next_start=ts(16), next_end=ts(20))
-        self.assertEqual(r["advice"], "До відключення зарядиться лише до 74 %. На 2,5 кВт — до 99 %: "
-                                      "збільште потужність заряду в застосунку Marstek.")
+        self.assertEqual(r["verdict"]["text"], "Не встигне зарядитися: до відключення о 16:00 буде ≈ 74 %")
+        self.assertEqual(r["advice"], "На 2,5 кВт — до 99 %: збільште потужність заряду в застосунку Marstek.")
 
-    def test_no_advice(self):
-        # fast enough / already near full power / not charging / no outage ahead
-        self.assertIsNone(suff(now=ts(15), light="on", charge_w=1200, stored_wh=4500, next_start=ts(17))["advice"])
-        self.assertIsNone(suff(now=ts(15), light="on", charge_w=2450, stored_wh=1000, next_start=ts(15, 30))["advice"])
-        self.assertIsNone(suff(now=ts(15), light="on", stored_wh=1000, next_start=ts(15, 30))["advice"])
-        self.assertIsNone(suff(now=ts(15), light="on", charge_w=1200, stored_wh=1000)["advice"])
+    def test_no_advice_at_full_power_and_nothing_without_outage_or_when_full(self):
+        r = suff(now=ts(15), light="on", charge_w=2450, stored_wh=1000, next_start=ts(15, 30))
+        self.assertEqual(r["verdict"]["text"], "Не встигне зарядитися: до відключення о 15:30 буде ≈ 43 %")
+        self.assertIsNone(r["advice"])
+        self.assertIsNone(suff(now=ts(15), light="on", charge_w=1200, stored_wh=1000)["verdict"])
+        self.assertIsNone(suff(now=ts(15), light="on", charge_w=100, stored_wh=5080, next_start=ts(16))["verdict"])
 
     def test_from_status(self):
         status = {
@@ -99,8 +96,8 @@ class SufficiencyTests(unittest.TestCase):
             "methods": {"Bat.GetStatus": {"data": {"rated_capacity": 5120, "bat_capacity": 2600}}},
         }
         r = from_status(status, ts(15), "on")
-        self.assertTrue(r["verdict"]["ok"])
-        self.assertTrue(r["advice"].startswith("До відключення зарядиться лише до 74"))
+        self.assertEqual(r["verdict"]["text"].replace("\u00a0", " "), "Не встигне зарядитися: до відключення о 16:00 буде ≈ 74 %")
+        self.assertTrue(r["advice"].startswith("На 2,5"))
 
 
 if __name__ == "__main__":
