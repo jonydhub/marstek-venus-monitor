@@ -51,6 +51,10 @@ class SufficiencyTests(unittest.TestCase):
         # need 457 × 4 = 1828 Wh; left 4014 − 1828 = 2186 → 43 %
         self.assertEqual(r["verdict"], {"ok": True, "text": "На відключення 20:00–00:00 вистачить · лишиться ≈ 43 %"})
 
+    def test_next_outage_tomorrow_names_the_day(self):
+        r = suff(now=ts(18), light="on", load_w=457, next_start=ts(21, day=27), next_end=ts(0, day=28))
+        self.assertEqual(r["verdict"]["text"], "На відключення завтра 21:00–00:00 вистачить · лишиться ≈ 52 %")
+
     def test_next_outage_short(self):
         r = suff(now=ts(15), light="on", load_w=1000, next_start=ts(20), next_end=ts(0, day=27))
         # need 4000, usable 3450,8 → бракує 549,2 Wh = 33 хв при 1000 Вт

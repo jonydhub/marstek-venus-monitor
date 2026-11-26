@@ -35,6 +35,16 @@ def _hm(ts: float) -> str:
     return _local(ts).strftime("%H:%M")
 
 
+def _day(ts: float, now: float) -> str:
+    """«» today, «завтра » tomorrow, «29.11 » later — prefix of a time range."""
+    t, today = _local(ts), datetime.fromtimestamp(now, KYIV).date()
+    if t.date() == today:
+        return ""
+    if t.date() == today + timedelta(days=1):
+        return "завтра "
+    return f"{t:%d.%m} "
+
+
 def _clock(ts: float, now: float) -> str:
     """«о 20:00», «завтра о 02:00», «о 09:00, 29.11»."""
     t, today = _local(ts), datetime.fromtimestamp(now, KYIV).date()
@@ -80,7 +90,7 @@ def sufficiency(*, now, light, stored_wh, rated_wh=None, floor_pct=None, load_w=
     if rated is not None:
         stored_at = min(rated, stored_at)
     if load is not None and nxt_end is not None and nxt_end > nxt_start:
-        rng = f"{_hm(nxt_start)}–{_hm(nxt_end)}"
+        rng = f"{_day(nxt_start, now)}{_hm(nxt_start)}–{_hm(nxt_end)}"
         need, usable = load * (nxt_end - nxt_start) / 3600, stored_at - floor_wh
         if usable >= need:
             left = f" · лишиться ≈{NBSP}{pct(stored_at - need)}" if rated is not None else ""

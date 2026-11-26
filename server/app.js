@@ -1006,6 +1006,9 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
     verdictEl.className = `hero-verdict ${suff.verdict ? (suff.verdict.ok ? 'good' : 'bad') : ''}`.trim();
   }
   if (adviceEl) { adviceEl.hidden = !suff.advice; adviceEl.textContent = suff.advice || ''; }
+  // with light on the verdict already names the next outage («На відключення завтра 21:00–00:00 …») — no repeat below it
+  const subEl = $('hero-sub');
+  if (subEl) subEl.hidden = Boolean(suff.verdict && light.state === 'on');
   hero.dataset.state = light.state;
   const modeChip = $('mode-chip');
   if (modeChip) {
