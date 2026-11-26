@@ -121,6 +121,7 @@ class MainActivity : Activity() {
     private lateinit var todayTiles: LinearLayout
     private lateinit var journalPreview: LinearLayout
     private lateinit var diagnosticsText: TextView
+    private lateinit var countersText: TextView
     private var serverJournal: List<com.doloh.marstekwidget.domain.JournalEvent> = emptyList()
     private var refreshing = false
     private var spec = ScreenLayoutSelector.specFor(0)
@@ -458,13 +459,6 @@ class MainActivity : Activity() {
         }.apply { visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE }
         journalCard.addView(statsButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)).apply { topMargin = dp(8) })
 
-        // Accumulated counters.
-        val energyCard = card()
-        energyCard.addView(sectionTitle(getString(R.string.main_energy_title)))
-        energyCard.addView(metricRow("energyGridIn", R.string.main_energy_grid_in, "energyGridOut", R.string.main_energy_grid_out))
-        energyCard.addView(metricColumn(getString(R.string.main_energy_load), "energyLoad"), rowMargin())
-        energyCard.addView(label(getString(R.string.main_energy_moved_note), 9f, DIM, false).apply { setPadding(0, dp(6), 0, 0) })
-
         // Diagnostics, collapsed by default.
         val diagCard = card()
         val diagBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
@@ -479,19 +473,22 @@ class MainActivity : Activity() {
         diagBody.addView(modeMeta)
         diagnosticsText = label("", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
         diagBody.addView(diagnosticsText)
+        // The device's lifetime counters (ES.GetStatus): Venus E fw 148 leaves load at 0 — raw values only, not a card.
+        countersText = label("", 10f, MUTED, false).apply { setPadding(0, dp(4), 0, 0) }
+        diagBody.addView(countersText)
         diagBody.addView(label(getString(R.string.main_grid_sign_note), 9f, DIM, false).apply { setPadding(0, dp(4), 0, 0) })
         diagBody.addView(label("Світло є / нема — лише за потужністю на резервному виході батареї. Без зв'язку з батареєю стан невідомий.", 9f, DIM, false).apply { setPadding(0, dp(4), 0, 0) })
         diagCard.addView(diagBody)
 
         when (spec.mode) {
-            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, energyCard, diagCard)
+            ScreenLayoutMode.SINGLE -> listOf(alertsCard, hero, historyCard, flowCard, journalCard, diagCard)
                 .forEach { page.addView(it, sectionMargin()) }
             ScreenLayoutMode.TWO_COLUMN -> page.addView(columns(
-                listOf(hero, historyCard, flowCard, energyCard),
+                listOf(hero, historyCard, flowCard),
                 listOf(scheduleCard!!, alertsCard, journalCard, diagCard),
             ))
             ScreenLayoutMode.THREE_COLUMN -> page.addView(columns(
-                listOf(hero, flowCard, energyCard),
+                listOf(hero, flowCard),
                 listOf(scheduleCard!!, alertsCard, historyCard),
                 listOf(journalCard, diagCard),
             ))
@@ -789,9 +786,10 @@ class MainActivity : Activity() {
             it.backupLoadCoverage7dSeconds >= com.doloh.marstekwidget.domain.AlertEvaluator.LOAD_MEAN_MIN_COVERAGE_SECONDS
         }?.backupLoadMean7dWatts?.let { "≈ " + WidgetSummaryResolver.formatWatts(it) } ?: "—"
         metricValues["backupToday"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.insights?.backupEnergyTodayWh)
-        metricValues["energyGridIn"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.totalGridInputEnergyWh)
-        metricValues["energyGridOut"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.totalGridOutputEnergyWh)
-        metricValues["energyLoad"]?.text = BatteryDisplayFormatter.formatKwh(snapshot?.totalLoadEnergyWh)
+        countersText.text = "Лічильники пристрою (як віддає прошивка, неповні): з мережі " +
+            BatteryDisplayFormatter.formatKwh(snapshot?.totalGridInputEnergyWh) + " · у мережу " +
+            BatteryDisplayFormatter.formatKwh(snapshot?.totalGridOutputEnergyWh) + " · навантаження " +
+            BatteryDisplayFormatter.formatKwh(snapshot?.totalLoadEnergyWh) + ". Реальні цифри — у «Статистиці»."
         val mode = OperatingModeFormatter.format(snapshot?.operatingMode)
         modeMeta.text = when (snapshot?.ctState) {
             1 -> getString(R.string.main_mode_ct, mode, getString(R.string.main_ct_connected))

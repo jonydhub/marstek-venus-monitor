@@ -111,6 +111,57 @@ class Ui(private val activity: Activity) {
 
     fun matchWrap(top: Int = 0) = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(top) }
 
+    /** Screen header: a 48 dp «‹» back target (finishes the activity) + title (+ optional muted subtitle). */
+    fun topBar(title: String, subtitle: String? = null) = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(6), 0, dp(6))
+        addView(TextView(activity).apply {
+            text = "‹"
+            textSize = 30f
+            setTextColor(TEXT)
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            contentDescription = "Назад"
+            background = rounded(SURFACE_RAISED, dp(14), STROKE)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { activity.finish() }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        val texts = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(label(title, 20f, TEXT, true).apply { includeFontPadding = false })
+        subtitle?.let { texts.addView(label(it, 11f, MUTED).apply { includeFontPadding = false; setPadding(0, dp(3), 0, 0) }) }
+        addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
+    }
+
+    /**
+     * One table row: the first cell takes the slack (left-aligned), the rest are fixed-share, right-aligned, tabular
+     * figures. [header] rows are small and dim; [highlight] colours the row coral (e.g. a running outage).
+     */
+    fun tableRow(cells: List<String>, weights: List<Float>, header: Boolean = false, highlight: Boolean = false, firstBold: Boolean = false) =
+        LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(if (header) 0 else 5), 0, dp(if (header) 4 else 5))
+            cells.forEachIndexed { i, value ->
+                val color = when {
+                    header -> DIM
+                    highlight -> CORAL
+                    i == 0 -> TEXT
+                    value == "—" -> DIM
+                    else -> MUTED
+                }
+                addView(label(value, if (header) 10f else 12.5f, color, !header && (highlight || (i == 0 && firstBold))).apply {
+                    maxLines = 1
+                    fontFeatureSettings = "tnum"
+                    gravity = if (i == 0) Gravity.START else Gravity.END
+                    setLineSpacing(0f, 1f)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weights.getOrElse(i) { 1f }))
+            }
+        }
+
+    /** Hairline divider for tables. */
+    fun divider() = View(activity).apply { setBackgroundColor(STROKE) }
+
     companion object {
         val BG = Color.rgb(7, 21, 34)
         val SURFACE = Color.rgb(21, 31, 42)

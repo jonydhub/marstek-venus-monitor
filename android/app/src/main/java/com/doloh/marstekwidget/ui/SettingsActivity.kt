@@ -112,7 +112,7 @@ class SettingsActivity : Activity() {
             page.addView(ui.label("Вітаємо в Marstek Energy", 22f, Ui.TEXT, true).apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
             page.addView(ui.label("Неофіційний монітор батареї Marstek (Venus E та сумісні). Лише читання — застосунок ніколи не керує батареєю. Налаштуйте підключення, графік відключень і запас.", 12f, Ui.MUTED))
         } else {
-            page.addView(ui.label("Налаштування", 20f, Ui.TEXT, true).apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
+            page.addView(ui.topBar("Налаштування"), ui.matchWrap())
         }
 
         // 1. Connection mode

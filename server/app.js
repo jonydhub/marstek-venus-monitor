@@ -518,11 +518,17 @@ function weekDayTitle(day) {
   const wd = d.toLocaleDateString('uk-UA', {weekday: 'short', timeZone: 'UTC'});
   return `${wd.charAt(0).toUpperCase()}${wd.slice(1)}, ${d.toLocaleDateString('uk-UA', {day: '2-digit', month: '2-digit', timeZone: 'UTC'})}`;
 }
+/** «Без світла 12 год 39 хв · у 5 з 7 днів» / «Без відключень за 7 днів» — same as Android LightWeek.summary (keep in sync). */
+function weekSummary(days) {
+  const off = days.reduce((t, d) => t + (d.off_seconds || 0), 0), withOutage = days.filter(d => d.off_seconds >= 60).length, n = days.length;
+  const word = n % 10 === 1 && n % 100 !== 11 ? 'день' : n % 10 >= 2 && n % 10 <= 4 && !(n % 100 >= 12 && n % 100 <= 14) ? 'дні' : 'днів';
+  return withOutage ? `Без світла ${spanText(off * 1000)} · у ${withOutage} з ${n} ${n === 1 ? 'дня' : 'днів'}` : `Без відключень за ${n} ${word}`;
+}
 /** Totals line of a measured day — same rules as Android LightWeek.totalsText (keep in sync). */
 function weekDayTotals(day) {
   const off = (day.off_seconds || 0) * 1000, on = (day.on_seconds || 0) * 1000, unknown = (day.unknown_seconds || 0) * 1000;
   if (!off && !on) return day.is_today ? 'Ще немає даних' : 'Немає даних';
-  const parts = off >= 60000 ? [`Без світла ${spanText(off)}`, `зі світлом ${spanText(on)}`] : ['Без відключень'];
+  const parts = off >= 60000 ? [`Без світла ${spanText(off)}`] : ['Без відключень'];  // the bar shows the light part
   if (unknown >= 30 * 60000) parts.push(`без даних ${spanText(unknown)}`);
   return parts.join(' · ');
 }
@@ -654,7 +660,7 @@ function renderWeek(payload, stats = null) {
     });
   }
   if (host.lastChild) scaleRows(host.lastChild);
-  set('week-summary', known ? `За 7 днів без світла ${spanText(off * 1000)}${days.some(d => d.off_seconds) ? ` · днів з відключеннями: ${days.filter(d => d.off_seconds >= 60).length}` : ''}` : 'Ще немає вимірів за ці дні');
+  set('week-summary', known ? weekSummary(days) : 'Ще немає вимірів за ці дні');
 }
 async function openWeek() {
   const dialog = $('week-dialog'); if (!dialog) return;
@@ -705,6 +711,37 @@ function statsDayText(d) {
   const charge = `заряд ${formatKwh(d.charge_wh)}`;
   return d.off_seconds > 0 ? `без світла ${spanText(d.off_seconds * 1000)} · зі станції ${kwhNumber(d.outage_energy_wh)} · ${charge}` : `без відключень · ${charge}`;
 }
+/**
+ * «Статистика» tables — same rules as Android StatsTable (keep in sync): column titles once, numbers in the cells,
+ * outages / charges grouped by their start day.
+ */
+const STATS_DAY_HEADER = ['', 'Без світла', 'Станція', 'Заряд'];
+const STATS_SESSION_HEADER = ['Час', 'Тривалість', 'кВт·год', 'Заряд, %'];
+function statsKwh(wh, plus = false) { return Number.isFinite(Number(wh)) && Number(wh) >= 5 ? `${plus ? '+' : ''}${kwhNumber(wh)}` : '—'; }
+function statsSoc(a, b) { return a !== null && a !== undefined && b !== null && b !== undefined ? `${a}→${b}` : '—'; }
+function statsDayCells(d) {
+  const off = (d.off_seconds || 0) >= 60;
+  return {cells: [weekDayTitle(d), off ? spanText(d.off_seconds * 1000) : '—', off ? statsKwh(d.outage_energy_wh) : '—', statsKwh(d.charge_wh)], highlight: off};
+}
+/** [{title: 'Сьогодні', lines: [{cells: ['09:23–09:40', '17 хв', '0,17', '100→97'], highlight}]}] */
+function statsGroups(items, charge = false) {
+  const groups = [];
+  for (const it of items) {
+    const date = new Date(it.start).toLocaleDateString('en-CA', {timeZone: 'Europe/Kyiv'});
+    let g = groups[groups.length - 1];
+    if (!g || g.date !== date) { g = {date, title: weekDayTitle({date, is_today: date === new Date().toLocaleDateString('en-CA', {timeZone: 'Europe/Kyiv'})}), lines: []}; groups.push(g); }
+    const hm = t => kyivHm(Date.parse(t));
+    let energy = statsKwh(it.energy_wh, charge);
+    if (charge && it.estimated && energy !== '—') energy = `≈ ${energy}`;
+    g.lines.push({cells: [it.ongoing ? `з ${hm(it.start)}` : `${hm(it.start)}–${hm(it.end)}`, spanText(it.seconds * 1000), energy, statsSoc(it.soc_start, it.soc_end)], highlight: Boolean(it.ongoing)});
+  }
+  return groups.map(({title, lines}) => ({title, lines}));
+}
+function statsRow(cells, cls = '') {
+  const row = el('div', `stats-row ${cls}`.trim());
+  cells.forEach((c, i) => row.append(el('span', c === '—' && i ? 'dash' : '', c)));
+  return row;
+}
 function renderStats(body) {
   const days = body?.days || [], outages = body?.outages || [], charges = body?.charges || [];
   const off = days.reduce((t, d) => t + (d.off_seconds || 0), 0);
@@ -723,13 +760,17 @@ function renderStats(body) {
     const t = el('div', `stats-tile ${cls}`); t.append(el('span', '', label), el('b', '', value), el('small', '', sub)); tiles.append(t);
   }
   const dayList = $('stats-days'); dayList.replaceChildren();
-  for (const d of days.filter(d => d.is_today || d.off_seconds || d.charge_wh || d.discharge_wh)) {
-    const li = el('li', d.off_seconds ? 'off' : ''); li.append(el('b', '', weekDayTitle(d)), el('span', '', statsDayText(d))); dayList.append(li);
-  }
-  for (const [id, items, lines, empty] of [['stats-outages', outages, statsOutageLines, 'Відключень не було'], ['stats-charges', charges, statsChargeLines, 'Заряджань не було']]) {
+  const dayRows = days.filter(d => d.is_today || d.off_seconds || d.charge_wh || d.discharge_wh).map(statsDayCells);
+  if (!dayRows.length) dayList.append(el('p', 'stats-empty', 'Ще немає вимірів'));
+  else { dayList.append(statsRow(STATS_DAY_HEADER, 'head')); for (const r of dayRows) dayList.append(statsRow(r.cells, r.highlight ? 'off' : '')); }
+  for (const [id, items, charge, empty] of [['stats-outages', outages, false, 'Відключень не було'], ['stats-charges', charges, true, 'Заряджань не було']]) {
     const host = $(id); host.replaceChildren();
-    if (!items.length) { host.append(el('li', 'stats-empty', empty)); continue; }
-    for (const item of items) { const [a, b] = lines(item); const li = el('li'); li.append(el('b', '', a), el('span', '', b)); host.append(li); }
+    if (!items.length) { host.append(el('p', 'stats-empty', empty)); continue; }
+    host.append(statsRow(STATS_SESSION_HEADER, 'head'));
+    for (const g of statsGroups(items, charge)) {
+      host.append(el('div', 'stats-group', g.title));
+      for (const l of g.lines) host.append(statsRow(l.cells, l.highlight ? 'live' : ''));
+    }
   }
 }
 async function loadStats() {

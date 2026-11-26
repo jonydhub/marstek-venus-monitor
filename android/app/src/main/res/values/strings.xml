@@ -149,10 +149,6 @@
     <string name="main_battery_flow">Потужність батареї · оцінка</string>
     <string name="main_backup">Резервний вихід</string>
     <string name="main_eta_title">Оцінка часу</string>
-    <string name="main_energy_title">Накопичені лічильники · кВт·год</string>
-    <string name="main_energy_grid_in">Імпорт із мережі</string>
-    <string name="main_energy_grid_out">Експорт у мережу</string>
-    <string name="main_energy_load">Споживання</string>
 
     <string name="main_ct_connected">підключено</string>
     <string name="main_mode_ct">Режим роботи: %1$s · CT %2$s</string>
@@ -206,7 +202,6 @@
     <string name="main_details_title">Батарея і потоки</string>
     <string name="main_schedule_title">Світло і графік</string>
     <string name="schedule_screen_title">Графік відключень</string>
-    <string name="main_energy_moved_note">Накопичені загальні лічильники пристрою, не за день.</string>
     <string name="widget_schedule_tomorrow">Завтра</string>
     <string name="widget_schedule_description">Графік відключень: сьогодні і завтра, біла риска — зараз</string>
     <string name="widget_chart_description">Заряд за 24 год; жовтим — періоди без світла</string>

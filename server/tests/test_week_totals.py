@@ -13,7 +13,7 @@ H = 3600
 
 def source():
     parts = []
-    for name in ("spanText", "weekDayTotals"):
+    for name in ("spanText", "weekDayTotals", "weekSummary"):
         match = re.search(rf"function {name}\(.*?\n}}\n", SCRIPT, re.S)
         assert match, f"{name} not found in app.js"
         parts.append(match.group(0))
@@ -29,20 +29,38 @@ def totals(off, on, unknown, today=False):
 @unittest.skipUnless(shutil.which("node"), "node not installed")
 class WeekDayTotalsTests(unittest.TestCase):
     def test_day_with_outage(self):
-        self.assertEqual(totals(4 * H + 58 * 60, 16 * H + 46 * 60, 0, today=True), "Без світла 4 год 58 хв · зі світлом 16 год 46 хв")
+        self.assertEqual(totals(4 * H + 58 * 60, 16 * H + 46 * 60, 0, today=True), "Без світла 4 год 58 хв")
 
     def test_day_without_outage(self):
         self.assertEqual(totals(0, 24 * H, 0), "Без відключень")
 
     def test_short_gap_is_not_shown(self):
-        self.assertEqual(totals(2 * H, 21 * H + 50 * 60, 10 * 60), "Без світла 2 год · зі світлом 21 год 50 хв")
+        self.assertEqual(totals(2 * H, 21 * H + 50 * 60, 10 * 60), "Без світла 2 год")
 
     def test_long_gap_is_shown(self):
-        self.assertEqual(totals(H, 20 * H, 3 * H), "Без світла 1 год · зі світлом 20 год · без даних 3 год")
+        self.assertEqual(totals(H, 20 * H, 3 * H), "Без світла 1 год · без даних 3 год")
 
     def test_no_data(self):
         self.assertEqual(totals(0, 0, 24 * H), "Немає даних")
         self.assertEqual(totals(0, 0, 5 * H, today=True), "Ще немає даних")
+
+
+
+def summary(days):
+    code = source() + f"process.stdout.write(JSON.stringify(weekSummary({json.dumps(days)})));"
+    return json.loads(subprocess.run([NODE, "-e", code], capture_output=True, text=True, encoding="utf-8", timeout=20, check=True).stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "node not installed")
+class WeekSummaryTests(unittest.TestCase):
+    """Same cases as Android LightWeekTest summary."""
+    def test_with_outages(self):
+        days = [{"off_seconds": 4 * H + 58 * 60}] + [{"off_seconds": 0}] * 6
+        self.assertEqual(summary(days), "Без світла 4 год 58 хв · у 1 з 7 днів")
+
+    def test_without_outages(self):
+        self.assertEqual(summary([{"off_seconds": 0}] * 7), "Без відключень за 7 днів")
+        self.assertEqual(summary([{"off_seconds": 0}] * 2), "Без відключень за 2 дні")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ class JournalActivity : Activity() {
     }
 
     private fun build(page: LinearLayout) {
-        page.addView(ui.label("Журнал подій", 20f, Ui.TEXT, true))
+        page.addView(ui.topBar("Журнал подій"), ui.matchWrap())
         page.addView(ui.hint("Світло (за резервним виходом), заряджання, зв'язок з батареєю та аномалії — з точним часом, 30 днів."))
 
         val settings = SettingsStore(this).load()

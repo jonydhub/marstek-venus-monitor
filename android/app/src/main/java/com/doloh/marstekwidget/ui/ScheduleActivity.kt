@@ -53,7 +53,7 @@ class ScheduleActivity : Activity() {
         super.onCreate(savedInstanceState)
         ui = Ui(this)
         val page = ui.page()
-        page.addView(ui.label("Графік відключень", 20f, Ui.TEXT, true).apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
+        page.addView(ui.topBar("Графік відключень"), ui.matchWrap())
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         page.addView(content, ui.matchWrap())
         val scroll = ui.scrollCentered(page, fillViewport = true)
@@ -94,11 +94,12 @@ class ScheduleActivity : Activity() {
         }
         val region = OutageRegions.byId(settings.outageRegionId ?: info.regionId)?.name
         head.addView(ui.label(listOfNotNull(region, info.group?.let { "черга $it" }).joinToString(" · ").ifEmpty { "Черга —" }, 16f, Ui.TEXT, true))
-        info.source?.let { head.addView(ui.label("Джерело: $it", 12f, Ui.MUTED)) }
+        // one muted line: «Львівобленерго · оновлено 12:34 · перевірено 17:50»
         listOfNotNull(
-            info.scheduleUpdatedAt?.let { "Графік оновлено джерелом: ${stamp(it)}" },
-            info.fetchedAt?.let { "Перевірено: ${stamp(it)}" },
-        ).forEach { head.addView(ui.label(it, 11f, Ui.DIM)) }
+            info.source,
+            info.scheduleUpdatedAt?.let { "оновлено ${stamp(it)}" },
+            info.fetchedAt?.let { "перевірено ${stamp(it)}" },
+        ).joinToString(" · ").takeIf { it.isNotEmpty() }?.let { head.addView(ui.label(it, 11f, Ui.DIM)) }
         val light = LightStatusResolver.resolve(snapshot, preferences.state() == WidgetFetchState.ERROR, now)
         val dayRows = ScheduleDays.days(info, now.toInstant().toEpochMilli())
         // «не опубліковано» / «без відключень» is stated by the «Сьогодні» row below — not repeated here.
@@ -145,16 +146,14 @@ class ScheduleActivity : Activity() {
      */
     private fun weekCard(): LinearLayout {
         val card = ui.card()
-        card.addView(ui.title("Світло за 7 днів · фактично"))
+        card.addView(ui.title("Світло за 7 днів"))
         val summary = ui.label("Завантажую…", 12f, Ui.MUTED, true)
         card.addView(summary)
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         card.addView(rows, ui.matchWrap(4))
         val settings = SettingsStore(this).load()
         val direct = settings.mode != ConnectionMode.SERVER
-        val note = ui.hint(if (direct) "Напряму телефон зберігає виміри лише 48 год — повний тиждень видно в режимі сервера."
-            else "Графіки публікують лише на сьогодні й завтра, тож тут — як було насправді, за резервним виходом.")
-        card.addView(note, ui.matchWrap(6))
+        if (direct) card.addView(ui.hint("Напряму телефон зберігає виміри лише 48 год — повний тиждень видно в режимі сервера."), ui.matchWrap(6))
         if (showcase) { summary.text = "Демо-режим"; return card }
         scope.launch {
             val now = System.currentTimeMillis()
@@ -264,8 +263,10 @@ class ScheduleActivity : Activity() {
         }
     }
 
+    /** «12:34» today, «12:34, 25.11» otherwise. */
     private fun stamp(value: String): String = runCatching {
-        OffsetDateTime.parse(value).atZoneSameInstant(KYIV).format(DateTimeFormatter.ofPattern("HH:mm, dd.MM"))
+        val t = OffsetDateTime.parse(value).atZoneSameInstant(KYIV)
+        t.format(DateTimeFormatter.ofPattern(if (t.toLocalDate() == java.time.LocalDate.now(KYIV)) "HH:mm" else "HH:mm, dd.MM"))
     }.getOrDefault(value)
 
     private companion object {

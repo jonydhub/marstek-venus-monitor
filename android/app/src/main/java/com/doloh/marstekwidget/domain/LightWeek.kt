@@ -81,10 +81,10 @@ object LightWeek {
         return if (h > 0) (if (r > 0) "$h${nb}год $r${nb}хв" else "$h${nb}год") else "$r${nb}хв"
     }
 
-    /** «Без світла 4 год 58 хв · зі світлом 16 год 46 хв» / «Без відключень» (+ «без даних …» when ≥ 30 min). */
+    /** «Без світла 4 год 58 хв» / «Без відключень» (+ «без даних …» when ≥ 30 min) — the bar shows the light part. */
     fun totalsText(day: WeekDay): String {
         if (day.offSeconds == 0L && day.onSeconds == 0L) return if (day.isToday) "Ще немає даних" else "Немає даних"
-        val parts = if (day.offSeconds >= 60) mutableListOf("Без світла ${span(day.offSeconds)}", "зі світлом ${span(day.onSeconds)}")
+        val parts = if (day.offSeconds >= 60) mutableListOf("Без світла ${span(day.offSeconds)}")
         else mutableListOf("Без відключень")
         if (day.unknownSeconds >= 30 * 60) parts += "без даних ${span(day.unknownSeconds)}"
         return parts.joinToString(" · ")
@@ -98,12 +98,12 @@ object LightWeek {
             ", %02d.%02d".format(day.date.dayOfMonth, day.date.monthValue)
     }
 
-    /** «За 7 днів без світла 4 год 58 хв · днів з відключеннями: 1»; null without any measurement. */
+    /** «Без світла 4 год 58 хв · у 1 з 7 днів»; null without any measurement. */
     fun summary(days: List<WeekDay>): String? {
         if (days.none { it.offSeconds + it.onSeconds > 0 }) return null
         val off = days.sumOf { it.offSeconds }
         val withOutage = days.count { it.offSeconds >= 60 }
-        return "За ${days.size} ${daysWord(days.size)} без світла ${span(off)}" + if (withOutage > 0) " · днів з відключеннями: $withOutage" else ""
+        return if (withOutage == 0) "Без відключень за ${days.size} ${daysWord(days.size)}" else "Без світла ${span(off)} · у $withOutage з ${days.size} ${if (days.size == 1) "дня" else "днів"}"
     }
 
     private fun daysWord(n: Int) = when {

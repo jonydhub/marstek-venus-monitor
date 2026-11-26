@@ -2,12 +2,12 @@ package com.doloh.marstekwidget.ui
 
 import android.app.Activity
 import android.os.Bundle
-import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import com.doloh.marstekwidget.data.DirectEngine
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.domain.StatsReport
+import com.doloh.marstekwidget.domain.StatsTable
 import com.doloh.marstekwidget.domain.StatsTexts
 import com.doloh.marstekwidget.settings.ConnectionMode
 import com.doloh.marstekwidget.settings.SettingsStore
@@ -32,9 +32,8 @@ class StatsActivity : Activity() {
         val settings = SettingsStore(this).load()
         val direct = settings.mode != ConnectionMode.SERVER
         val page = ui.page()
-        page.addView(ui.label(if (direct) "Статистика · 2 дні" else "Статистика · 7 днів", 20f, Ui.TEXT, true)
-            .apply { setPadding(0, ui.dp(10), 0, ui.dp(4)) })
-        if (direct) page.addView(ui.hint("Напряму телефон зберігає виміри лише 48 год — повну статистику видно в режимі сервера."))
+        page.addView(ui.topBar("Статистика", if (direct) "2 дні · з пам'яті телефона" else "7 днів"), ui.matchWrap())
+        if (direct) page.addView(ui.hint("Повну статистику за тиждень видно в режимі сервера."))
         content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         page.addView(content, ui.matchWrap())
         val scroll = ui.scrollCentered(page, fillViewport = true)
@@ -87,46 +86,43 @@ class StatsActivity : Activity() {
         }
         content.addView(grid, ui.matchWrap(8))
 
-        // 2. per day
+        // 2. per day — one table, column titles once
         val today = LocalDate.now(KYIV)
         val days = ui.card()
-        days.addView(ui.title("По днях"))
-        val withData = report.days.filter { it.hasData }
-        if (withData.isEmpty()) days.addView(ui.label("Ще немає вимірів", 12f, Ui.MUTED))
-        withData.forEachIndexed { i, d ->
-            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            head.addView(ui.label(StatsTexts.dayTitle(d, today), 12f, Ui.TEXT, true),
-                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            head.addView(ui.label(StatsTexts.dayLine(d), 11f, if (d.offSeconds > 0) ChartColors.ACTUAL_OFF else Ui.MUTED).apply { gravity = Gravity.END },
-                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = ui.dp(8) })
-            days.addView(head, ui.matchWrap(if (i == 0) 0 else 8))
+        days.addView(ui.title("По днях · кВт·год"))
+        val dayLines = StatsTable.dayLines(report.days, today)
+        if (dayLines.isEmpty()) days.addView(ui.label("Ще немає вимірів", 12f, Ui.MUTED))
+        else {
+            days.addView(ui.tableRow(StatsTable.DAY_HEADER, DAY_WEIGHTS, header = true))
+            dayLines.forEach { days.addView(ui.tableRow(it.cells, DAY_WEIGHTS, highlight = false, firstBold = true).also { row -> if (it.highlight) row.offCells() }) }
         }
         content.addView(days, ui.matchWrap(8))
 
-        // 3. outages
-        val outages = ui.card()
-        outages.addView(ui.title("Відключення"))
-        if (report.outages.isEmpty()) outages.addView(ui.label("Відключень не було", 12f, Ui.MUTED))
-        report.outages.forEachIndexed { i, o ->
-            val (head, detail) = StatsTexts.outageLines(o)
-            outages.addView(ui.label(head, 12f, if (o.ongoing) ChartColors.ACTUAL_OFF else Ui.TEXT, true), ui.matchWrap(if (i == 0) 0 else 8))
-            if (detail.isNotEmpty()) outages.addView(ui.label(detail, 11f, Ui.MUTED))
-        }
-        content.addView(outages, ui.matchWrap(8))
+        // 3–4. outages / charges — grouped by day
+        content.addView(sessionCard("Відключення", StatsTable.outageGroups(report.outages, today), "Відключень не було"), ui.matchWrap(8))
+        content.addView(sessionCard("Заряджання", StatsTable.chargeGroups(report.charges, today), "Заряджань не було"), ui.matchWrap(8))
+        content.addView(ui.hint("Станція — енергія з резервного виходу, поки світла не було. Дрібні підзаряди 99→100 % не показано."), ui.matchWrap(6))
+    }
 
-        // 4. charges
-        val charges = ui.card()
-        charges.addView(ui.title("Заряджання"))
-        if (report.charges.isEmpty()) charges.addView(ui.label("Заряджань не було", 12f, Ui.MUTED))
-        report.charges.forEachIndexed { i, c ->
-            val (head, detail) = StatsTexts.chargeLines(c)
-            charges.addView(ui.label(head, 12f, Ui.TEXT, true), ui.matchWrap(if (i == 0) 0 else 8))
-            if (detail.isNotEmpty()) charges.addView(ui.label(detail, 11f, Ui.MUTED))
+    /** Coral «без світла» cell (the 2nd) of a day row with an outage. */
+    private fun LinearLayout.offCells() {
+        (getChildAt(1) as? android.widget.TextView)?.setTextColor(ChartColors.ACTUAL_OFF)
+    }
+
+    private fun sessionCard(title: String, groups: List<StatsTable.Group>, empty: String) = ui.card().apply {
+        addView(ui.title(title))
+        if (groups.isEmpty()) { addView(ui.label(empty, 12f, Ui.MUTED)); return@apply }
+        addView(ui.tableRow(StatsTable.SESSION_HEADER, SESSION_WEIGHTS, header = true))
+        groups.forEachIndexed { gi, g ->
+            addView(ui.divider(), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1).apply { topMargin = ui.dp(if (gi == 0) 0 else 4) })
+            addView(ui.label(g.title, 11f, Ui.TEXT, true).apply { setPadding(0, ui.dp(7), 0, ui.dp(1)) })
+            g.lines.forEach { addView(ui.tableRow(it.cells, SESSION_WEIGHTS, highlight = it.highlight)) }
         }
-        content.addView(charges, ui.matchWrap(8))
     }
 
     private companion object {
         val KYIV: ZoneId = ZoneId.of("Europe/Kyiv")
+        val DAY_WEIGHTS = listOf(1.15f, 1.25f, 0.8f, 0.8f)
+        val SESSION_WEIGHTS = listOf(1.35f, 1.15f, 0.85f, 0.85f)
     }
 }

@@ -17,10 +17,10 @@ class LightWeekTest {
         WeekDay(LocalDate.of(2026, 11, 20), today, 0, 0, off, on, unknown, emptyList())
     private fun t(d: WeekDay) = LightWeek.totalsText(d).replace('\u00A0', ' ')
 
-    @Test fun dayWithOutage() = assertEquals("Без світла 4 год 58 хв · зі світлом 16 год 46 хв", t(day(4 * h + 58 * 60, 16 * h + 46 * 60, 0, today = true)))
+    @Test fun dayWithOutage() = assertEquals("Без світла 4 год 58 хв", t(day(4 * h + 58 * 60, 16 * h + 46 * 60, 0, today = true)))
     @Test fun dayWithoutOutage() = assertEquals("Без відключень", t(day(0, 24 * h, 0)))
-    @Test fun shortGapIsNotShown() = assertEquals("Без світла 2 год · зі світлом 21 год 50 хв", t(day(2 * h, 21 * h + 50 * 60, 10 * 60)))
-    @Test fun longGapIsShown() = assertEquals("Без світла 1 год · зі світлом 20 год · без даних 3 год", t(day(h, 20 * h, 3 * h)))
+    @Test fun shortGapIsNotShown() = assertEquals("Без світла 2 год", t(day(2 * h, 21 * h + 50 * 60, 10 * 60)))
+    @Test fun longGapIsShown() = assertEquals("Без світла 1 год · без даних 3 год", t(day(h, 20 * h, 3 * h)))
     @Test fun noData() {
         assertEquals("Немає даних", t(day(0, 0, 24 * h)))
         assertEquals("Ще немає даних", t(day(0, 0, 5 * h, today = true)))
@@ -63,7 +63,9 @@ class LightWeekTest {
         assertEquals("Вчора", LightWeek.title(day(0, 0, 0).copy(date = today.minusDays(1)), today))
         assertEquals("Пн, 16.11", LightWeek.title(day(0, 0, 0).copy(date = LocalDate.of(2026, 11, 16)), today))
         val week = listOf(day(4 * h + 58 * 60, 16 * h, 0)) + List(6) { day(0, 24 * h, 0) }
-        assertEquals("За 7 днів без світла 4 год 58 хв · днів з відключеннями: 1", LightWeek.summary(week)?.replace('\u00A0', ' '))
+        assertEquals("Без світла 4 год 58 хв · у 1 з 7 днів", LightWeek.summary(week)?.replace('\u00A0', ' '))
         assertNull(LightWeek.summary(listOf(day(0, 0, 24 * h))))
+        assertEquals("Без відключень за 7 днів", LightWeek.summary(List(7) { day(0, 24 * h, 0) }))
+        assertEquals("Без відключень за 2 дні", LightWeek.summary(List(2) { day(0, 24 * h, 0) }))
     }
 }

@@ -34,6 +34,7 @@ class AboutActivity : Activity() {
         super.onCreate(savedInstanceState)
         val ui = Ui(this)
         val page = ui.page()
+        page.addView(ui.topBar("Про застосунок"), ui.matchWrap())
         val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
         head.addView(ImageView(this).apply { setImageResource(R.mipmap.ic_launcher) }, LinearLayout.LayoutParams(ui.dp(48), ui.dp(48)).apply { marginEnd = ui.dp(10) })
         val names = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
