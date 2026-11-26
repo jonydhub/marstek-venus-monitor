@@ -62,6 +62,7 @@ import com.doloh.marstekwidget.domain.AlertSeverity
 import com.doloh.marstekwidget.domain.SummaryMode
 import com.doloh.marstekwidget.domain.OperatingModeFormatter
 import com.doloh.marstekwidget.domain.PowerBadges
+import com.doloh.marstekwidget.domain.Sufficiency
 import com.doloh.marstekwidget.domain.EnergyCounters
 import com.doloh.marstekwidget.domain.CountersTable
 import com.doloh.marstekwidget.domain.Counters
@@ -120,6 +121,8 @@ class MainActivity : Activity() {
     private lateinit var alertsList: LinearLayout
     private lateinit var powerMaybe: TextView
     private lateinit var subLine: TextView
+    private lateinit var verdictLine: TextView
+    private lateinit var adviceLine: TextView
     private lateinit var todayCaption: TextView
     private lateinit var scheduleCaption: TextView
     private lateinit var scheduleDays: ScheduleDaysView
@@ -416,6 +419,19 @@ class MainActivity : Activity() {
         hero.addView(etaLine)
         subLine = label("", 13f, MUTED, false).apply { setPadding(0, dp(2), 0, 0) }
         hero.addView(subLine)
+        // «Чи вистачить» (Sufficiency) + amber «зарядиться лише до …» advice
+        verdictLine = label("", 14f, POWER_ON, true).apply { setPadding(0, dp(6), 0, 0); visibility = View.GONE }
+        hero.addView(verdictLine)
+        adviceLine = label("", 12.5f, AMBER, false).apply {
+            setPadding(dp(11), dp(8), dp(11), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat()
+                setColor(android.graphics.Color.argb(20, 245, 183, 46))
+                setStroke(dp(1), android.graphics.Color.argb(90, 245, 183, 46))
+            }
+            visibility = View.GONE
+        }
+        hero.addView(adviceLine, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
         val tiles = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         todayTiles = tiles
         listOf("todayCharge" to "Заряд", "todayDischarge" to "Розряд", "todayOutage" to "Без світла").forEachIndexed { i, (key, caption) ->
@@ -768,6 +784,12 @@ class MainActivity : Activity() {
         etaLine.setTextColor(etaColor)
         subLine.text = sub.orEmpty()
         subLine.visibility = if (sub.isNullOrBlank()) View.GONE else View.VISIBLE
+        val suff = Sufficiency.of(snapshot, info, light.kind == LightKind.NO_LINK || state == WidgetFetchState.ERROR)
+        verdictLine.text = suff.verdict?.text.orEmpty()
+        verdictLine.visibility = if (suff.verdict == null) View.GONE else View.VISIBLE
+        verdictLine.setTextColor(if (suff.verdict?.ok == false) CORAL else POWER_ON)
+        adviceLine.text = suff.advice.orEmpty()
+        adviceLine.visibility = if (suff.advice == null) View.GONE else View.VISIBLE
 
         val today = snapshot?.insights?.today
         metricValues["todayCharge"]?.text = TodayFormatter.short(today?.chargeSeconds)

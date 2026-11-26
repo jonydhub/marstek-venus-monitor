@@ -97,6 +97,15 @@ class MarstekApiClient(private val context: Context, private val settings: AppSe
         }
     }
 
+    /** «Звіт» (GET /api/report?period=week|month); null for an older server or any failure. */
+    suspend fun fetchReport(period: String): com.doloh.marstekwidget.domain.EnergyReport? {
+        val base = settings.serverUrl?.let(ServerUrlValidator::normalize) ?: return null
+        return when (val raw = fetchJson("${base.trimEnd('/')}/api/report?period=$period", readTimeoutMs = 30_000)) {
+            is Raw.Ok -> com.doloh.marstekwidget.domain.ReportTable.parse(raw.root)
+            else -> null
+        }
+    }
+
     sealed class StatsFetch {
         data class Ok(val report: com.doloh.marstekwidget.domain.StatsReport) : StatsFetch()
         object NotSupported : StatsFetch()

@@ -34,6 +34,7 @@ enum class AlertId(val group: AlertGroup) {
     CHARGING_STARTED(AlertGroup.CHARGING),
     CHARGED_FULL(AlertGroup.CHARGING),
     NOT_CHARGING_AFTER_RETURN(AlertGroup.CHARGING),
+    CHARGE_TOO_SLOW(AlertGroup.CHARGING),
     HIGH_LOAD(AlertGroup.CONSUMPTION),
     TEMPERATURE_HIGH(AlertGroup.BATTERY_HEALTH),
     TEMPERATURE_COLD_CHARGING(AlertGroup.BATTERY_HEALTH),
@@ -65,6 +66,8 @@ data class AlertMemory(
     val notChargingSent: Boolean = false,
     val outageSoonSentFor: String? = null,
     val reserveNextSentFor: String? = null,
+    /** next outage start the «зарядиться лише до …» advice was sent for */
+    val chargeSlowSentFor: String? = null,
     val reserveCurrentSent: Boolean = false,
     val schedulePublished: Boolean? = null,
     val lastPublishedKey: String? = null,
@@ -259,6 +262,13 @@ object AlertEvaluator {
                 active += alert
                 if (m0.reserveNextSentFor != info.nextStart) events += alert
                 m = m.copy(reserveNextSentFor = info.nextStart)
+            }
+            // charging, but not fast enough to be full by the outage → suggest a higher charge power (Sufficiency)
+            Sufficiency.of(snapshot, info, linkLost = false, nowMillis = nowMillis).advice?.let { advice ->
+                val alert = Alert(AlertId.CHARGE_TOO_SLOW, AlertSeverity.WARN, "Не встигне зарядитися до відключення", advice)
+                active += alert
+                if (m0.chargeSlowSentFor != info.nextStart) events += alert
+                m = m.copy(chargeSlowSentFor = info.nextStart)
             }
         }
 
@@ -487,6 +497,7 @@ object AlertMemoryCodec {
         .put("notChargingSent", m.notChargingSent)
         .put("outageSoonSentFor", m.outageSoonSentFor ?: JSONObject.NULL)
         .put("reserveNextSentFor", m.reserveNextSentFor ?: JSONObject.NULL)
+        .put("chargeSlowSentFor", m.chargeSlowSentFor ?: JSONObject.NULL)
         .put("reserveCurrentSent", m.reserveCurrentSent)
         .put("schedulePublished", m.schedulePublished ?: JSONObject.NULL)
         .put("lastPublishedKey", m.lastPublishedKey ?: JSONObject.NULL)
@@ -523,6 +534,7 @@ object AlertMemoryCodec {
             notChargingSent = bool("notChargingSent"),
             outageSoonSentFor = str("outageSoonSentFor"),
             reserveNextSentFor = str("reserveNextSentFor"),
+            chargeSlowSentFor = str("chargeSlowSentFor"),
             reserveCurrentSent = bool("reserveCurrentSent"),
             schedulePublished = if (!j.has("schedulePublished") || j.isNull("schedulePublished")) null else j.optBoolean("schedulePublished"),
             lastPublishedKey = str("lastPublishedKey"),

@@ -181,6 +181,22 @@ class AlertEvaluatorTest {
     // ---- reserve before the next outage ----
 
     @Test
+    fun chargeTooSlowSuggestsMorePowerOncePerOutage() {
+        // 30 % (1536 Wh), charging 1200 W, outage in 60 min → 2736 Wh = 53 %; at 2500 W → 1536 + 2500 = 4036 → 79 % (not full)
+        val slow = snap(soc = 30, direction = BatteryDirection.CHARGING, power = 1200.0, nextStart = at(60))
+        val r = eval(null, slow)
+        val alert = r.one(AlertId.CHARGE_TOO_SLOW)
+        assertEquals("Не встигне зарядитися до відключення", alert.title)
+        assertEquals("До відключення зарядиться лише до 53 %. На 2,5 кВт — до 79 %: збільште потужність заряду в застосунку Marstek.",
+            alert.text.replace('\u00A0', ' '))
+        assertFalse(AlertId.CHARGE_TOO_SLOW in eval(r.memory, slow).ids())
+        assertTrue(eval(r.memory, slow).active.any { it.id == AlertId.CHARGE_TOO_SLOW })
+        // a new outage window → a fresh reminder; already at full power → nothing
+        assertTrue(AlertId.CHARGE_TOO_SLOW in eval(r.memory, snap(soc = 30, direction = BatteryDirection.CHARGING, power = 1200.0, nextStart = at(90))).ids())
+        assertFalse(AlertId.CHARGE_TOO_SLOW in eval(null, snap(soc = 30, direction = BatteryDirection.CHARGING, power = 2450.0, nextStart = at(60))).ids())
+    }
+
+    @Test
     fun reserveShortNextComputesNeededAndAvailableEnergy() {
         // 4 h outage at 400 W needs 1.60 kWh; battery holds 1.00 kWh → short by 0.60 kWh.
         val r = eval(null, snap(soc = 20, capacityWh = 1000.0, nextStart = at(180), nextEnd = at(420), runtime = 9000, covers = false, loadW = 400.0))
