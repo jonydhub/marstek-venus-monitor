@@ -53,6 +53,12 @@ class HistoryStore:
         )
         self.conn.execute("CREATE INDEX IF NOT EXISTS events_ts ON events (ts)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID")
+        # Per-day totals of completed days, kept forever (samples are pruned after 8 days) — the «Лічильники» total.
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS day_totals (date TEXT PRIMARY KEY, charge_wh REAL NOT NULL,"
+            " discharge_wh REAL NOT NULL, outage_energy_wh REAL NOT NULL, off_seconds REAL NOT NULL,"
+            " outages INTEGER NOT NULL) WITHOUT ROWID"
+        )
 
     def get_meta(self, key, default=None):
         """Small persisted per-install facts (e.g. the learned «bypass load seen» flag); never pruned."""
@@ -110,6 +116,33 @@ class HistoryStore:
         with self.lock:
             cursor = self.conn.execute(f"SELECT {','.join(COLUMNS)} FROM samples WHERE ts >= ? ORDER BY ts", (start_ts,))
             return [dict(zip(COLUMNS, values)) for values in cursor.fetchall()]
+
+    def first_sample_ts(self):
+        with self.lock:
+            row = self.conn.execute("SELECT MIN(ts) FROM samples").fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def save_day_totals(self, days):
+        """Upsert completed days of stats()["days"] (dicts with date / charge_wh / discharge_wh / outage_energy_wh /
+        off_seconds / outages). Callers pass only fully covered past days — today is never stored."""
+        with self.lock:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO day_totals (date, charge_wh, discharge_wh, outage_energy_wh, off_seconds, outages)"
+                " VALUES (?,?,?,?,?,?)",
+                [(d["date"], d["charge_wh"], d["discharge_wh"], d["outage_energy_wh"], d["off_seconds"], d["outages"])
+                 for d in days])
+
+    def day_totals(self, before_date=None):
+        """Stored days (oldest first), optionally only those before `before_date` (ISO)."""
+        query = "SELECT date, charge_wh, discharge_wh, outage_energy_wh, off_seconds, outages FROM day_totals"
+        args = ()
+        if before_date:
+            query += " WHERE date < ?"
+            args = (before_date,)
+        with self.lock:
+            rows = self.conn.execute(query + " ORDER BY date", args).fetchall()
+        keys = ("date", "charge_wh", "discharge_wh", "outage_energy_wh", "off_seconds", "outages")
+        return [dict(zip(keys, r)) for r in rows]
 
     def close(self):
         with self.lock:
@@ -386,6 +419,33 @@ def stats(rows, *, now, days=WEEK_DAYS, threshold_w=BACKUP_DRAW_THRESHOLD_W,
                         "outage_energy_wh": round(backup_wh, 1), "charge_wh": round(charge_wh, 1),
                         "discharge_wh": round(discharge_wh, 1)})
     return {"days": per_day, "outages": outages[::-1], "charges": charges[::-1]}
+
+
+COUNTER_KEYS = ("charge_wh", "discharge_wh", "outage_energy_wh", "off_seconds", "outages")
+
+
+def _sum_days(days):
+    total = {k: sum(d.get(k) or 0 for d in days) for k in COUNTER_KEYS}
+    return {k: round(v) if k in ("off_seconds", "outages") else round(v, 1) for k, v in total.items()}
+
+
+def counters(store, days, *, first_sample_ts=None):
+    """«Лічильники»: today / the stats window / everything since the server started keeping history.
+
+    `days` = stats()["days"] (newest first). Completed days that have samples are saved to the never-pruned
+    day_totals table on every call, so the total survives the 8-day sample retention and always matches «Статистика»
+    for the days still in the window."""
+    if not days:
+        return None
+    first_date = datetime.fromtimestamp(first_sample_ts, KYIV).date().isoformat() if first_sample_ts else None
+    past = [d for d in days[1:] if first_date is None or d["date"] >= first_date]
+    if store is not None and past:
+        store.save_day_totals(past)
+    stored = store.day_totals(before_date=days[0]["date"]) if store is not None else past
+    covered = [d for d in days if first_date is None or d["date"] >= first_date]
+    since = stored[0]["date"] if stored else days[0]["date"]
+    return {"since": since, "window_days": len(covered),
+            "today": _sum_days(days[:1]), "window": _sum_days(covered), "total": _sum_days(stored + days[:1])}
 
 
 def day_starts(now, days=WEEK_DAYS):

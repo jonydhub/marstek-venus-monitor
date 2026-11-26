@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
 import gridstate
-from history import (day_starts, week_light, stats as history_stats, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
+from history import (day_starts, week_light, stats as history_stats, counters as history_counters, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
                      measured_backup_load, smoothed_backup_load)
 from outage import build_outage_service
 from netcache import CachedJsonClient
@@ -637,6 +637,7 @@ def _compute_stats(now) -> dict:
         body = history_stats(rows, now=now, threshold_w=BACKUP_THRESHOLD_W,
                              confirm_gap=gridstate.confirm_gap_seconds(POLL_SECONDS),
                              bypass=SETTINGS.bypass_load, bypass_seen=poller.bypass_seen())
+        body["counters"] = history_counters(poller.history, body["days"], first_sample_ts=poller.history.first_sample_ts())
     return {**body, "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
