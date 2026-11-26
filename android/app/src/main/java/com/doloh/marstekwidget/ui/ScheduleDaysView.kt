@@ -21,7 +21,28 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
      * [scheduleNow] «За графіком: …» goes above today's bar, [actual] (the «Фактично» row) under today's windows, with
      * the same width, hour ticks and now-marker as the schedule bar. Without a schedule pass [days] empty: only «Фактично».
      */
+    private var lastKey: Any? = null
+    private val dayViews = mutableListOf<Pair<DayScheduleView, DaySchedule>>()
+    private var actualView: ActualDayView? = null
+    /** Last «Відключення …» / «Можливе …» lines per day: a rebuilt row starts with them, so it does not blink. */
+    private val lastLines = mutableMapOf<String, Pair<String?, String?>>()
+
+    /**
+     * Rebuilds only when what is shown changes. The 15-s refresh used to rebuild every row: the «Відключення …» line
+     * under a bar is shown first and hidden after the bar has laid out its labels (onUnlabeled), so the screen below
+     * jumped on every refresh. With the same windows only the «now» marker moves (setDay → invalidate, no relayout).
+     */
     fun setDays(days: List<DaySchedule>, actual: ActualDay? = null, scheduleNow: String? = null) {
+        // «Фактично» segments grow with the clock — they are pushed into the existing view, not part of the key
+        val key = Triple(days.map { it.copy(nowFraction = null, nowText = null) }, actual?.copy(nowFraction = 0f, segments = emptyList()), scheduleNow)
+        if (key == lastKey && dayViews.size == days.count { it.isToday || it.published }) {
+            dayViews.forEachIndexed { i, (view, _) -> days.filter { it.isToday || it.published }.getOrNull(i)?.let(view::setDay) }
+            actual?.let { a -> actualView?.setDay(a) }
+            return
+        }
+        lastKey = key
+        dayViews.clear()
+        actualView = null
         removeAllViews()
         if (days.isEmpty() && actual != null) {
             addView(text("Сьогодні", 12f, TEXT, true), params(0))
@@ -38,8 +59,14 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
             if (day.isToday) scheduleNow?.let { addView(text(it, 10.5f, MUTED, false), params(dp(1))) }
             val offLine = text(day.windowsText, 12f, if (day.definite.isNotEmpty()) AMBER else MUTED, day.definite.isNotEmpty())
             val maybeLine = day.maybeText?.let { text(it, 11f, AMBER_SOFT, false) }
+            val dayKey = day.date.toString()
+            lastLines[dayKey]?.let { (off, maybe) ->
+                if (day.definite.isNotEmpty()) { offLine.visibility = if (off == null) GONE else VISIBLE; off?.let { offLine.text = it } }
+                maybeLine?.let { line -> line.visibility = if (maybe == null) GONE else VISIBLE; maybe?.let { line.text = it } }
+            }
             addView(DayScheduleView(context).apply {
                 setDay(day)
+                dayViews += this to day
                 contentDescription = "${day.title}: ${day.windowsText}" + (day.maybeText?.let { "; $it" } ?: "")
                 // The bar already shows each window's times above it: the lines below list only windows without a
                 // label there (same rule as the web renderScheduleTimes), so nothing is said twice.
@@ -55,6 +82,8 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
                         line.visibility = if (r.isEmpty()) GONE else VISIBLE
                         line.text = "Можливе ${r.joinToString(", ")}"
                     }
+                    lastLines[dayKey] = (if (offLine.visibility == VISIBLE) offLine.text.toString() else null) to
+                        maybeLine?.takeIf { it.visibility == VISIBLE }?.text?.toString()
                 }
             }, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(barHeightDp) + timeLabelZonePx()).apply { topMargin = dp(3) })
             addView(offLine, params(dp(2)))
@@ -68,6 +97,7 @@ class ScheduleDaysView(context: Context, private val textScale: Float = 1f, priv
         val color = when (actual.state) { "on" -> GREEN; "off" -> CORAL; else -> MUTED }
         addView(text(actual.text, 10.5f, color, true), params(dp(8)))
         val view = ActualDayView(context, timeLabels = true).apply { setDay(actual) }
+        actualView = view
         val zone = kotlin.math.ceil(ActualBarPainter.topZone(actual, view.timeLabelPx(), resources.displayMetrics.density)).toInt()
         addView(view, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ACTUAL_BAR_DP) + actualTickZonePx() + zone).apply { topMargin = dp(3) })
         // «Без світла 37 хв · зі станції 0,35 кВт·год» under the axis

@@ -38,6 +38,17 @@ object Sufficiency {
 
     private fun hm(ts: Double) = "%02d:%02d".format(local(ts).hour, local(ts).minute)
 
+    /** «» today, «завтра » tomorrow, «29.11 » later — prefix of a time range. */
+    private fun day(ts: Double, now: Double): String {
+        val d = local(ts).toLocalDate()
+        val today = Instant.ofEpochSecond(now.toLong()).atZone(kyiv).toLocalDate()
+        return when (d) {
+            today -> ""
+            today.plusDays(1) -> "завтра "
+            else -> "%02d.%02d ".format(d.dayOfMonth, d.monthValue)
+        }
+    }
+
     /** «о 20:00», «завтра о 02:00», «о 09:00, 29.11». */
     private fun clock(ts: Double, now: Double): String {
         val t = local(ts)
@@ -79,7 +90,7 @@ object Sufficiency {
         val storedAt = (stored + charge * t / 3600).let { if (rated != null) min(rated, it) else it }
         var verdict: Verdict? = null
         if (load != null && nextEnd != null && nextEnd > nextStart) {
-            val range = "${hm(nextStart)}–${hm(nextEnd)}"
+            val range = "${day(nextStart, now)}${hm(nextStart)}–${hm(nextEnd)}"
             val need = load * (nextEnd - nextStart) / 3600
             val usable = storedAt - floorWh
             verdict = if (usable >= need) {

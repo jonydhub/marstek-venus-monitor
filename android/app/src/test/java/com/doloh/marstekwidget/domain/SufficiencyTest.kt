@@ -37,6 +37,9 @@ class SufficiencyTest {
     @Test fun nextOutageEnough() = assertEquals(true to "На відключення 20:00–00:00 вистачить · лишиться ≈ 43 %",
         suff(ts(15), "on", load = 457.0, nextStart = ts(20), nextEnd = ts(0, day = 27)).v())
 
+    @Test fun nextOutageTomorrowNamesTheDay() = assertEquals("На відключення завтра 21:00–00:00 вистачить · лишиться ≈ 52 %",
+        suff(ts(18), "on", load = 457.0, nextStart = ts(21, day = 27), nextEnd = ts(0, day = 28)).v()?.second)
+
     @Test fun nextOutageShort() = assertEquals(false to "На відключення 20:00–00:00 не вистачить ≈ 33 хв",
         suff(ts(15), "on", load = 1000.0, nextStart = ts(20), nextEnd = ts(0, day = 27)).v())
 

@@ -1009,6 +1009,8 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
   // with light on the verdict already names the next outage («На відключення завтра 21:00–00:00 …») — no repeat below it
   const subEl = $('hero-sub');
   if (subEl) subEl.hidden = Boolean(suff.verdict && light.state === 'on');
+  const fc = $('hero-forecast');  // «Запасу на …» = the reserve the verdict already judges
+  if (fc) fc.hidden = Boolean(suff.verdict && light.state === 'on' && fc.textContent.startsWith('Запасу на'));
   hero.dataset.state = light.state;
   const modeChip = $('mode-chip');
   if (modeChip) {

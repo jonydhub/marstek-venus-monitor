@@ -794,12 +794,18 @@ class MainActivity : Activity() {
         val shownBySchedule = if (info != null && info.scheduleEnabled && !info.scheduleUnavailable)
             setOf(days[0].windowsText, "Графік не опубліковано", "За графіком без відключень") else emptySet()
         if (sub in shownBySchedule) sub = null
+        // «Чи вистачить»: with light on it names the next outage itself («На відключення завтра 21:00–00:00 вистачить …»),
+        // so the «Відключення завтра о 21:00» line, the outage line and «Запас ≈ … · вистачить» are not repeated.
+        val suff = Sufficiency.of(snapshot, info, light.kind == LightKind.NO_LINK || state == WidgetFetchState.ERROR)
+        val nextVerdict = suff.verdict != null && light.kind == LightKind.ON
+        if (nextVerdict) sub = null
+        // «Запасу на 9 год 14 хв» is the same reserve the verdict already judges against the outage
+        if (nextVerdict && eta?.startsWith("Запасу на") == true) eta = null
         etaLine.text = eta.orEmpty()
         etaLine.visibility = if (eta.isNullOrBlank()) View.GONE else View.VISIBLE
         etaLine.setTextColor(etaColor)
         subLine.text = sub.orEmpty()
         subLine.visibility = if (sub.isNullOrBlank()) View.GONE else View.VISIBLE
-        val suff = Sufficiency.of(snapshot, info, light.kind == LightKind.NO_LINK || state == WidgetFetchState.ERROR)
         verdictLine.text = suff.verdict?.text.orEmpty()
         verdictLine.visibility = if (suff.verdict == null) View.GONE else View.VISIBLE
         verdictLine.setTextColor(if (suff.verdict?.ok == false) CORAL else POWER_ON)
@@ -841,10 +847,10 @@ class MainActivity : Activity() {
         scheduleDays.setDays(if (hasSchedule) days else emptyList(), actual, ActualDays.scheduleNowText(info, now))
         scheduleCaption.text = listOfNotNull("Графік відключень", info?.group?.let { "черга $it" }).joinToString(" · ") + "  ›"
         val nextText = info?.takeIf { light.kind != LightKind.OFF && light.kind != LightKind.NO_LINK }?.let { PowerOutageFormatter.detail(it, now) }
-            ?.takeIf { it != sub && it !in shownBySchedule }
+            ?.takeIf { !nextVerdict && it != sub && it !in shownBySchedule }
         outageLine.text = nextText.orEmpty()
         outageLine.visibility = if (nextText.isNullOrBlank()) View.GONE else View.VISIBLE
-        val reserveText = reserve?.text?.takeIf { light.kind == LightKind.ON && it != eta }
+        val reserveText = reserve?.text?.takeIf { light.kind == LightKind.ON && it != eta && !nextVerdict }
         reserveLine.visibility = if (reserveText == null) View.GONE else View.VISIBLE
         reserveLine.text = reserveText.orEmpty()
         reserveLine.setTextColor(toneColor(reserve?.tone))
