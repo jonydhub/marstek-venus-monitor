@@ -995,12 +995,8 @@ function renderHero(data, bat, socValue, fetchFailed = false) {
       ? `Прогноз запасу з’явиться після першого відключення (навантаження міряється на резервному виході).${bypass}${err}`
       : `Запас — енергія ${floorText} ${autonomyBasisText(a)}. Світло — за резервним виходом Venus.${bypass}${err}`);
   }
-  // «Чи вистачить» + «зарядиться лише до …» (see sufficiency())
-  const suff = sufficiency({now: Date.now(), light: light.state, stored_wh: a.stored_wh ?? bat?.bat_capacity,
-    rated_wh: bat?.rated_capacity ?? data.methods?.['ES.GetStatus']?.data?.bat_cap, floor_pct: a.floor_pct, load_w: a.load_w,
-    charge_w: flow.available && flow.direction === 'charging' ? flow.power_w : 0,
-    current_end: Date.parse(outage.current_outage?.end || '') || null,
-    next_start: Date.parse(outage.next_outage?.start || '') || null, next_end: Date.parse(outage.next_outage?.end || '') || null});
+  // «Чи вистачить» + «зарядиться лише до …» — computed by the server (sufficiency.py)
+  const suff = data.sufficiency || {};
   const verdictEl = $('hero-verdict'), adviceEl = $('hero-advice');
   if (verdictEl) {
     verdictEl.hidden = !suff.verdict;
@@ -1079,57 +1075,6 @@ function initCalc() {
     host.append(b);
   }
   renderCalc();
-}
-/**
- * «Чи вистачить» + charge advice — same rules as Android Sufficiency (keep in sync, cases in test_sufficiency.py).
- * i: {now (ms), light 'off'|'on'|…, stored_wh, rated_wh, floor_pct, load_w, charge_w (> 0 while charging),
- *     current_end, next_start, next_end (ms or null)} → {verdict: {ok, text} | null, advice: string | null}.
- */
-const MAX_CHARGE_W = 2500;
-function suffClock(ms, nowMs) {
-  ms = Math.round(ms / 60000) * 60000;  // nearest minute, as Android
-  const opts = {timeZone: 'Europe/Kyiv'};
-  const day = t => new Date(t).toLocaleDateString('en-CA', opts);
-  const hm = new Date(ms).toLocaleTimeString('uk-UA', {...opts, hour: '2-digit', minute: '2-digit', hour12: false});
-  return day(ms) === day(nowMs) ? `о ${hm}` : day(ms) === day(nowMs + 86400000) ? `завтра о ${hm}` : `о ${hm}, ${new Date(ms).toLocaleDateString('uk-UA', {...opts, day: '2-digit', month: '2-digit'})}`;
-}
-function suffHm(ms) { return new Date(Math.round(ms / 60000) * 60000).toLocaleTimeString('uk-UA', {timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hour12: false}); }
-function sufficiency(i) {
-  const out = {verdict: null, advice: null};
-  const num = v => v !== null && v !== undefined && Number.isFinite(Number(v)) ? Number(v) : null;
-  const now = num(i.now), stored = num(i.stored_wh), rated = num(i.rated_wh) > 0 ? num(i.rated_wh) : null;
-  const load = num(i.load_w) > 0 ? num(i.load_w) : null, charge = num(i.charge_w) > 0 ? num(i.charge_w) : 0;
-  if (now === null || stored === null) return out;
-  const floorWh = rated !== null && num(i.floor_pct) > 0 ? rated * num(i.floor_pct) / 100 : 0;
-  const pct = wh => `${Math.round(wh / rated * 100)}\u00A0%`;
-  const curEnd = num(i.current_end), nextStart = num(i.next_start), nextEnd = num(i.next_end);
-  if (i.light === 'off' && curEnd !== null && curEnd > now && load !== null) {
-    const runtime = Math.max(0, stored - floorWh) / load * 3600, remaining = (curEnd - now) / 1000;
-    if (runtime >= remaining) {
-      const margin = runtime - remaining;
-      out.verdict = {ok: true, text: `Вистачить до світла ${suffClock(curEnd, now)}${margin >= 60 ? ` · запас ≈\u00A0${spanText(margin * 1000)}` : ' — впритул'}`};
-    } else {
-      out.verdict = {ok: false, text: `Не вистачить ≈\u00A0${spanText((remaining - runtime) * 1000)}: заряду до ${suffHm(now + runtime * 1000)}, світло ${suffClock(curEnd, now)}`};
-    }
-    return out;
-  }
-  if (i.light !== 'on' || nextStart === null || nextStart <= now) return out;
-  const t = (nextStart - now) / 1000;
-  const storedAt = rated !== null ? Math.min(rated, stored + charge * t / 3600) : stored + charge * t / 3600;
-  const range = nextEnd !== null && nextEnd > nextStart ? `${suffHm(nextStart)}–${suffHm(nextEnd)}` : null;
-  if (load !== null && range) {
-    const need = load * (nextEnd - nextStart) / 3600000, usable = storedAt - floorWh;
-    out.verdict = usable >= need
-      ? {ok: true, text: `На відключення ${range} вистачить${rated !== null ? ` · лишиться ≈\u00A0${pct(storedAt - need)}` : ''}`}
-      : {ok: false, text: `На відключення ${range} не вистачить ≈\u00A0${spanText((need - Math.max(0, usable)) / load * 3600000)}`};
-  }
-  if (charge > 0 && rated !== null && storedAt < rated * 0.99 && charge < MAX_CHARGE_W - 200) {
-    const fullAtMax = (rated - stored) / MAX_CHARGE_W * 3600;
-    const atMax = fullAtMax <= t ? `100\u00A0% ${suffClock(now + fullAtMax * 1000, now)}`
-      : `до ${Math.min(99, Math.round((stored + MAX_CHARGE_W * t / 3600) / rated * 100))}\u00A0%`;  // not full → never «100 %»
-    out.advice = `До відключення зарядиться лише до ${pct(storedAt)}. На 2,5\u00A0кВт — ${atMax}: збільште потужність заряду в застосунку Marstek.`;
-  }
-  return out;
 }
 function render(data) {
   const m=data.methods||{}, wifi=good(m['Wifi.GetStatus']), ble=good(m['BLE.GetStatus']), bat=good(m['Bat.GetStatus']), es=good(m['ES.GetStatus']), mode=good(m['ES.GetMode']), em=good(m['EM.GetStatus']);

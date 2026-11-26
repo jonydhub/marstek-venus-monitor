@@ -23,6 +23,7 @@ from config import ConfigError, load_env_file, load_settings, validate
 import events as journal
 import gridstate
 import report as report_module
+from sufficiency import from_status as sufficiency_from_status
 from history import (day_starts, week_light, stats as history_stats, counters as history_counters, LOAD_STATS_WINDOW_SECONDS, HistoryStore, backup_load_stats, compute_insights,
                      measured_backup_load, smoothed_backup_load)
 from outage import build_outage_service
@@ -539,6 +540,12 @@ class MarstekPoller:
                 "insights": insights,
                 "connection": connection,
             }
+            light = power_outage.get("grid_state", "unknown") if connection["ok"] else "unknown"
+            try:  # «Чи вистачить» + charge advice (sufficiency.py) — read by the web hero and the Telegram alert
+                self.data["sufficiency"] = sufficiency_from_status(self.data, time.time(), light)
+            except Exception as exc:
+                logging.warning("sufficiency failed: %s", exc)
+                self.data["sufficiency"] = {"verdict": None, "advice": None}
 
     def wait(self, seconds) -> None:
         """Sleep until the next poll; apply_settings()/stop() wake it early."""
