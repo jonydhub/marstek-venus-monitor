@@ -231,3 +231,8 @@ body{margin:0;color:var(--text);font:15px/1.45 Inter,ui-sans-serif,system-ui,-ap
 .calc-tariff{max-width:260px}.calc-tariff small{color:var(--dim);font-size:10px}
 @media(min-width:760px){.calc-presets{grid-template-columns:repeat(9,minmax(0,1fr))}}
 @media(min-width:1100px){.official-shell>.calc{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);column-gap:24px;align-items:start}.calc>.flow-heading,.calc>.calc-presets{grid-column:1/-1}.calc>.calc-inputs{grid-column:1;grid-row:3}.calc>.calc-tariff{grid-column:1;grid-row:4;margin-top:12px}.calc>.calc-result{grid-column:2;grid-row:3/5;margin:0}}
+/* v27: «Лічильники» (server-side day totals) */
+.counters{margin:0 0 12px;padding:14px 16px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(155deg,rgba(26,33,45,.98),rgba(21,27,37,.96))}
+.counters[hidden]{display:none}
+.counters-table .stats-row{grid-template-columns:2.3fr 1fr 1fr 1fr}
+.counters-table .stats-row:not(.head) span:not(:first-child):not(.dash){color:var(--text);font-weight:600}

@@ -773,12 +773,41 @@ function renderStats(body) {
     }
   }
 }
+/**
+ * «Лічильники» — same rules as Android CountersTable (keep in sync): rows × «Сьогодні / 7 днів / Усього» from
+ * /api/stats counters (server-side day totals that outlive the 8-day history).
+ */
+const COUNTER_ROWS = [['Заряджено', 'charge_wh'], ['Розряджено', 'discharge_wh'], ['Спожито без світла', 'outage_energy_wh'], ['Без світла, год', 'off_seconds']];
+function counterCell(key, v) {
+  const n = Number(v) || 0;
+  if (key === 'off_seconds') return n >= 60 ? (n / 3600).toLocaleString('uk-UA', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '—';
+  return n >= 5 ? kwhNumber(n) : '—';
+}
+function countersRows(c) {
+  if (!c?.today || !c?.window || !c?.total) return null;
+  const head = ['', 'Сьогодні', `${c.window_days || 7}\u00A0${(c.window_days || 7) === 1 ? 'день' : (c.window_days || 7) < 5 ? 'дні' : 'днів'}`, 'Усього'];
+  return {head, rows: COUNTER_ROWS.map(([label, key]) => [label, counterCell(key, c.today[key]), counterCell(key, c.window[key]), counterCell(key, c.total[key])])};
+}
+function countersNote(c) {
+  if (!c?.since) return '';
+  const [y, m, d] = c.since.split('-');
+  return `Усього — з ${d}.${m}.${y}. Рахує сервер з вимірів (лічильники станції неповні).`;
+}
+function renderCounters(c) {
+  const host = $('counters-table'); if (!host) return;
+  const t = countersRows(c);
+  $('counters').hidden = !t;
+  if (!t) return;
+  host.replaceChildren(statsRow(t.head, 'head'), ...t.rows.map(r => statsRow(r)));
+  set('counters-note', countersNote(c));
+}
 async function loadStats() {
   const section = $('stats'); if (!section) return;
   try {
     const response = await apiFetch('/api/stats');
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    renderStats(await response.json());
+    const body = await response.json();
+    renderStats(body); renderCounters(body.counters);
     section.hidden = false;
   } catch (err) {
     const tiles = $('stats-tiles');
