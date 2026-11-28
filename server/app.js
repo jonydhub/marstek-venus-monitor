@@ -427,6 +427,7 @@ function renderScheduleTimes(host, day, width, offLine = null, maybeLine = null)
 }
 window.addEventListener('resize', () => {
   if (lastScheduleOutage) renderScheduleDays(lastScheduleOutage);
+  renderExtraSchedules();
   if (lastSocChart) renderSocChart(lastSocChart.insights, lastSocChart.outage);
 });
 function scaleRows(box) {
@@ -507,6 +508,158 @@ function renderScheduleDays(outage = {}, insights = lastData?.insights || {}) {
   }
   lastScheduleOutage = outage;
   set('schedule-caption', `Графік відключень${outage.group ? ` · черга ${outage.group}` : ''}`);
+}
+/**
+ * «Інші графіки» — extra schedules (робота, батьки, інше місце), display only, kept in this browser (localStorage).
+ * Same rules as Android ExtraSchedules (keep in sync, test_extra_schedules_web.py): at most EXTRA_MAX entries,
+ * name trimmed to 24 chars (empty → «Графік»), duplicates of the same region+queue dropped.
+ */
+const EXTRA_KEY = 'marstek.extraSchedules', EXTRA_MAX = 6;
+function extraSchedulesParse(raw) {
+  let list;
+  try { list = JSON.parse(raw || '[]'); } catch { return []; }
+  if (!Array.isArray(list)) return [];
+  const seen = new Set(), out = [];
+  for (const e of list) {
+    if (!e || typeof e.region !== 'string' || typeof e.queue !== 'string' || !e.region || !e.queue) continue;
+    const key = `${e.region}|${e.queue}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({name: String(e.name || '').trim().slice(0, 24) || 'Графік', region: e.region, queue: e.queue});
+    if (out.length >= EXTRA_MAX) break;
+  }
+  return out;
+}
+/**
+ * One «Інші графіки» row: the bar carries the times, the header only the name and the state by the schedule —
+ * «без світла» (inside a definite window now), «світло є», «не опубліковано», «недоступний», «аварійні».
+ */
+function extraRow(entry, outage, nowMs = Date.now()) {
+  const sub = `${(outage?.region_name || entry.region).replace(/ область/, ' обл.')} · черга ${entry.queue}`;
+  if (!outage) return {name: entry.name, sub, state: 'loading', status: '…', days: null};
+  if (!outage.available || outage.schedule_unavailable || (outage.error && !outage.schedule_published && !(outage.windows || []).length)) {
+    return {name: entry.name, sub, state: 'na', status: 'графік недоступний', days: null};
+  }
+  if (outage.emergency) return {name: entry.name, sub, state: 'off', status: 'аварійні відключення', days: scheduleDays(outage, nowMs)};
+  const off = (outage.windows || []).some(w => w.kind !== 'maybe' && Date.parse(w.start) <= nowMs && Date.parse(w.end) > nowMs);
+  const state = off ? 'off' : outage.schedule_published ? 'on' : 'none';
+  const status = off ? 'без світла' : outage.schedule_published ? 'світло є' : 'не опубліковано';
+  return {name: entry.name, sub, state, status, days: scheduleDays(outage, nowMs)};
+}
+// end extraRow
+let extraList = [], extraData = {}, extraEditing = false, extraOpen = new Set(), regionsCatalog = null;
+function extraLoadList() { try { extraList = extraSchedulesParse(localStorage.getItem(EXTRA_KEY)); } catch { extraList = []; } }
+function extraSaveList() { try { localStorage.setItem(EXTRA_KEY, JSON.stringify(extraList)); } catch { /* private mode */ } }
+async function loadExtraSchedules() {
+  extraLoadList();
+  await Promise.all(extraList.map(async e => {
+    const key = `${e.region}|${e.queue}`;
+    try {
+      const r = await apiFetch(`/api/schedule?region=${encodeURIComponent(e.region)}&queue=${encodeURIComponent(e.queue)}`);
+      if (r.ok) extraData[key] = await r.json();
+      else if (!extraData[key]) extraData[key] = {available: false};
+    } catch { if (!extraData[key]) extraData[key] = {available: false}; }
+  }));
+  renderExtraSchedules();
+}
+function extraDayRow(box, day) {
+  if (!day.isToday && !day.published) { box.append(el('p', 'extra-pending', 'Завтра: графік ще не опубліковано')); return; }
+  if (!day.isToday) box.append(el('p', 'extra-day', 'Завтра'));
+  const times = el('div', 'sched-times'); times.setAttribute('aria-hidden', 'true');
+  const track = el('div', `sched-track${day.published ? '' : ' unpublished'}`);
+  track.setAttribute('role', 'img');
+  track.setAttribute('aria-label', `${day.title}: ${day.text}`);
+  for (const seg of day.segments) {
+    const i = el('i', `seg ${seg.maybe ? 'maybe' : 'off'}`);
+    i.style.left = `${(seg.a * 100).toFixed(2)}%`; i.style.width = `${((seg.b - seg.a) * 100).toFixed(2)}%`;
+    track.append(i);
+  }
+  for (const h of [6, 12, 18]) { const i = el('i', 'six'); i.style.left = `${(h / 24 * 100).toFixed(3)}%`; track.append(i); }
+  if (day.now !== null) { const i = el('i', 'now'); i.style.left = `${(day.now * 100).toFixed(2)}%`; track.append(i); }
+  box.append(times, track);
+  requestAnimationFrame(() => {
+    const width = track.getBoundingClientRect().width;
+    times.replaceChildren();
+    if (!width) return;
+    // no «now» label here: the marker on the bar is enough in a compact row
+    for (const l of scheduleTimeLabels(day.segments, null, null, width, labelWidth)) {
+      const sp = el('span', l.kind, l.text); sp.style.left = `${l.left.toFixed(1)}px`; times.append(sp);
+    }
+  });
+}
+function renderExtraSchedules() {
+  const host = $('extra-schedules'); if (!host) return;
+  host.replaceChildren();
+  host.classList.toggle('editing', extraEditing);
+  const head = el('div', 'extra-head');
+  head.append(el('h3', '', 'Інші графіки'));
+  const edit = el('button', 'extra-edit', extraEditing ? 'Готово' : extraList.length ? 'Змінити' : '+ Додати');
+  edit.type = 'button';
+  edit.addEventListener('click', () => { extraEditing = !extraEditing; renderExtraSchedules(); });
+  head.append(edit);
+  host.append(head);
+  const now = Date.now();
+  extraList.forEach((entry, index) => {
+    const key = `${entry.region}|${entry.queue}`;
+    const row = extraRow(entry, extraData[key], now);
+    const box = el('div', `extra-row ${row.state}`);
+    const top = el('div', 'extra-top');
+    const title = el('button', 'extra-name');
+    title.type = 'button';
+    title.setAttribute('aria-expanded', String(extraOpen.has(key)));
+    title.append(el('b', '', row.name), el('span', 'extra-sub', row.sub));
+    title.addEventListener('click', () => { extraOpen.has(key) ? extraOpen.delete(key) : extraOpen.add(key); renderExtraSchedules(); });
+    top.append(title, el('span', `extra-state ${row.state}`, row.status));
+    if (extraEditing) {
+      const del = el('button', 'extra-del', '×'); del.type = 'button'; del.setAttribute('aria-label', `Прибрати «${row.name}»`);
+      del.addEventListener('click', () => { extraList.splice(index, 1); extraSaveList(); delete extraData[key]; renderExtraSchedules(); });
+      top.append(del);
+    }
+    box.append(top);
+    if (row.days) {
+      extraDayRow(box, row.days[0]);
+      if (extraOpen.has(key)) extraDayRow(box, row.days[1]);
+    }
+    host.append(box);
+  });
+  if (extraEditing) host.append(extraForm());
+}
+function extraForm() {
+  const form = el('form', 'extra-form');
+  if (extraList.length >= EXTRA_MAX) { form.append(el('p', 'extra-note', `Не більше ${EXTRA_MAX} графіків`)); return form; }
+  const name = el('input'); name.placeholder = 'Назва: Робота, Батьки…'; name.maxLength = 24; name.setAttribute('aria-label', 'Назва графіка');
+  const region = el('select'); region.setAttribute('aria-label', 'Область');
+  const queue = el('select'); queue.setAttribute('aria-label', 'Черга');
+  const add = el('button', '', 'Додати'); add.type = 'submit';
+  const fillQueues = () => {
+    const r = (regionsCatalog || []).find(x => x.id === region.value);
+    queue.replaceChildren(...(r?.queues || []).map(q => { const o = el('option', '', `черга ${q}`); o.value = q; return o; }));
+    add.disabled = !queue.options.length;
+  };
+  const fillRegions = () => {
+    const usable = (regionsCatalog || []).filter(r => (r.sources || []).length && (r.queues || []).length);
+    region.replaceChildren(...usable.map(r => { const o = el('option', '', r.name_ua); o.value = r.id; return o; }));
+    const own = lastData?.power_outage?.region;
+    if (own && usable.some(r => r.id === own)) region.value = own;
+    fillQueues();
+  };
+  region.addEventListener('change', fillQueues);
+  if (regionsCatalog) fillRegions();
+  else {
+    add.disabled = true;
+    apiFetch('/api/regions').then(r => (r.ok ? r.json() : null)).then(d => { regionsCatalog = d?.regions || []; fillRegions(); }).catch(() => {});
+  }
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (!region.value || !queue.value) return;
+    extraList = extraSchedulesParse(JSON.stringify([...extraList, {name: name.value, region: region.value, queue: queue.value}]));
+    extraSaveList();
+    extraEditing = false;
+    renderExtraSchedules();
+    loadExtraSchedules();
+  });
+  form.append(name, region, queue, add);
+  return form;
 }
 /** «Сьогодні», «Вчора», «Пн, 16.11» for a Kyiv ISO date. */
 function weekDayTitle(day) {
@@ -1215,4 +1368,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 document.querySelector('.diagnostics')?.addEventListener('toggle', drawChart);
 initCalc(); refresh(); loadJournal(); loadStats(); loadReport();
 for (const b of document.querySelectorAll('.report-tab')) b.addEventListener('click', () => loadReport(b.dataset.period));
- setInterval(refresh,15000); setInterval(loadJournal,60000); setInterval(loadStats,300000); window.addEventListener('resize',drawChart);
+ loadExtraSchedules(); setInterval(loadExtraSchedules,300000); setInterval(renderExtraSchedules,60000); setInterval(refresh,15000); setInterval(loadJournal,60000); setInterval(loadStats,300000); window.addEventListener('resize',drawChart);

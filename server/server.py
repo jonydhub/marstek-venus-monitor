@@ -29,6 +29,7 @@ from history import (day_starts, week_light, stats as history_stats, counters as
 from outage import build_outage_service
 from netcache import CachedJsonClient
 from regions import build_region_catalog
+from extra_schedules import ExtraSchedules
 from uaoutages import NOW_URL
 
 ROOT = Path(__file__).resolve().parent
@@ -71,6 +72,7 @@ HISTORY_WINDOW_SECONDS = 24 * 3600
 EXPECTED_LOAD_W = SETTINGS.expected_load_w
 BACKUP_THRESHOLD_W = SETTINGS.backup_threshold_w
 UA_OUTAGES_CLIENT = CachedJsonClient(ttl=600)
+EXTRA_SCHEDULES = ExtraSchedules(ua_client=UA_OUTAGES_CLIENT)  # «Інші графіки» (display only)
 
 
 def _optional_float(value):
@@ -827,6 +829,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logging.warning("report failed: %s", exc)
                 return self.send_json(500, {"error": "report_unavailable"})
+        if path == "/api/schedule":  # another region/queue: «Робота», «Батьки» … — schedule fields only
+            q = parse_qs(query or "")
+            try:
+                return self.send_json(200, EXTRA_SCHEDULES.get((q.get("region") or [""])[0], (q.get("queue") or [""])[0]))
+            except ValueError:
+                return self.send_json(400, {"error": "bad_request"})
+            except Exception as exc:
+                logging.warning("extra schedule failed: %s", exc)
+                return self.send_json(502, {"error": "upstream_unavailable"})
         if path == "/api/regions":
             try:
                 regions = regions_catalog()
