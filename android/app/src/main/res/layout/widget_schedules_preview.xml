@@ -1,0 +1,30 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="10dp">
+    <!-- Widget picker preview (API 31+): sample rows, not data. -->
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:baselineAligned="false" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_home" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#7FE3B2" android:textSize="11sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_on" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="13dp" android:baselineAligned="false" android:orientation="horizontal"><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="7" android:background="#33475A" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="4" android:background="#F5B72E" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="13" android:background="#33475A" /></LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="6dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:baselineAligned="false" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_work" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F5B72E" android:textSize="11sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_off" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="13dp" android:baselineAligned="false" android:orientation="horizontal"><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="10" android:background="#33475A" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="5" android:background="#F5B72E" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="4" android:background="#33475A" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="3" android:background="#F5B72E" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="2" android:background="#33475A" /></LinearLayout>
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginTop="6dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:baselineAligned="false" android:orientation="horizontal">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_parents" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#7FE3B2" android:textSize="11sp" android:textStyle="bold" android:text="@string/widget_schedules_preview_on" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="match_parent" android:layout_height="8dp" android:layout_marginTop="13dp" android:baselineAligned="false" android:orientation="horizontal"><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="16" android:background="#33475A" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="4" android:background="#F5B72E" /><FrameLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="4" android:background="#33475A" /></LinearLayout>
+    </LinearLayout>
+</LinearLayout>

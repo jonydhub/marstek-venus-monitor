@@ -1,0 +1,67 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/sched_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="10dp">
+    <!-- «Графіки відключень»: up to 7 rows (own + 6 extras); heights must match ScheduleListWidgetRenderer.plan(). -->
+    <TextView android:id="@+id/sched_empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:includeFontPadding="false" android:textColor="#A0ADB8" android:textSize="12sp" android:text="@string/widget_schedules_empty" android:visibility="gone" />
+    <LinearLayout android:id="@+id/sched_row_0" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_0" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_0" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_0" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_1" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_1" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_1" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_1" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_2" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_2" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_2" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_3" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_3" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_3" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_3" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_4" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_4" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_4" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_4" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_5" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_5" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_5" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_5" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/sched_row_6" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:orientation="vertical" android:visibility="gone">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/sched_name_6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:includeFontPadding="false" android:maxLines="1" android:textColor="#F3F7FA" android:textSize="12sp" android:textStyle="bold" />
+            <TextView android:id="@+id/sched_more_6" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp" android:ellipsize="end" android:includeFontPadding="false" android:maxLines="1" android:textColor="#8B9BA7" android:textSize="10sp" />
+            <TextView android:id="@+id/sched_status_6" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:includeFontPadding="false" android:maxLines="1" android:textColor="#A0ADB8" android:textSize="11sp" android:textStyle="bold" />
+        </LinearLayout>
+        <ImageView android:id="@+id/sched_bar_6" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:adjustViewBounds="true" android:importantForAccessibility="no" android:scaleType="fitXY" />
+    </LinearLayout>
+</LinearLayout>

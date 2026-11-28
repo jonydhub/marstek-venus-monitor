@@ -589,12 +589,14 @@ object WidgetRenderer {
         }
         // The standalone «Світло» widget renders the same cached snapshot.
         LightWidgetRenderer.updateAll(context)
+        // «Графіки відключень»: snapshot + the «Інші графіки» cache
+        ScheduleListWidgetRenderer.updateAll(context)
     }
 
     fun allWidgetIds(context: Context): IntArray {
         val manager = AppWidgetManager.getInstance(context)
         return (widgetProviders().flatMap { (provider, _) -> manager.getAppWidgetIds(ComponentName(context, provider)).toList() } +
-            LightWidgetRenderer.widgetIds(context).toList()).toIntArray()
+            LightWidgetRenderer.widgetIds(context).toList() + ScheduleListWidgetRenderer.widgetIds(context).toList()).toIntArray()
     }
 
     fun hasWidgets(context: Context): Boolean = allWidgetIds(context).isNotEmpty()

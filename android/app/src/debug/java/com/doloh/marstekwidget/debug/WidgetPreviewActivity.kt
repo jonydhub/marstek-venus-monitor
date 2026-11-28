@@ -47,6 +47,8 @@ import java.time.format.DateTimeFormatter
  *   widget at 4×1 / 2×1 (strips) or 2×2 / 4×2 (blocks) cell sizes, FIXTURE at a fixed clock 20:15 Kyiv;
  *   `--ez clean true` draws one unlabelled 2×2 card (picker preview image); `--ez save true` stores that FIXTURE
  *   (real clock) as the cached snapshot and redraws the placed launcher widgets.
+ * `--ez pin_schedules true`: asks the launcher to pin the «Графіки відключень» widget (emulator check).
+ * `--ez schedules true`: the «Графіки відключень» widget (own + «Інші графіки») from the real cache at 4×2 / 4×3 / 3×1 / 4×1.
  * FIXTURE data, except `--es state live` which renders the app's last stored real snapshot.
  */
 class WidgetPreviewActivity : Activity() {
@@ -83,6 +85,19 @@ class WidgetPreviewActivity : Activity() {
         }
         intent.getStringExtra("light")?.let { case ->
             lightPreview(case, intent.getStringExtra("lpage") ?: "blocks", intent.getBooleanExtra("clean", false))
+            return
+        }
+        if (intent.getBooleanExtra("pin_schedules", false)) {
+            // emulator check without dragging from the picker: the launcher asks «Add to home screen?»
+            val manager = android.appwidget.AppWidgetManager.getInstance(this)
+            val ok = manager.isRequestPinAppWidgetSupported && manager.requestPinAppWidget(
+                android.content.ComponentName(this, com.doloh.marstekwidget.widget.MarstekSchedulesWidgetProvider::class.java), null, null)
+            android.util.Log.i("WidgetPreview", "pin_schedules requested: $ok")
+            finish()
+            return
+        }
+        if (intent.getBooleanExtra("schedules", false)) {
+            schedulesPreview()
             return
         }
         intent.getStringExtra("sched")?.let { case ->
@@ -505,6 +520,29 @@ class WidgetPreviewActivity : Activity() {
               "ES.GetStatus":{"data":{"ongrid_power":0,"offgrid_power":$offgrid}}},
             "battery_flow":{"available":true,"power_w":${if (off) -130.0 else 0.0},"direction":"${if (off) "discharging" else "idle"}"}}""")
             .put("power_outage", outage)
+    }
+
+    /** `--ez schedules true`: the «Графіки відключень» widget from the REAL cache (snapshot + «Інші графіки») at several cell sizes. */
+    private fun schedulesPreview() {
+        val density = resources.displayMetrics.density
+        fun px(dp: Int) = (dp * density).toInt()
+        val rows = com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer.rows(WidgetPreferences(this).snapshot()?.powerOutage,
+            com.doloh.marstekwidget.data.ExtraScheduleRepository(this).cachedAll(), System.currentTimeMillis())
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(12, 24, 36))
+            setPadding(px(16), px(40), px(16), px(16))
+        }
+        listOf("4×2 · 340×160" to (340 to 160), "4×2 Samsung · 350×200" to (350 to 200), "4×3 · 340×250" to (340 to 250),
+            "3×1 · 250×60" to (250 to 60), "4×1 · 340×84" to (340 to 84)).forEach { (name, size) ->
+            val (w, h) = size
+            column.addView(TextView(this).apply { text = "$name dp"; setTextColor(Color.rgb(160, 173, 184)); textSize = 10f; setPadding(0, px(10), 0, px(4)) })
+            column.addView(FrameLayout(this).apply {
+                addView(com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer.build(this@WidgetPreviewActivity, rows, 0, w.toFloat() to h.toFloat()).apply(context, this),
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }, LinearLayout.LayoutParams(px(w), px(h)))
+        }
+        setContentView(ScrollView(this).apply { addView(column) })
     }
 
     private fun lightPreview(case: String, page: String, clean: Boolean) {

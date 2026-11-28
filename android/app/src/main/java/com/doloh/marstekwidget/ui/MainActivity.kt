@@ -33,8 +33,11 @@ import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.AccessCookie
 import com.doloh.marstekwidget.data.JournalStore
 import com.doloh.marstekwidget.data.DirectEngine
+import com.doloh.marstekwidget.data.ExtraScheduleRepository
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.domain.ActualDays
+import com.doloh.marstekwidget.domain.ExtraSchedules
+import com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer
 import com.doloh.marstekwidget.domain.ChartEventClusters
 import com.doloh.marstekwidget.domain.EtaTextFormatter
 import com.doloh.marstekwidget.domain.JournalExport
@@ -126,6 +129,7 @@ class MainActivity : Activity() {
     private lateinit var todayCaption: TextView
     private lateinit var scheduleCaption: TextView
     private lateinit var scheduleDays: ScheduleDaysView
+    private lateinit var extraSchedules: ExtraSchedulesView
     private lateinit var todayTiles: LinearLayout
     private lateinit var journalPreview: LinearLayout
     private lateinit var diagnosticsText: TextView
@@ -195,6 +199,7 @@ class MainActivity : Activity() {
         statsButton?.visibility = if (settings.weekStatsEnabled) View.VISIBLE else View.GONE
         render(WidgetPreferences(this).snapshot(), WidgetPreferences(this).state())
         refreshTelemetry()
+        refreshExtraSchedules()
         loadServerJournal()
         loadCounters()
         handler.removeCallbacks(refreshLoop)
@@ -494,6 +499,10 @@ class MainActivity : Activity() {
         scheduleHost.addView(scheduleBlock)
         scheduleBlock.addView(powerGroup)
         scheduleHost.addView(powerNote)
+        // «Інші графіки» (робота, батьки…) after the own schedule and the reserve note (which belongs to the own
+        // battery): name + today's bar each; the tap opens «Графік відключень» with all of them
+        extraSchedules = ExtraSchedulesView(this, spec.textScale)
+        scheduleHost.addView(extraSchedules)
 
         // 24 h SOC chart: outage shading, event markers, axis labels, discharge floor.
         historyCard = card()
@@ -846,6 +855,7 @@ class MainActivity : Activity() {
         scheduleDays.visibility = if (hasSchedule || actual != null) View.VISIBLE else View.GONE
         scheduleDays.setDays(if (hasSchedule) days else emptyList(), actual, ActualDays.scheduleNowText(info, now))
         scheduleCaption.text = listOfNotNull("Графік відключень", info?.group?.let { "черга $it" }).joinToString(" · ") + "  ›"
+        renderExtraSchedules()
         val nextText = info?.takeIf { light.kind != LightKind.OFF && light.kind != LightKind.NO_LINK }?.let { PowerOutageFormatter.detail(it, now) }
             ?.takeIf { !nextVerdict && it != sub && it !in shownBySchedule }
         outageLine.text = nextText.orEmpty()
@@ -1025,6 +1035,25 @@ class MainActivity : Activity() {
         BatteryWarning.HIGH_POWER -> getString(R.string.widget_warning_high_power)
     }
 
+    /** «Інші графіки» from their cache (no network on the main thread). */
+    private fun renderExtraSchedules() {
+        if (!::extraSchedules.isInitialized) return
+        val now = System.currentTimeMillis()
+        extraSchedules.setRows(ExtraScheduleRepository(this).cachedAll().map { (entry, data) -> ExtraSchedules.row(entry, data, now) })
+    }
+
+    /** Fetches the due «Інші графіки» (≤ once per 10 min each) in the background, then redraws their rows. */
+    private fun refreshExtraSchedules() {
+        if (showcase) return
+        scope.launch {
+            val changed = withContext(Dispatchers.IO) { runCatching { ExtraScheduleRepository(this@MainActivity).refreshIfDue() }.getOrDefault(false) }
+            if (changed) {
+                renderExtraSchedules()
+                ScheduleListWidgetRenderer.updateAll(this@MainActivity)
+            }
+        }
+    }
+
     private fun refreshTelemetry() {
         if (refreshing || showcase) return
         if (needsAccess() && !hasAccessCookie()) {
@@ -1037,6 +1066,7 @@ class MainActivity : Activity() {
         scope.launch {
             try {
                 val result = TelemetryRepository.refreshAndStore(this@MainActivity)
+                refreshExtraSchedules()
                 val preferences = WidgetPreferences(this@MainActivity)
                 when (result) {
                     is TelemetryFetchResult.Success -> render(result.snapshot, preferences.state())

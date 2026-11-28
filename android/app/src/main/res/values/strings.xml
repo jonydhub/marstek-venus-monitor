@@ -20,6 +20,14 @@
     <string name="widget_compact_description">Заряд, стан світла та головний час.</string>
     <string name="widget_strip_description">Плаский рядок 4×1: заряд, світло, ETA або час повернення.</string>
     <string name="widget_energy_description">Заряд, світло, повернення/відключення, запас і потоки.</string>
+    <string name="widget_schedules_name">Графіки відключень</string>
+    <string name="widget_schedules_description">Свій графік та інші (робота, батьки…) на сьогодні: смуги з часом відключень.</string>
+    <string name="widget_schedules_empty">Додайте графіки в застосунку: Налаштування → Інші графіки</string>
+    <string name="widget_schedules_preview_home">Дім · черга 1.1</string>
+    <string name="widget_schedules_preview_work">Робота</string>
+    <string name="widget_schedules_preview_parents">Батьки</string>
+    <string name="widget_schedules_preview_on">світло є</string>
+    <string name="widget_schedules_preview_off">без світла</string>
     <string name="widget_light_name">Світло</string>
     <string name="widget_light_description">Чи є світло зараз і скільки його немає, повернення або наступне відключення за графіком.</string>
     <string name="widget_light_preview_headline">Світла нема</string>

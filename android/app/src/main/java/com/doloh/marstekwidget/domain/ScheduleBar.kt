@@ -75,11 +75,22 @@ object ScheduleDays {
         return listOf(day(info, today, today, nowMillis), day(info, today.plusDays(1), today, nowMillis))
     }
 
-    fun day(info: PowerOutageInfo?, date: LocalDate, today: LocalDate, nowMillis: Long): DaySchedule {
+    /** Same rows from bare windows (the «Інші графіки» schedules have no [PowerOutageInfo]). */
+    fun days(windows: List<ScheduleWindow>, scheduleDates: List<String>, schedulePublished: Boolean, nowMillis: Long): List<DaySchedule> {
+        val today = Instant.ofEpochMilli(nowMillis).atZone(kyiv).toLocalDate()
+        return listOf(today, today.plusDays(1)).map { day(windows, scheduleDates, schedulePublished, it, today, nowMillis) }
+    }
+
+    fun day(info: PowerOutageInfo?, date: LocalDate, today: LocalDate, nowMillis: Long): DaySchedule =
+        day(info?.windows, info?.scheduleDates.orEmpty(), info?.schedulePublished == true, date, today, nowMillis)
+
+    /** [windows] null = no schedule at all (never published). */
+    private fun day(windows: List<ScheduleWindow>?, scheduleDates: List<String>, schedulePublished: Boolean, date: LocalDate,
+                    today: LocalDate, nowMillis: Long): DaySchedule {
         val start = date.atStartOfDay(kyiv).toInstant().toEpochMilli()
         val end = date.plusDays(1).atStartOfDay(kyiv).toInstant().toEpochMilli()
         val span = (end - start).toDouble()
-        val clipped = info?.windows.orEmpty().mapNotNull { w ->
+        val clipped = windows.orEmpty().mapNotNull { w ->
             val a = maxOf(w.startMillis, start)
             val b = minOf(w.endMillis, end)
             if (b > a) Triple(a, b, w.maybe) else null
@@ -90,8 +101,8 @@ object ScheduleDays {
             ScheduleBarModel.Segment(((a - start) / span).toFloat(), ((b - start) / span).toFloat(), maybe, hm(a), toText(b))
         }.sortedWith(compareBy({ !it.maybe }, { it.start }))
         fun label(a: Long, b: Long): String = "${hm(a)}–${toText(b)}"
-        val published = info != null && (date.toString() in info.scheduleDates || clipped.isNotEmpty() ||
-            (info.scheduleDates.isEmpty() && info.schedulePublished && date == today))
+        val published = windows != null && (date.toString() in scheduleDates || clipped.isNotEmpty() ||
+            (scheduleDates.isEmpty() && schedulePublished && date == today))
         val isToday = date == today
         return DaySchedule(
             date = date,

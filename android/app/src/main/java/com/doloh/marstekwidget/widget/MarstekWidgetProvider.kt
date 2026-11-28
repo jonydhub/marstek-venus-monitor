@@ -78,3 +78,9 @@ class MarstekLightWidgetProvider : BaseMarstekWidgetProvider() {
     override val variant = WidgetVariant.MEDIUM
     override fun render(context: Context, widgetId: Int) = LightWidgetRenderer.update(context, widgetId)
 }
+
+/** «Графіки відключень»: the own schedule + «Інші графіки» chosen in the app, today's bar each. Same worker. */
+class MarstekSchedulesWidgetProvider : BaseMarstekWidgetProvider() {
+    override val variant = WidgetVariant.MEDIUM
+    override fun render(context: Context, widgetId: Int) = ScheduleListWidgetRenderer.update(context, widgetId)
+}

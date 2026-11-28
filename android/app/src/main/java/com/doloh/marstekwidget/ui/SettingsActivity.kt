@@ -23,6 +23,9 @@ import android.widget.Switch
 import android.widget.TextView
 import com.doloh.marstekwidget.data.BatteryScanner
 import com.doloh.marstekwidget.data.DirectEngine
+import com.doloh.marstekwidget.data.ExtraScheduleRepository
+import com.doloh.marstekwidget.domain.ExtraSchedule
+import com.doloh.marstekwidget.domain.ExtraSchedules
 import com.doloh.marstekwidget.data.NetworkInfo
 import com.doloh.marstekwidget.data.OutageRepository
 import com.doloh.marstekwidget.data.TelemetryFetchResult
@@ -206,6 +209,7 @@ class SettingsActivity : Activity() {
         sourceText = ui.hint("")
         outageCard.addView(sourceText)
         page.addView(outageCard, ui.matchWrap(10))
+        if (!onboarding) page.addView(extraSchedulesCard(), ui.matchWrap(10))
 
         // 3. Reserve
         val reserveCard = ui.card()
@@ -316,6 +320,121 @@ class SettingsActivity : Activity() {
             card.post { (card.parent?.parent?.parent as? ScrollView ?: findScroll(card))?.smoothScrollTo(0, card.top) }
         }
         return card
+    }
+
+    private lateinit var extraList: LinearLayout
+    private lateinit var extraAdd: View
+    private lateinit var extraFull: TextView
+
+    /**
+     * «Інші графіки» (робота, батьки, інше місце): shown on the main screen, «Графік відключень» and the «Графіки
+     * відключень» widget; display only, no notifications. Saved immediately, like the notification switches.
+     */
+    private fun extraSchedulesCard(): LinearLayout {
+        val card = ui.card()
+        card.addView(ui.title("Інші графіки", R.drawable.ic_ui_schedule))
+        card.addView(ui.hint("Робота, батьки, інше місце — лише показ, без сповіщень"))
+        extraList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        card.addView(extraList)
+        extraAdd = ui.button("Додати графік") { addExtraDialog() }
+        card.addView(extraAdd, ui.matchWrap(8))
+        extraFull = ui.hint("Не більше ${ExtraSchedules.MAX} графіків")
+        card.addView(extraFull)
+        renderExtraList()
+        return card
+    }
+
+    private fun renderExtraList() {
+        val list = ExtraScheduleRepository(this).list()
+        extraList.removeAllViews()
+        list.forEach { entry ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(ui.dp(12), ui.dp(4), ui.dp(4), ui.dp(4))
+                background = ui.rounded(Ui.SURFACE_RAISED, ui.dp(14), Ui.STROKE)
+            }
+            val text = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            text.addView(ui.label(entry.name, 14f, Ui.TEXT, true))
+            text.addView(ui.label(ExtraSchedules.sub(entry), 11f, Ui.MUTED))
+            row.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(ui.label("×", 22f, Ui.MUTED, true).apply {
+                gravity = Gravity.CENTER
+                contentDescription = "Прибрати «${entry.name}»"
+                isClickable = true
+                setOnClickListener {
+                    ExtraScheduleRepository(this@SettingsActivity).remove(entry.key)
+                    renderExtraList()
+                    com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer.updateAll(this@SettingsActivity)
+                }
+            }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)))
+            extraList.addView(row, ui.matchWrap(6))
+        }
+        val full = list.size >= ExtraSchedules.MAX
+        extraAdd.visibility = if (full) View.GONE else View.VISIBLE
+        extraFull.visibility = if (full) View.VISIBLE else View.GONE
+    }
+
+    /** Name, region (those with a schedule source; the own one first) and queue; «Додати» saves and fetches it. */
+    private fun addExtraDialog() {
+        val regions = OutageRegions.all.filter { it.hasScheduleSource }
+        var regionId: String? = (draft.outageRegionId ?: store.load().outageRegionId)?.takeIf { id -> regions.any { it.id == id } }
+        var queue: String? = null
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(ui.dp(20), ui.dp(8), ui.dp(20), 0) }
+        val name = ui.field("Назва: Робота, Батьки…").apply {
+            filters = arrayOf(android.text.InputFilter.LengthFilter(ExtraSchedules.NAME_MAX))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        box.addView(name)
+        val regionText = ui.label("", 14f, Ui.TEXT, true)
+        val queueText = ui.label("", 14f, Ui.TEXT, true)
+        fun refreshLabels() {
+            regionText.text = OutageRegions.byId(regionId)?.name ?: "Оберіть область"
+            queueText.text = queue?.let { "черга $it" } ?: "Оберіть чергу"
+            queueText.setTextColor(if (queue == null) Ui.AMBER else Ui.TEXT)
+        }
+        lateinit var dialog: AlertDialog
+        fun chooseQueue() {
+            val id = regionId ?: return
+            queueText.text = "Завантажую черги…"
+            scope.launch {
+                val queues = withContext(Dispatchers.IO) { runCatching { OutageRepository(this@SettingsActivity).queuesFor(id) }.getOrDefault(OutageRepository.DEFAULT_QUEUES) }
+                refreshLabels()
+                AlertDialog.Builder(this@SettingsActivity).setTitle("Черга")
+                    .setItems(queues.toTypedArray()) { _, which -> queue = queues[which]; refreshLabels(); dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = true }
+                    .setNegativeButton("Скасувати", null).show()
+            }
+        }
+        box.addView(pickerRow("Область", regionText) {
+            val names = regions.map { it.name }
+            AlertDialog.Builder(this).setTitle("Область").setItems(names.toTypedArray()) { _, which ->
+                val changed = regions[which].id != regionId
+                regionId = regions[which].id
+                if (changed) queue = null
+                refreshLabels()
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = queue != null
+                if (changed) chooseQueue()
+            }.setNegativeButton("Скасувати", null).show()
+        })
+        box.addView(pickerRow("Черга", queueText) { chooseQueue() })
+        refreshLabels()
+        dialog = AlertDialog.Builder(this).setTitle("Інший графік").setView(box)
+            .setPositiveButton("Додати") { _, _ ->
+                val r = regionId ?: return@setPositiveButton
+                val q = queue ?: return@setPositiveButton
+                val repo = ExtraScheduleRepository(this)
+                val entry = ExtraSchedule(name.text.toString(), r, q)
+                repo.add(entry)
+                renderExtraList()
+                // fetch it now (display only) and redraw the schedules widget
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { repo.refreshIfDue(force = true, onlyKey = entry.key) } }
+                    com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer.updateAll(this@SettingsActivity)
+                }
+            }
+            .setNegativeButton("Скасувати", null).create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
     }
 
     /** «Нові версії»: saved immediately, like the notification switches. */

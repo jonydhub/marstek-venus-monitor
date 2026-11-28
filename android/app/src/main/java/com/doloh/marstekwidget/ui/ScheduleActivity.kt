@@ -10,6 +10,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.doloh.marstekwidget.R
 import com.doloh.marstekwidget.data.DirectEngine
+import com.doloh.marstekwidget.data.ExtraScheduleRepository
+import com.doloh.marstekwidget.domain.ExtraSchedules
+import com.doloh.marstekwidget.widget.ScheduleListWidgetRenderer
 import com.doloh.marstekwidget.data.MarstekApiClient
 import com.doloh.marstekwidget.data.TelemetryRepository
 import com.doloh.marstekwidget.domain.ActualDays
@@ -61,6 +64,48 @@ class ScheduleActivity : Activity() {
         SystemBarsInsetHelper.apply(scroll, 0, 0, 0, 0)
         setContentView(scroll)
         render()
+        refreshExtras(force = false)
+    }
+
+    private var extrasHost: LinearLayout? = null
+
+    /** «Інші графіки»: per schedule a card with name, place and state, then today + tomorrow like the own schedule. */
+    private fun addExtraSchedules() {
+        val host = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        extrasHost = host
+        content.addView(host, ui.matchWrap())
+        fillExtras(host)
+    }
+
+    private fun fillExtras(host: LinearLayout) {
+        host.removeAllViews()
+        val now = System.currentTimeMillis()
+        ExtraScheduleRepository(this).cachedAll().forEach { (entry, data) ->
+            val row = ExtraSchedules.row(entry, data, now)
+            val card = ui.card()
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            head.addView(ui.label(row.name, 15f, Ui.TEXT, true), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            head.addView(ui.label(row.status, 12f, ExtraSchedulesView.stateColor(row.state), true),
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = ui.dp(8) })
+            card.addView(head)
+            card.addView(ui.label(row.sub, 11f, Ui.DIM))
+            row.days?.let { days ->
+                card.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(days) }, ui.matchWrap(8))
+            }
+            host.addView(card, ui.matchWrap(8))
+        }
+    }
+
+    /** Due (or, from «Оновити графік», all) «Інші графіки» in the background; redraws only their cards. */
+    private fun refreshExtras(force: Boolean) {
+        if (showcase) return
+        scope.launch {
+            val changed = withContext(Dispatchers.IO) { runCatching { ExtraScheduleRepository(this@ScheduleActivity).refreshIfDue(force) }.getOrDefault(false) }
+            if (changed) {
+                extrasHost?.let(::fillExtras)
+                ScheduleListWidgetRenderer.updateAll(this@ScheduleActivity)
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -90,6 +135,7 @@ class ScheduleActivity : Activity() {
                 card.addView(legend(), ui.matchWrap(10))
                 content.addView(card, ui.matchWrap(8))
             }
+            addExtraSchedules()
             addWeekAndStats(settings)
             return
         }
@@ -128,6 +174,7 @@ class ScheduleActivity : Activity() {
         days.addView(ScheduleDaysView(this, barHeightDp = 44).apply { setDays(dayRows, actual, ActualDays.scheduleNowText(info, now)) })
         days.addView(legend(), ui.matchWrap(10))
         content.addView(days, ui.matchWrap(8))
+        addExtraSchedules()
         addWeekAndStats(settings)
 
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -256,6 +303,7 @@ class ScheduleActivity : Activity() {
         refreshing = true
         refreshButton.alpha = 0.5f
         refreshButton.text = "Оновлюю…"
+        refreshExtras(force = true)
         scope.launch {
             try { TelemetryRepository.refreshAndStore(this@ScheduleActivity) } finally {
                 refreshing = false

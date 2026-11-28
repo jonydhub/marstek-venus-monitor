@@ -3,6 +3,7 @@ package com.doloh.marstekwidget.widget
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.doloh.marstekwidget.data.ExtraScheduleRepository
 import com.doloh.marstekwidget.data.TelemetryFetchResult
 import com.doloh.marstekwidget.data.TelemetryRepository
 import com.doloh.marstekwidget.settings.SettingsStore
@@ -20,6 +21,10 @@ class MarstekRefreshWorker(
         val wantsNotifications = preferences.anyAlertsEnabled()
         if (!WidgetRenderer.hasWidgets(applicationContext) && !wantsNotifications) return Result.success()
         if (!SettingsStore(applicationContext).load().configured) return Result.success()
+        // «Інші графіки» (display only, ≤ once per 10 min each) before the redraw below, so the schedules widget is fresh
+        if (ScheduleListWidgetRenderer.widgetIds(applicationContext).isNotEmpty()) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { ExtraScheduleRepository(applicationContext).refreshIfDue() } }
+        }
         return when (TelemetryRepository.refreshAndStore(applicationContext)) {
             is TelemetryFetchResult.Failure -> if (runAttemptCount < MAX_RETRIES) Result.retry() else Result.success()
             else -> Result.success()
